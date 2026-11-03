@@ -82,7 +82,7 @@ import java.util.List;
  */
 public final class Ui {
 
-    /** {@link #codeLayout} bit: code sets the element's layout kind; its style's {@code layout} is not applied. */
+    /** {@link #codeLayout} bit: code sets the element's layout kind and direction (its style's are not applied). */
     public static final int CODE_KIND = 1;
     /** {@link #codeLayout} bit: code sets the element's anchors and offsets (a virtualized row's place). */
     public static final int CODE_PLACEMENT = 2;
@@ -623,10 +623,10 @@ public final class Ui {
         float bw = border.width();
         int code = codeLayout[slot];
         if ((code & CODE_KIND) == 0) {
-            layout.kind(slot, KINDS[s.get(Styles.LAYOUT).ordinal()]);
+            layout.kind(slot, KINDS[s.get(Styles.LAYOUT).ordinal()])
+                .direction(slot, DIRECTIONS[s.get(Styles.DIRECTION).ordinal()]);
         }
-        layout.direction(slot, DIRECTIONS[s.get(Styles.DIRECTION).ordinal()])
-            .wrap(slot, WRAPS[s.get(Styles.WRAP).ordinal()])
+        layout.wrap(slot, WRAPS[s.get(Styles.WRAP).ordinal()])
             .justifyContent(slot, JUSTIFIES[s.get(Styles.JUSTIFY_CONTENT).ordinal()])
             .alignItems(slot, ALIGNS[s.get(Styles.ALIGN_ITEMS).ordinal()])
             .alignSelf(slot, ALIGNS[s.get(Styles.ALIGN_SELF).ordinal()])
@@ -849,8 +849,8 @@ public final class Ui {
     }
 
     private void recordPrimitives(int slot) {
-        if (store.isRoot(slot) && !resolver.styleOf(slot).isSet(Styles.BACKGROUND)) {
-            return;
+        if (store.isRoot(slot) && !resolver.styleOf(slot).isSet(Styles.BACKGROUND) || !layout.shown(slot)) {
+            return; // a hidden element (or one inside one) draws nothing
         }
         ResolvedStyle s = resolver.styleOf(slot);
         float scale = layout.scale();
