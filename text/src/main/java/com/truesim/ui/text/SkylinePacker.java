@@ -54,8 +54,8 @@ public final class SkylinePacker {
         int best = -1;
         int bestY = Integer.MAX_VALUE;
         for (int i = 0; i < count; i++) {
-            int y = fit(i, w, h);
-            if (y >= 0 && y < bestY) {
+            int y = fit(i, w, h, bestY);
+            if (y >= 0) {
                 best = i;
                 bestY = y;
             }
@@ -70,8 +70,11 @@ public final class SkylinePacker {
         return true;
     }
 
-    /** The top of a {@code w} by {@code h} rectangle whose left edge is node {@code i}'s, or -1 if it does not fit. */
-    private int fit(int i, int w, int h) {
+    /**
+     * The top of a {@code w} by {@code h} rectangle whose left edge is node {@code i}'s, or -1 if it does not fit or
+     * lands no higher than {@code bestY} (then it cannot win, so the scan stops early).
+     */
+    private int fit(int i, int w, int h, int bestY) {
         int x = nodeX[i];
         if (x + w > width) {
             return -1;
@@ -80,7 +83,7 @@ public final class SkylinePacker {
         int left = w;
         for (int j = i; left > 0; j++) {
             y = Math.max(y, nodeY[j]);
-            if (y + h > height) {
+            if (y + h > height || y >= bestY) {
                 return -1;
             }
             left -= nodeW[j];
@@ -112,12 +115,14 @@ public final class SkylinePacker {
             remove(i);
             i--;
         }
-        for (int i = 0; i < count - 1; i++) {
-            if (nodeY[i] == nodeY[i + 1]) {
-                nodeW[i] += nodeW[i + 1];
-                remove(i + 1);
-                i--;
-            }
+        // only the new segment can now be level with a neighbour: merge locally, not over the whole skyline
+        if (at + 1 < count && nodeY[at + 1] == y) {
+            nodeW[at] += nodeW[at + 1];
+            remove(at + 1);
+        }
+        if (at > 0 && nodeY[at - 1] == y) {
+            nodeW[at - 1] += nodeW[at];
+            remove(at);
         }
     }
 
