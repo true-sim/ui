@@ -29,6 +29,7 @@
   selection { background: box(rgba(#3fa7ff, 0.35)); radius: 2px; }
   placeholder { color: var(--fg-muted); font-style: italic; }
   composition { border: 1px var(--fg); background: box(rgba(#3fa7ff, 0.12)); }
+  selection-handle { size: 12px; radius: 999px; background: box(var(--accent)); }
 }
 
 textfield { @include editor-box; width: 200px; min-width: 60px; }
@@ -49,6 +50,7 @@ richtext {
   color: var(--fg);
   cursor: text;
   selection { background: box(rgba(#3fa7ff, 0.35)); }
+  selection-handle { size: 12px; radius: 999px; background: box(var(--accent)); }
   placeholder { color: var(--fg-muted); font-style: italic; }
 }
 

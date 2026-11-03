@@ -68,6 +68,69 @@ class EditorDetailsTest {
     }
 
     @Test
+    void touchSelectionsHaveHandlesThatMoveTheirEnds() {
+        TextRig r = rig();
+        TextEditor f = TextEditor.field(r.ui, null, "Name");
+        r.ui.styles().inline(f.element().slot(), com.truesim.ui.style.InlineStyle.builder()
+            .set(com.truesim.ui.style.Styles.WIDTH, com.truesim.ui.style.value.Length.px(400)).build());
+        r.add(f.element()).frame();
+        f.text("one two three four");
+        r.settle();
+        float[] b = r.box(f.element());
+        float y = (b[1] + b[3]) / 2;
+        float x = f.handle(0);
+        assertThat(x).as("no handles yet").isNaN();
+        // a long press on "two" selects it, with a handle at each end
+        float two = b[0] + 45;
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, two, y, Pointer.PRIMARY);
+        r.frame();
+        r.later(800_000_000L).frame();
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, two, y, 0);
+        r.frame();
+        assertThat(f.text().subSequence(f.editable().selectionStart(), f.editable().selectionEnd()).toString())
+            .isEqualTo("two");
+        assertThat(f.touchHandles()).isTrue();
+        assertThat(f.handle(2)).isGreaterThan(f.handle(0));
+        // the end handle dragged right takes the selection's end along
+        float hx = f.handle(2);
+        float hy = f.handle(3);
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, hx + 2, hy + 2, Pointer.PRIMARY);
+        r.frame();
+        for (float dx = 10; dx <= 50; dx += 10) {
+            r.synthetic.pointer(3, Pointer.Kind.TOUCH, hx + 2 + dx, hy + 2, Pointer.PRIMARY);
+            r.frame();
+        }
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, hx + 52, hy + 2, 0);
+        r.frame();
+        assertThat(f.text().subSequence(f.editable().selectionStart(), f.editable().selectionEnd()).toString())
+            .startsWith("two th");
+        // the start handle dragged past the end becomes the end
+        float sx = f.handle(0);
+        float sy = f.handle(1);
+        float end = f.handle(2);
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, sx, sy, Pointer.PRIMARY);
+        r.frame();
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, end + 30, sy, Pointer.PRIMARY);
+        r.frame();
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, end + 30, sy, 0);
+        r.frame();
+        assertThat(f.editable().selectionStart()).isGreaterThan(4);
+        assertThat(f.touchHandles()).isTrue();
+        // typing or a mouse press ends them
+        r.type("x");
+        assertThat(f.touchHandles()).isFalse();
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, two, y, Pointer.PRIMARY);
+        r.frame();
+        r.later(800_000_000L).frame();
+        r.synthetic.pointer(3, Pointer.Kind.TOUCH, two, y, 0);
+        r.frame();
+        assertThat(f.touchHandles()).isTrue();
+        r.click(two, y);
+        assertThat(f.touchHandles()).isFalse();
+        assertThat(f.handle(0)).isNaN();
+    }
+
+    @Test
     void touchTapsDragsAndLongPressesInAField() {
         TextRig r = rig();
         TextEditor f = TextEditor.field(r.ui, null, "Name");

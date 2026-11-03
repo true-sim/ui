@@ -56,14 +56,16 @@ import java.util.function.Predicate;
  *   <li><b>text</b> and <b>composition</b> (the IME's preedit, drawn inline with an underline; the candidate window
  *   placed at the caret through {@link Interaction#imeArea});</li>
  *   <li><b>pointers</b>: press places the caret, Shift extends, a double press selects a word and a triple press the
- *   line, dragging extends by the unit pressed; touch drags scroll, a long press selects a word; the wheel scrolls;
+ *   line, dragging extends by the unit pressed; touch drags scroll, a long press selects a word and shows a
+ *   selection handle at each end ({@code selection-handle}), dragged to move that end; the wheel scrolls;
  *   links in rich text are hovered ({@code link:hover}) and clicked ({@link Listener#link}).</li>
  * </ul>
  *
  * <p><b>Style.</b> Everything presentational comes from the theme: the element's own keys (font, colour,
  * {@code line-height}, {@code text-align}, {@code text-mask} for passwords, padding, background, {@code clip}) and
  * its parts' ({@link Ui#part}): {@code caret} (width, background, opacity), {@code selection} (background, radius),
- * {@code placeholder} (colour, font), {@code composition} (border: the underline), {@code gutter} (background,
+ * {@code placeholder} (colour, font), {@code composition} (border: the underline), {@code selection-handle} (size,
+ * background, radius: the touch selection handles), {@code gutter} (background,
  * colour, padding: line numbers), and for rich text {@code span.<class>}, {@code link}, {@code link:hover} and
  * {@code img} (height), which may set font keys, colour, {@code text-decoration} and background. States:
  * {@code :focused}, {@code :disabled}, {@code :read-only}, {@code :invalid} (the {@link #validator}).
@@ -142,6 +144,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private final Element selectionPart;
     private final Element placeholderPart;
     private final Element compositionPart;
+    private final Element handlePart;
     private Element gutterPart;
     private Element linkPart;
     private Element linkHoverPart;
@@ -217,6 +220,12 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private float touchY;
     private float touchX;
     private boolean touchMoved;
+    // touch selection handles: shown while a touch made the selection; one of them dragged (1 start, 2 end)
+    private boolean touchSelection;
+    private int draggedHandle;
+    private float grabX;
+    private float grabY;
+    private final float[] handles = new float[4]; // the two handles' centres where last painted
     private int hoveredLink = NONE;
     private int pressedLink = NONE;
 
@@ -239,6 +248,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         selectionPart = ui.part(element, "selection", null);
         placeholderPart = ui.part(element, "placeholder", null);
         compositionPart = ui.part(element, "composition", null);
+        handlePart = ui.part(element, "selection-handle", null);
         ui.paint(element, this);
         element.semantics(Role.TEXT_FIELD, label);
         interaction.textInput(element, true);
@@ -958,6 +968,74 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             paintLineNumbers(list, x0 + gutterPad(true), opacity);
         }
         paintCaret(list, ox, opacity);
+        paintHandles(list, ox, opacity);
+    }
+
+    /** Whether the touch selection handles show: a touch made the selection, and the editor has the focus. */
+    public boolean touchHandles() {
+        return touchSelection && text.hasSelection() && focused();
+    }
+
+    /**
+     * The touch selection handles: a {@code selection-handle} part (size, background, radius) centred on the bottom
+     * of the line at each end of the selection, dragged to move that end.
+     */
+    private void paintHandles(DrawList list, float ox, float opacity) {
+        handles[0] = Float.NaN;
+        handles[2] = Float.NaN;
+        if (!touchHandles()) {
+            return;
+        }
+        ResolvedStyle hs = partStyle(handlePart);
+        float w = handleSize(hs.get(Styles.WIDTH));
+        float h = handleSize(hs.get(Styles.HEIGHT));
+        float r = hs.get(Styles.RADIUS).topLeft() * scale();
+        long hc = Rgba.fade(paintColor(hs, color), opacity * hs.getFloat(Styles.OPACITY));
+        for (int k = 0; k < 2; k++) {
+            int at = k == 0 ? text.selectionStart() : text.selectionEnd();
+            int p = text.lineOf(at);
+            if (p < visibleFrom || p >= visibleTo) {
+                continue;
+            }
+            TextBlock b = shaped(p);
+            int local = at - text.lineStart(p);
+            int line = b.caretLine(local);
+            float x = ox + b.caretX(local);
+            float y = paraTop(p) + b.lineTop(line) + b.lineHeight(line);
+            list.box(x - w * 0.5f, y - h * 0.5f, x + w * 0.5f, y + h * 0.5f, hc, r, r, r, r, 0, 0);
+            handles[k * 2] = x;
+            handles[k * 2 + 1] = y;
+        }
+    }
+
+    /** Word {@code i} of the handles' centres as last painted: start x, start y, end x, end y (NaN: not shown). */
+    float handle(int i) {
+        return handles[i];
+    }
+
+    /** A handle's side in pixels: the part's size, or most of a line's height when the theme gives none. */
+    private float handleSize(Length l) {
+        return l.unit() == Length.AUTO.unit() ? lineHeightPx() * 0.6f : l.value() * scale();
+    }
+
+    /** The handle (1 start, 2 end) a touch at {@code (x, y)} grabs, or 0: within a line height of its centre. */
+    private int handleAt(float x, float y) {
+        if (!touchHandles()) {
+            return 0;
+        }
+        float reach = lineHeightPx();
+        int best = 0;
+        float bestD = reach * reach;
+        for (int k = 0; k < 2; k++) {
+            float dx = x - handles[k * 2];
+            float dy = y - handles[k * 2 + 1];
+            float d = dx * dx + dy * dy;
+            if (d <= bestD) { // a handle not shown (NaN) never is
+                bestD = d;
+                best = k + 1;
+            }
+        }
+        return best;
     }
 
     /** Shapes the visible paragraphs, top to bottom from the anchor, keeping their heights. */
@@ -1421,6 +1499,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             case WHEEL -> wheel(e);
             case LONG_PRESS -> {
                 selectUnit(hit(e.x(), e.y()), 2);
+                touchSelection = e.pointerKind() == Pointer.Kind.TOUCH; // with handles to drag its ends
                 touchMoved = true; // no caret placing on release
                 e.consume();
             }
@@ -1448,6 +1527,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
 
     private void typed(UiEvent e) {
         e.consume();
+        touchSelection = false;
         if (readOnly()) {
             return;
         }
@@ -1678,6 +1758,13 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         int link = linkAt(e.x(), e.y());
         pressedLink = link;
         if (e.pointerKind() == Pointer.Kind.TOUCH) {
+            draggedHandle = handleAt(e.x(), e.y());
+            if (draggedHandle != 0) { // its end follows the touch, kept where it was grabbed from
+                int k = draggedHandle - 1;
+                grabX = e.x() - handles[k * 2];
+                grabY = e.y() - handles[k * 2 + 1] + lineHeightPx() * 0.5f;
+                return;
+            }
             touchPress = true;
             touchMoved = false;
             touchX = e.x();
@@ -1685,6 +1772,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             return;
         }
         touchPress = false;
+        touchSelection = false; // a mouse selects without handles
         float dist = Interaction.DOUBLE_CLICK_DISTANCE.get();
         boolean again = e.time() - lastPress <= (long) (Interaction.DOUBLE_CLICK_TIME.get() * 1e9f)
             && Math.abs(e.x() - lastPressX) <= dist && Math.abs(e.y() - lastPressY) <= dist;
@@ -1715,6 +1803,19 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     }
 
     private void move(UiEvent e) {
+        if (draggedHandle != 0) {
+            if ((e.buttons() & Pointer.PRIMARY) != 0) {
+                int at = hit(e.x() - grabX, e.y() - grabY);
+                int other = draggedHandle == 1 ? text.selectionEnd() : text.selectionStart();
+                if (at != other) {
+                    text.select(other, at);
+                    draggedHandle = at < other ? 1 : 2; // dragged past the other end: it is the start now
+                    changed(false);
+                }
+                e.consume();
+            }
+            return;
+        }
         if (touchPress) {
             if ((e.buttons() & Pointer.PRIMARY) != 0) {
                 float dy = touchY - e.y();
@@ -1763,8 +1864,13 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             return;
         }
         e.consume();
+        if (draggedHandle != 0) {
+            draggedHandle = 0;
+            return;
+        }
         if (touchPress && !touchMoved) {
             text.moveTo(hit(e.x(), e.y()), false);
+            touchSelection = false;
             changed(false);
         }
         int link = linkAt(e.x(), e.y());

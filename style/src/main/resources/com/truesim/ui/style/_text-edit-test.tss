@@ -17,6 +17,7 @@
   selection { background: box(rgba(#ffef00, 0.7)); radius: 6px; }
   placeholder { color: #ff6600; font-size: 25px; }
   composition { border: 4px #ff1493; background: box(#00ffff); }
+  selection-handle { size: 20px; radius: 0; background: box(#ff6600); }
 }
 
 textfield { @include garish-editor(#39ff14); }
@@ -24,6 +25,7 @@ textarea { @include garish-editor(#00ffff); gutter { background: box(#ff6600); c
 richtext {
   clip: true; color: #ff6600; font-size: 21px; line-height: 2.4;
   selection { background: box(#39ff14); }
+  selection-handle { size: 20px; radius: 0; background: box(#0000ff); }
   placeholder { color: #0000ff; }
 }
 span.warning { color: #0000ff; font-size: 30px; }
