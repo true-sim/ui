@@ -9,7 +9,8 @@ import java.util.Map;
 
 /**
  * Compiles {@code .tss} ("true-sim style sheets", a Sass-like language) into typed {@link StyleSheet}s, all at load
- * time. Keys are found by name in {@link StyleKeys}: the standard {@link Styles} always, and the keys of the holder
+ * time. Keys are found by name in {@link StyleKeys}: the standard {@link Styles} always, those of every installed
+ * {@link com.truesim.ui.style.StyleKeyHolder} (the control libraries on the class path), and the keys of the holder
  * classes passed in (a control's style keys), so a new control's keys are usable at once.
  *
  * <pre>{@code
@@ -32,6 +33,7 @@ public final class Tss {
     /** Compiles {@code path} from {@code loader}, after loading the keys of {@code keyHolders}. */
     public static Compilation compile(SourceLoader loader, String path, Class<?>... keyHolders) {
         StyleKeys.load(Styles.class);
+        StyleKeys.loadInstalled();
         StyleKeys.load(keyHolders);
         return new Compiler(loader).compile(path);
     }

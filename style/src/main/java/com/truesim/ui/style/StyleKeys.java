@@ -52,6 +52,18 @@ public final class StyleKeys {
         }
     }
 
+    /**
+     * Initialises every {@link StyleKeyHolder} on the class path (the context class loader's {@code ServiceLoader}), so
+     * keys declared by modules above ui-style are known to sheets; the shipped themes style their controls with them.
+     */
+    public static void loadInstalled() {
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        for (StyleKeyHolder holder : java.util.ServiceLoader.load(StyleKeyHolder.class,
+            loader == null ? StyleKeys.class.getClassLoader() : loader)) {
+            load(holder.getClass());
+        }
+    }
+
     /** The key named {@code name}, or null. */
     public static synchronized StyleKey<?> find(String name) {
         return KEYS.get(name);
