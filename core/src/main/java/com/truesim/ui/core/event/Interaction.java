@@ -82,6 +82,8 @@ public final class Interaction {
     private static final int REMEMBER = 4;
     private static final int IME_AREA = 8;
     private static final int OUTSIDE_WATCH = 16;
+    private static final int KIND_SHIFT = 5; // bits 5-6: the text input kind
+    private static final int KIND_MASK = 3 << KIND_SHIFT;
 
     private static final int DIRECTIONS = 6; // explicit neighbours: up, down, left, right, next, previous
     private static final int MAX_DEPTH = 16; // nested dispatches (a listener's focus change dispatches focus events)
@@ -495,6 +497,21 @@ public final class Interaction {
             setFlag(slot, FOCUSABLE, true);
             picking.invalidate(slot);
         }
+    }
+
+    /**
+     * The kind of text {@code element} takes ({@link TextInputHost#TEXT}, {@link TextInputHost#PASSWORD},
+     * {@link TextInputHost#NUMBER}, {@link TextInputHost#MULTILINE}): the engine's text input starts with it (a
+     * password field gets no IME). Takes effect the next time text input starts for it.
+     */
+    public void textInputKind(Element element, int kind) {
+        int slot = slotOf(element);
+        flags[slot] = flags[slot] & ~KIND_MASK | (kind & 3) << KIND_SHIFT;
+    }
+
+    /** The kind of text {@code element} takes. */
+    public int textInputKind(Element element) {
+        return (flags[slotOf(element)] & KIND_MASK) >>> KIND_SHIFT;
     }
 
     /**
@@ -1964,7 +1981,8 @@ public final class Interaction {
         textOwnerGen = owner == UiStore.NONE ? 0 : store.generation(owner);
         if (owner != UiStore.NONE && textHost != null) {
             area(owner);
-            textHost.start(textArea[0], textArea[1], textArea[2], textArea[3]);
+            textHost.start(textArea[0], textArea[1], textArea[2], textArea[3],
+                (flags[owner] & KIND_MASK) >>> KIND_SHIFT);
         }
     }
 

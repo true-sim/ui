@@ -29,6 +29,40 @@ class CommandsAndTextTest {
     }
 
     @Test
+    void textInputStartsWithTheElementsKind() {
+        Rig r = new Rig();
+        Element field = r.box(r.root(), "field", 0, 0, 100, 20);
+        r.ia.textInput(field, true);
+        r.ia.textInputKind(field, TextInputHost.PASSWORD);
+        assertThat(r.ia.textInputKind(field)).isEqualTo(TextInputHost.PASSWORD);
+        List<Integer> kinds = new ArrayList<>();
+        r.ia.textInputHost(new TextInputHost() {
+            @Override
+            public void start(float x, float y, float width, float height) {
+                kinds.add(-1);
+            }
+
+            @Override
+            public void start(float x, float y, float width, float height, int kind) {
+                kinds.add(kind);
+            }
+
+            @Override
+            public void stop() {
+            }
+        });
+        r.ia.focus(field);
+        r.frame();
+        assertThat(kinds).containsExactly(TextInputHost.PASSWORD);
+        Host plain = new Host();
+        r.ia.textInputHost(plain);
+        r.ia.textInputKind(field, TextInputHost.NUMBER);
+        r.frame();
+        assertThat(plain.calls).as("the default ignores the kind").hasSize(1);
+        assertThat(r.ia.textInputKind(field)).isEqualTo(TextInputHost.NUMBER);
+    }
+
+    @Test
     void commandsGoToTheFocusedElementAlongItsRouteBeforeMovingFocus() {
         Rig r = new Rig();
         Element list = r.box(r.root(), "list", 0, 0, 100, 200);
