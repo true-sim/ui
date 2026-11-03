@@ -432,7 +432,8 @@ public final class Interaction {
 
     /** The event types {@code element} listens to ({@link EventType#bit()} or'ed). */
     public int listening(Element element) {
-        return listenerMask[slotOf(element)];
+        int slot = slotOf(element); // first: it may grow the arrays
+        return listenerMask[slot];
     }
 
     // ================================================================ pickability and flags
@@ -481,7 +482,8 @@ public final class Interaction {
 
     /** Whether {@code element} is focusable. */
     public boolean focusable(Element element) {
-        return (flags[slotOf(element)] & FOCUSABLE) != 0;
+        int slot = slotOf(element); // first: it may grow the arrays
+        return (flags[slot] & FOCUSABLE) != 0;
     }
 
     /**
@@ -1464,12 +1466,14 @@ public final class Interaction {
         if (direction.ordinal() >= DIRECTIONS) {
             throw new IllegalArgumentException("no explicit neighbour for " + direction);
         }
-        neighbours[slotOf(from) * DIRECTIONS + direction.ordinal()] = to;
+        int slot = slotOf(from); // first: it may grow the arrays
+        neighbours[slot * DIRECTIONS + direction.ordinal()] = to;
     }
 
     /** Gives {@code container} its own focus navigation (null removes it). */
     public void traversal(Element container, FocusTraversal traversal) {
-        traversals[slotOf(container)] = traversal;
+        int slot = slotOf(container); // first: it may grow the arrays
+        traversals[slot] = traversal;
     }
 
     /** Makes {@code container} remember its last focused descendant and return focus to it when entered again. */
@@ -1483,7 +1487,8 @@ public final class Interaction {
 
     /** The descendant {@code container} remembers as last focused, or null. */
     public Element remembered(Element container) {
-        Element m = memory[slotOf(container)];
+        int slot = slotOf(container); // first: it may grow the arrays
+        Element m = memory[slot];
         return m != null && m.alive() ? m : null;
     }
 

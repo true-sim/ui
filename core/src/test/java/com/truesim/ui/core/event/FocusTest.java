@@ -288,4 +288,32 @@ class FocusTest {
         assertThat(b.is(UiState.FOCUSED)).isFalse();
         assertThat(Pointer.PRIMARY).isEqualTo(1);
     }
+
+    @Test
+    void queriesGrowTheirArraysForElementsMadeAfterTheInteraction() {
+        Rig r = new Rig();
+        com.truesim.ui.core.Element last = null;
+        for (int i = 0; i < 600; i++) {
+            last = r.store.create("panel", null);
+        }
+        assertThat(r.ia.focusable(last)).isFalse();
+        com.truesim.ui.core.Element more = null;
+        for (int i = 0; i < 600; i++) {
+            more = r.store.create("panel", null);
+        }
+        assertThat(r.ia.listening(more)).isZero();
+        com.truesim.ui.core.Element another = null;
+        for (int i = 0; i < 1200; i++) {
+            another = r.store.create("panel", null);
+        }
+        assertThat(r.ia.remembered(another)).isNull();
+        for (int i = 0; i < 2400; i++) {
+            another = r.store.create("panel", null);
+        }
+        r.ia.traversal(another, null);
+        for (int i = 0; i < 4800; i++) {
+            another = r.store.create("panel", null);
+        }
+        r.ia.neighbour(another, FocusDirection.UP, null);
+    }
 }
