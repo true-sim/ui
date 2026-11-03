@@ -124,7 +124,8 @@ class UiStoreTest {
         }
         assertThat(store.capacity()).isGreaterThanOrEqualTo(301);
         assertThat(store.highWater()).isEqualTo(301);
-        // destroy and remake while still queued: slots are queued again
+        // destroy and remake while still queued: each slot stays queued once
+        int generation = store.generation(made.getFirst().slot());
         for (int round = 0; round < 3; round++) {
             for (Element e : made) {
                 e.destroy();
@@ -134,7 +135,21 @@ class UiStoreTest {
                 made.add(store.create("panel", null));
             }
         }
-        assertThat(store.dirtyCount()).isGreaterThan(store.capacity());
+        assertThat(store.dirtyCount()).isEqualTo(301);
+        assertThat(store.generation(made.getLast().slot())).isGreaterThan(generation);
+    }
+
+    @Test
+    void workClearedBitByBitNeverLosesALaterMark() {
+        UiStore store = new UiStore();
+        Element a = store.create("panel", null);
+        store.root().add(a);
+        // a frame: layout done, style still set, the queue emptied
+        store.clearDirty(a.slot(), UiStore.DIRTY_LAYOUT);
+        store.clearDirtyQueue();
+        a.markDirty(UiStore.DIRTY_LAYOUT);
+        assertThat(store.dirtyCount()).isEqualTo(1);
+        assertThat(store.dirtySlots()[0]).isEqualTo(a.slot());
     }
 
     @Test

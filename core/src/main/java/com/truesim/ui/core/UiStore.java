@@ -60,6 +60,7 @@ public final class UiStore implements Versioned {
     private Element[] facades;
 
     private int[] dirtyQueue;
+    private boolean[] queued;
     private int dirtyCount;
     private long version;
     private final int root;
@@ -82,6 +83,7 @@ public final class UiStore implements Versioned {
     private void allocate(int newCapacity) {
         generation = grow(generation, newCapacity);
         alive = alive == null ? new boolean[newCapacity] : Arrays.copyOf(alive, newCapacity);
+        queued = queued == null ? new boolean[newCapacity] : Arrays.copyOf(queued, newCapacity);
         parent = grow(parent, newCapacity);
         firstChild = grow(firstChild, newCapacity);
         lastChild = grow(lastChild, newCapacity);
@@ -98,13 +100,13 @@ public final class UiStore implements Versioned {
         role = role == null ? new Role[newCapacity] : Arrays.copyOf(role, newCapacity);
         label = grow(label, newCapacity);
         facades = facades == null ? new Element[newCapacity] : Arrays.copyOf(facades, newCapacity);
-        dirtyQueue = grow(dirtyQueue, Math.max(newCapacity, dirtyQueue == null ? 0 : dirtyQueue.length));
+        dirtyQueue = grow(dirtyQueue, newCapacity); // each slot is queued at most once
         capacity = newCapacity;
     }
 
-    @AllowAllocation("growing, rarely")
-    private static int[] growQueue(int[] queue) {
-        return Arrays.copyOf(queue, queue.length * 2);
+    /** The generation of {@code slot}: it grows each time the slot is reused for a new element. */
+    public int generation(int slot) {
+        return generation[slot];
     }
 
     private static int[] grow(int[] a, int n) {
@@ -252,10 +254,8 @@ public final class UiStore implements Versioned {
 
     /** Adds dirty {@code bits} to {@code slot}, queueing it for the next frame. */
     public void markDirty(int slot, int bits) {
-        if (dirty[slot] == 0 && bits != 0) {
-            if (dirtyCount == dirtyQueue.length) {
-                dirtyQueue = growQueue(dirtyQueue); // a slot reused while still queued is queued twice
-            }
+        if (!queued[slot] && bits != 0) {
+            queued[slot] = true;
             dirtyQueue[dirtyCount++] = slot;
         }
         dirty[slot] |= bits;
@@ -279,8 +279,14 @@ public final class UiStore implements Versioned {
         return dirtyCount;
     }
 
-    /** Empties the queue; each slot's bits are cleared by whoever did the work ({@link #clearDirty}). */
+    /**
+     * Empties the queue; each slot's bits are cleared by whoever did the work ({@link #clearDirty}). A slot is queued
+     * once until then, whatever bits it still has, so work cleared bit by bit never loses a later mark.
+     */
     public void clearDirtyQueue() {
+        for (int i = 0; i < dirtyCount; i++) {
+            queued[dirtyQueue[i]] = false;
+        }
         dirtyCount = 0;
     }
 
