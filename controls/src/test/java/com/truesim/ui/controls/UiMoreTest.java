@@ -63,7 +63,7 @@ class UiMoreTest {
         assertThatThrownBy(() -> ui.images().load("b", bad)).isInstanceOf(UncheckedIOException.class);
         assertThatThrownBy(() -> ui.images().load("c", dir.resolve("missing.png")))
             .isInstanceOf(UncheckedIOException.class);
-        assertThat(ui.tunables()).hasSize(10);
+        assertThat(ui.tunables()).hasSize(11);
         assertThat(ui.textSystem()).isNull();
     }
 

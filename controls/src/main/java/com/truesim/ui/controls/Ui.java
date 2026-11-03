@@ -1,6 +1,8 @@
 package com.truesim.ui.controls;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.ui.controls.anim.Animator;
+import com.truesim.ui.controls.anim.Visuals;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Layer;
 import com.truesim.ui.core.Layers;
@@ -79,8 +81,29 @@ import java.util.List;
  * ui.update(width, height, input, System.nanoTime());
  * renderer.submit(ui.layers(), ui.layerCount(), ui.textures(), width, height);
  * }</pre>
+ *
+ * <p><b>Animation.</b> Changed styles animate the keys their {@code transition} names ({@link Animator#restyled}),
+ * driven by the clock {@link #update(float, float, UiInput, long)} is given; {@link #visuals()} holds the per-element
+ * values animations and controls write over the style (opacity, scale, drawn offsets, colours, sizes, offsets,
+ * anchors). An element's opacity and scale (its style's or animated) apply to its whole subtree. {@link #frame}
+ * listeners (controls polling their models) run each frame after input and before styles and layout.
  */
 public final class Ui {
+
+    /** Runs once a frame after input and before animations, styles and layout: controls poll their models here. */
+    @FunctionalInterface
+    public interface FrameListener {
+        /** The frame at {@code nanos} on the UI clock (0 without a clock). */
+        void frame(long nanos);
+
+        /**
+         * The frame is laid out and recorded: elements added this frame have their rectangles now (they can take
+         * focus). Changes made here show next frame, before its input is processed.
+         */
+        default void laidOut() {
+            // nothing by default
+        }
+    }
 
     private static final int NONE = 0;
     private static final int TEXT = 1;
@@ -104,6 +127,10 @@ public final class Ui {
     private final UiImages images;
     private final Layers layerStack;
     private final Interaction interaction;
+    private final Visuals visuals;
+    private final Animator animator;
+    private FrameListener[] frameListeners = new FrameListener[4];
+    private int frameListenerCount;
     private final Measure measure = this::measure;
     private DrawList rec; // the list being recorded
     private StyleWatcher watcher;
@@ -156,8 +183,50 @@ public final class Ui {
         this.images = new UiImages(own);
         this.layerStack = new Layers(store);
         this.interaction = new Interaction(layerStack, new Geometry());
+        this.visuals = new Visuals(store, layout, resolver);
+        this.animator = new Animator(store, visuals);
+        visuals.restyler(this::restyleLayout);
         ensure();
         store.semantics(store.rootSlot(), Role.GROUP, null);
+    }
+
+    /** Applies {@code slot}'s style to its layout inputs again: a layout override was cleared. */
+    private void restyleLayout(int slot) {
+        ResolvedStyle style = applied[slot];
+        if (style != null && store.alive(slot)) {
+            apply(slot, style);
+            visuals.applyLayout(slot);
+        }
+    }
+
+    /** The per-element values animations and controls draw and lay out with instead of the style's. */
+    public Visuals visuals() {
+        return visuals;
+    }
+
+    /** The animations and style transitions of this UI. */
+    public Animator animator() {
+        return animator;
+    }
+
+    /** Adds {@code listener}, run every frame after input and before animations, styles and layout. */
+    @AllowAllocation("listeners are added when a UI is built")
+    public void frame(FrameListener listener) {
+        if (frameListenerCount == frameListeners.length) {
+            frameListeners = Arrays.copyOf(frameListeners, frameListenerCount * 2);
+        }
+        frameListeners[frameListenerCount++] = listener;
+    }
+
+    /** Removes {@code listener}. */
+    public void removeFrame(FrameListener listener) {
+        for (int i = 0; i < frameListenerCount; i++) {
+            if (frameListeners[i] == listener) {
+                System.arraycopy(frameListeners, i + 1, frameListeners, i, frameListenerCount - i - 1);
+                frameListeners[--frameListenerCount] = null;
+                return;
+            }
+        }
     }
 
     private static UiTextures atlasTextures(GlyphAtlas atlas) {
@@ -377,6 +446,11 @@ public final class Ui {
             interaction.process(input, nanos);
             ensure();
         }
+        for (int i = 0; i < frameListenerCount; i++) {
+            frameListeners[i].frame(nanos);
+        }
+        ensure();
+        animator.advance(nanos);
         attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
@@ -416,7 +490,13 @@ public final class Ui {
                 applied[slot] = style;
                 appliedVersion[slot] = style.version();
                 apply(slot, style);
+                visuals.applyLayout(slot);
                 restyled(slot, before, style);
+                animator.restyled(slot, before, style);
+                if (before != null && (before.getFloat(Styles.OPACITY) != style.getFloat(Styles.OPACITY)
+                    || before.getFloat(Styles.SCALE) != style.getFloat(Styles.SCALE))) {
+                    visuals.redrawSubtree(slot); // opacity and scale apply to the subtree
+                }
                 store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
             }
             if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
@@ -435,6 +515,9 @@ public final class Ui {
             int slot = moved[i];
             store.markDirty(slot, UiStore.DIRTY_DRAW);
             interaction.picking().moved(slot);
+            if (visuals.transformed(slot)) {
+                visuals.redrawSubtree(slot); // the centre its subtree scales about moved
+            }
             if (ownClip[slot] != DrawList.NO_CLIP) {
                 clipsMoved = true;
             }
@@ -466,6 +549,9 @@ public final class Ui {
         }
         store.clearDirtyQueue();
         interaction.laidOut();
+        for (int i = 0; i < frameListenerCount; i++) {
+            frameListeners[i].laidOut();
+        }
     }
 
     /** Tells picking about a new style: a changed shape, clip or pointer-events of an element it may hold. */
@@ -761,7 +847,12 @@ public final class Ui {
         float y0 = layout.y(slot);
         float x1 = x0 + layout.width(slot);
         float y1 = y0 + layout.height(slot);
-        float opacity = s.getFloat(Styles.OPACITY);
+        visuals.compose(slot);
+        float opacity = visuals.composedOpacity();
+        if (visuals.composedScale() != 1 || visuals.composedX() != 0 || visuals.composedY() != 0) {
+            rec.transform(visuals.composedScale(), visuals.composedX(), visuals.composedY());
+        }
+        int overrides = visuals.flags(slot);
         Radii r = s.get(Styles.RADIUS);
         float tl = r.topLeft() * scale;
         float tr = r.topRight() * scale;
@@ -781,13 +872,16 @@ public final class Ui {
 
         Border border = s.get(Styles.BORDER);
         float bw = border.width() * scale;
-        long borderColor = Rgba.fade(border.color().rgba(), opacity);
+        long borderColor = Rgba.fade((overrides & Visuals.BORDER_COLOR) != 0 ? visuals.borderColor(slot)
+            : border.color().rgba(), opacity);
+        boolean fill = (overrides & Visuals.BACKGROUND) != 0;
         Paint paint = s.get(Styles.BACKGROUND);
         switch (paint) {
-            case Paint.Box box -> rec.box(x0, y0, x1, y1, Rgba.fade(box.color().rgba(), opacity), tl, tr, br, bl, bw,
-                borderColor);
-            case Paint.LinearGradient g -> rec.gradientBox(x0, y0, x1, y1, Rgba.fade(g.from().rgba(), opacity),
-                Rgba.fade(g.to().rgba(), opacity), (g.angle() - 90) * RADIANS, tl, tr, br, bl, bw, borderColor);
+            case Paint.Box box -> rec.box(x0, y0, x1, y1, Rgba.fade(fill ? visuals.backgroundA(slot)
+                : box.color().rgba(), opacity), tl, tr, br, bl, bw, borderColor);
+            case Paint.LinearGradient g -> rec.gradientBox(x0, y0, x1, y1, Rgba.fade(fill ? visuals.backgroundA(slot)
+                : g.from().rgba(), opacity), Rgba.fade(fill ? visuals.backgroundB(slot) : g.to().rgba(), opacity),
+                (g.angle() - 90) * RADIANS, tl, tr, br, bl, bw, borderColor);
             case Paint.Image image -> {
                 UiTexture t = images.get(image.name());
                 if (t != null) {
@@ -825,10 +919,11 @@ public final class Ui {
         float cx1 = x1 - bw - padding.right() * scale;
         float cy1 = y1 - bw - padding.bottom() * scale;
         if (content[slot] == TEXT) {
-            shape(slot, cx1 - cx0 + 0.5f);
+            shape(slot, cx1 - cx0 + 1); // snapping to whole pixels may have taken up to a pixel off the measured width
             TextOutline outline = s.get(Styles.TEXT_OUTLINE);
             TextBlock b = blocks[slot];
-            b.record(rec, cx0, cy0, Rgba.fade(s.rgba(Styles.COLOR), opacity), outline.width() * scale,
+            long textColor = (overrides & Visuals.COLOR) != 0 ? visuals.color(slot) : s.rgba(Styles.COLOR);
+            b.record(rec, cx0, cy0, Rgba.fade(textColor, opacity), outline.width() * scale,
                 Rgba.fade(outline.color().rgba(), opacity), 0);
             drawnTextVersion[slot] = b.version();
         } else if (content[slot] == IMAGE) {
@@ -934,6 +1029,7 @@ public final class Ui {
         all.add(Layout.UI_SCALE);
         all.add(StyleResolver.CACHE_LIMIT);
         all.add(StyleWatcher.DELAY);
+        all.add(Animator.SPEED);
         all.addAll(Interaction.tunables());
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
