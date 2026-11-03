@@ -56,7 +56,7 @@ public final class UiStore implements Versioned {
     private int[] rangeStart;
     private int[] rangeCapacity;
     private Role[] role;
-    private String[] label;
+    private CharSequence[] label;
     private Element[] facades;
 
     private int[] dirtyQueue;
@@ -143,7 +143,7 @@ public final class UiStore implements Versioned {
         rangeStart = grow(rangeStart, newCapacity);
         rangeCapacity = grow(rangeCapacity, newCapacity);
         role = role == null ? new Role[newCapacity] : Arrays.copyOf(role, newCapacity);
-        label = grow(label, newCapacity);
+        label = label == null ? new CharSequence[newCapacity] : Arrays.copyOf(label, newCapacity);
         facades = facades == null ? new Element[newCapacity] : Arrays.copyOf(facades, newCapacity);
         dirtyQueue = grow(dirtyQueue, newCapacity); // each slot is queued at most once
         capacity = newCapacity;
@@ -464,13 +464,17 @@ public final class UiStore implements Versioned {
         return role[slot];
     }
 
-    /** The element's accessible name, or null. */
+    /** The element's accessible name, or null: taken from the live text when one was given ({@link #semantics}). */
     public String label(int slot) {
-        return label[slot];
+        CharSequence l = label[slot];
+        return l == null ? null : l.toString();
     }
 
-    /** Sets the element's semantics. */
-    public void semantics(int slot, Role newRole, String newLabel) {
+    /**
+     * Sets the element's semantics. The label may be live text (a label's or a row's {@link StringBuilder}): the
+     * accessible name is read from it when the semantics tree is taken, so changing text costs nothing here.
+     */
+    public void semantics(int slot, Role newRole, CharSequence newLabel) {
         check(slot);
         role[slot] = newRole;
         label[slot] = newLabel;

@@ -2,7 +2,6 @@ package com.truesim.ui.controls.windows;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.HostBox;
 import com.truesim.ui.controls.overlay.Overlay;
 import com.truesim.ui.controls.overlay.OverlayInput;
@@ -23,6 +22,7 @@ import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.core.input.UiInput;
 import com.truesim.ui.layout.Direction;
+import com.truesim.ui.layout.LayoutKind;
 import com.truesim.ui.layout.Layout;
 import com.truesim.ui.layout.Unit;
 import com.truesim.ui.style.Facts;
@@ -49,7 +49,7 @@ import java.util.List;
  * <p>The tab strip and splitter here are docking's own parts: generic tabbed panes and split panes are separate
  * controls; these can be replaced by them when both exist, as nothing outside this class touches them.
  */
-public final class DockSpace implements UiFrameHook, WindowDropTarget {
+public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
 
     /** The drag payload of a dragged tab. */
     public static final DataFormat<DockPanel> PANEL = DataFormat.of("ui.dock.panel", DockPanel.class);
@@ -159,7 +159,7 @@ public final class DockSpace implements UiFrameHook, WindowDropTarget {
             host = new WindowDockHost(windows);
             windows.addDropTarget(this);
         }
-        ui.addFrameHook(this);
+        ui.addFrameListener(this);
     }
 
     /** The dock space's element: add it where the space should show (it fills what its parent gives it). */
@@ -627,34 +627,44 @@ public final class DockSpace implements UiFrameHook, WindowDropTarget {
     // ================================================================ the frame
 
     @Override
-    public void beforeLayout(Ui frameUi) {
+    public void frame(long nanos) {
+        assertLayout();
+    }
+
+    /** Sets the layout inputs docking owns (split directions and ratios, the shown tab's content, the preview). */
+    private void assertLayout() {
         if (tree != null) {
             flexChild(tree.element.slot(), 1);
         }
         for (Split s : splits) {
             int e = s.element.slot();
-            layout.direction(e, s.row ? Direction.ROW : Direction.COLUMN);
+            ui.ownLayout(e, Ui.CODE_KIND);
+            layout.kind(e, LayoutKind.FLEX).direction(e, s.row ? Direction.ROW : Direction.COLUMN);
             for (int i = 0; i < s.children.size(); i++) {
                 flexChild(s.children.get(i).element.slot(), s.ratios[i]);
             }
             for (Element splitter : s.splitters) {
                 int sp = splitter.slot();
+                ui.ownLayout(sp, Ui.CODE_FLEX);
                 layout.grow(sp, 0).shrink(sp, 0);
             }
         }
         for (Tabs t : panes) {
             int b = t.body.slot();
+            ui.ownLayout(b, Ui.CODE_FLEX);
             layout.grow(b, 1);
             DockPanel shown = t.active();
             for (int i = 0; i < t.panels.size(); i++) {
                 DockPanel p = t.panels.get(i);
                 int c = p.content.slot();
+                ui.ownLayout(c, Ui.CODE_FLEX);
                 layout.visible(c, p == shown);
                 layout.grow(c, 1);
             }
         }
         if (preview.showing()) {
             int p = previewElement.slot();
+            ui.ownLayout(p, Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
             float scale = HostBox.scale(ui);
             layout.width(p, hitRect[2] / scale, Unit.PX).height(p, hitRect[3] / scale, Unit.PX);
             if (!dragging()) {
@@ -664,6 +674,7 @@ public final class DockSpace implements UiFrameHook, WindowDropTarget {
     }
 
     private void flexChild(int slot, float ratio) {
+        ui.ownLayout(slot, Ui.CODE_FLEX);
         layout.grow(slot, ratio).shrink(slot, 1).basis(slot, 0, Unit.PX);
     }
 
@@ -679,7 +690,7 @@ public final class DockSpace implements UiFrameHook, WindowDropTarget {
     private boolean windowDragging;
 
     @Override
-    public void afterLayout(Ui frameUi) {
+    public void afterLayout() {
         if (zones.showing() && hit && hitTabs != null) {
             int t = hitTabs.element.slot();
             int z = zonesElement.slot();

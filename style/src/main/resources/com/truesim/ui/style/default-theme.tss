@@ -8,6 +8,7 @@
 
 @use "tokens";
 @use "mixins" as *;
+@import "data";
 
 // ------------------------------------------------------------------ palette: live tokens, dark by default
 

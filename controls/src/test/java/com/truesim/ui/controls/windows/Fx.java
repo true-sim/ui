@@ -162,26 +162,24 @@ final class Fx {
     Element box(float x, float y, float w, float h) {
         Element e = ui.panel("card");
         ui.root().add(e);
-        ui.layout().kind(ui.store().rootSlot(), com.truesim.ui.layout.LayoutKind.NONE);
-        ui.addFrameHook(new Pin(e, x, y, w, h));
-        return e;
+        return pinned(e, x, y, w, h);
     }
 
     /** Puts {@code e} on the HUD at {@code x, y}, {@code w x h}, kept there. */
     Element pin(Element e, float x, float y, float w, float h) {
         ui.root().add(e);
-        ui.addFrameHook(new Pin(e, x, y, w, h));
-        return e;
+        return pinned(e, x, y, w, h);
     }
 
-    /** Keeps an element at a place set in code (restyles reset it). */
-    private record Pin(Element e, float x, float y, float w, float h) implements com.truesim.ui.controls.UiFrameHook {
-        @Override
-        public void beforeLayout(Ui ui) {
-            ui.layout().kind(ui.store().rootSlot(), com.truesim.ui.layout.LayoutKind.NONE);
-            ui.layout().offsets(e.slot(), x, y, 0, 0);
-            ui.layout().width(e.slot(), w, com.truesim.ui.layout.Unit.PX);
-            ui.layout().height(e.slot(), h, com.truesim.ui.layout.Unit.PX);
-        }
+    /** Keeps an element at a place set in code (code-owned layout inputs: restyles keep them). */
+    private Element pinned(Element e, float x, float y, float w, float h) {
+        int root = ui.store().rootSlot();
+        ui.ownLayout(root, Ui.CODE_KIND);
+        ui.layout().kind(root, com.truesim.ui.layout.LayoutKind.NONE);
+        ui.codeLayout(e, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
+        ui.layout().offsets(e.slot(), x, y, 0, 0);
+        ui.layout().width(e.slot(), w, com.truesim.ui.layout.Unit.PX);
+        ui.layout().height(e.slot(), h, com.truesim.ui.layout.Unit.PX);
+        return e;
     }
 }

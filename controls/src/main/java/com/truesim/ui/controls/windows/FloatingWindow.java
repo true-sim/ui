@@ -533,11 +533,13 @@ public final class FloatingWindow {
 
     // ================================================================ the frame
 
-    /** Sets the window's layout inputs for its place, size and mode (every frame: restyles take the style's). */
+    /** Sets the window's layout inputs for its place, size and mode (code-owned; its min-height follows the mode). */
     void assertLayout() {
         int r = root.slot();
+        ui.ownLayout(r, Ui.CODE_KIND | Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
         layout.kind(r, LayoutKind.ANCHORS);
         int f = frame.slot();
+        ui.ownLayout(f, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
         layout.anchors(f, 0, 0, 0, 0);
         layout.offsets(f, 0, 0, 0, 0);
         boolean minimised = mode == WindowMode.MINIMISED;
@@ -569,6 +571,7 @@ public final class FloatingWindow {
         float half = t * 0.5f;
         for (int i = 0; i < handles.length; i++) {
             int h = handles[i].slot();
+            ui.ownLayout(h, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
             layout.visible(h, edges);
             int e = HANDLE_EDGES[i];
             float al = (e & RIGHT) != 0 ? 1 : 0;

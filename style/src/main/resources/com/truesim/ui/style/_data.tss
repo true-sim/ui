@@ -1,0 +1,211 @@
+// The data controls' default look (ui-controls, com.truesim.ui.controls.data): scroll panes and bars, list boxes,
+// trees, tables and their inline editors. Code places the parts (rows, cells, thumbs, headers); everything visible
+// is here. Element types: scroll-pane, scroll-viewport, scroll-content, scroll-section, scroll-sticky, scroll-bar
+// (#vertical, #horizontal; [active=true] while in use), scroll-button (#start, #end), scroll-thumb; list-view,
+// list-body, list-item, list-drop-indicator; tree-view, tree-body, tree-item, tree-indent, tree-expander,
+// tree-drop-indicator; table-view, table-header, table-header-row, table-header-cell ([sort=ascending|descending]),
+// table-sort-indicator, table-column-grip, table-filter-row, table-filter-cell, table-body, table-row, table-cells,
+// table-frozen, table-cell, table-column-drop-indicator; value-check, value-editor; labels with ids text, number,
+// enum, vector, color; drag previews: labels styled list-drag-preview, tree-drag-preview, table-drag-preview.
+
+@use "tokens";
+@use "mixins" as *;
+
+// ------------------------------------------------------------------ scroll views
+
+scroll-pane, list-view, tree-view, table-view {
+  scroll-step: 40;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  focus-ring-offset: 1px;
+  pointer-events: all;
+
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:disabled { opacity: 0.45; }
+}
+
+scroll-viewport { clip: true; radius: tokens.$radius-m; }
+
+scroll-content {
+  layout: stack;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+}
+
+// a stuck header covers the content scrolling under it
+scroll-sticky { layout: stack; direction: column; background: box(var(--surface-raised)); }
+
+// thin overlay bars that show while in use and on hover
+scroll-bar {
+  width: 10px;
+  height: 10px;
+  padding: 2px;
+  thumb-min: 24;
+  scrollbar-overlay: true;
+  opacity: 0;
+  transition: opacity tokens.$normal ease-out, background tokens.$fast;
+
+  &[active=true] { opacity: 1; }
+  &:hover { opacity: 1; background: box(var(--track)); }
+}
+
+scroll-button { size: 0px; }
+
+scroll-thumb {
+  background: box(rgba(#8b949e, 0.55));
+  radius: 999px;
+  @include reactive;
+
+  &:hover { background: box(var(--fg-muted)); }
+  &:pressed { background: box(var(--accent)); }
+}
+
+// ------------------------------------------------------------------ rows: lists and trees
+
+list-item, tree-item {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  height: 26px;
+  padding: 0 tokens.$space-m;
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+  &:focused { border: 1px var(--edge); }
+  &:focus-visible { border: 1px var(--accent); }
+  &:drop-target { background: box(rgba(#3fa7ff, 0.18)); border: 1px var(--accent); }
+}
+
+list-drop-indicator, tree-drop-indicator, table-column-drop-indicator {
+  height: 2px;
+  width: 2px;
+  background: box(var(--accent));
+}
+
+tree-item { indent: 16; }
+tree-indent { height: 1px; }
+
+tree-expander {
+  size: 8px;
+  radius: 1px 4px 4px 1px;
+  background: box(var(--fg-muted));
+  cursor: pointer;
+
+  &:hover { background: box(var(--fg)); }
+  &:expanded { radius: 1px 1px 4px 4px; }
+  &:disabled { opacity: 0; }
+}
+
+// ------------------------------------------------------------------ values and editors
+
+value-check {
+  size: 14px;
+  radius: tokens.$radius-s;
+  border: 1px var(--fg-muted);
+
+  &:checked { background: box(var(--accent)); border: 1px var(--accent); }
+}
+
+label#number { text-align: end; font-family: tokens.$font-numbers; grow: 1; }
+label#color, label#vector { font-family: tokens.$font-numbers; }
+
+value-editor {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  grow: 1;
+  padding: 0 tokens.$space-s;
+  background: box(var(--bg));
+  border: 1px var(--accent);
+  radius: tokens.$radius-s;
+}
+
+label.list-drag-preview, label.tree-drag-preview, label.table-drag-preview {
+  background: box(var(--surface-raised));
+  border: 1px var(--accent);
+  radius: tokens.$radius-s;
+  padding: tokens.$space-xs tokens.$space-m;
+  opacity: 0.9;
+  @include raised(2);
+}
+
+// ------------------------------------------------------------------ tables
+
+table-header {
+  background: box(var(--surface-raised));
+  clip: true;
+}
+
+table-header-row, table-filter-row { height: 28px; }
+
+table-header-cell {
+  layout: flex;
+  direction: row;
+  align-items: stretch;
+  gap: tokens.$space-s;
+  padding: 0 0 0 tokens.$space-m;
+  column-min-width: 32;
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.18)); }
+
+  > label { grow: 1; align-self: center; @include text(caption, 600); color: var(--fg-muted); }
+}
+
+table-sort-indicator { width: 0px; }
+
+table-header-cell[sort=ascending] > table-sort-indicator {
+  width: 8px;
+  height: 4px;
+  align-self: center;
+  radius: 4px 4px 0 0;
+  background: box(var(--accent));
+}
+
+table-header-cell[sort=descending] > table-sort-indicator {
+  width: 8px;
+  height: 4px;
+  align-self: center;
+  radius: 0 0 4px 4px;
+  background: box(var(--accent));
+}
+
+table-column-grip {
+  width: 5px;
+  cursor: resize-ew;
+  &:hover { background: box(var(--accent)); }
+}
+
+table-filter-cell { layout: flex; direction: row; padding: 2px; }
+
+table-row {
+  height: 26px;
+  @include reactive;
+
+  &:hover { background: box(rgba(#8b949e, 0.10)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+  &:focused { border: 1px var(--edge); }
+}
+
+table-cell {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  padding: 0 tokens.$space-m;
+  clip: true;
+
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+  &:focused { border: 1px var(--accent); }
+  &:editing { padding: 1px; }
+}
+
+// frozen cells cover the scrolled ones under them
+table-frozen > table-cell { background: box(var(--surface)); }
+table-frozen > table-cell:selected { background: box(lighten(var(--surface), 12%)); }

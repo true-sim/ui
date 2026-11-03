@@ -110,8 +110,8 @@ public final class Element {
         return this;
     }
 
-    /** Sets the element's semantics; returns this. */
-    public Element semantics(Role role, String label) {
+    /** Sets the element's semantics (the label may be live text: {@link UiStore#semantics}); returns this. */
+    public Element semantics(Role role, CharSequence label) {
         check();
         store.semantics(slot, role, label);
         return this;

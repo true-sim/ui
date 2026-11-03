@@ -107,6 +107,8 @@ public final class Layout {
     byte[] growV;
     byte[] textDir;
     boolean[] hidden;
+    /** Inside a hidden element's subtree: collapsed to an empty rectangle, not {@link #shown}. */
+    private boolean[] collapsed;
     boolean[] measured;
     float[] width;
     float[] height;
@@ -153,6 +155,12 @@ public final class Layout {
     float[][] rowTracks;
     int[] columnCount;
     int[] rowCount;
+    float[] scrollX;
+    float[] scrollY;
+    private boolean[] independent;
+    private boolean[] scrollMoved;
+    private int[] scrollQueue = new int[16];
+    private int scrollQueueCount;
 
     // ---------------------------------------------------------------- caches
     private boolean[] lcValid;
@@ -650,6 +658,49 @@ public final class Layout {
         return this;
     }
 
+    /**
+     * Scrolls the element's children by {@code x, y} panel units (left and up): their positions are shifted without
+     * a new layout, so scrolling costs a visit of the subtree's positions, not a measure. A negative value shifts
+     * them the other way (a sticky header following the viewport). Default 0, 0.
+     */
+    public Layout scroll(int slot, float x, float y) {
+        own(slot);
+        if (scrollX[slot] != x || scrollY[slot] != y) {
+            scrollX[slot] = x;
+            scrollY[slot] = y;
+            if (!scrollMoved[slot]) {
+                scrollMoved[slot] = true;
+                if (scrollQueueCount == scrollQueue.length) {
+                    growScrollQueue();
+                }
+                scrollQueue[scrollQueueCount++] = slot;
+            }
+        }
+        return this;
+    }
+
+    /** The element's horizontal scroll in panel units ({@link #scroll}). */
+    public float scrollX(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? scrollX[slot] : 0;
+    }
+
+    /** The element's vertical scroll in panel units ({@link #scroll}). */
+    public float scrollY(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? scrollY[slot] : 0;
+    }
+
+    /**
+     * Declares that the element's size never depends on its content (a scroll viewport, a virtualized list's body:
+     * its parent or its style sizes it). It measures as if empty (its padding, minimum and style sizes), so content
+     * larger than it scrolls instead of growing it, and a change below it is laid out from it alone, at its last
+     * constraints, as for an element of fixed size, instead of from its ancestors up. Default off.
+     */
+    public Layout independent(int slot, boolean value) {
+        own(slot);
+        independent[slot] = value;
+        return this;
+    }
+
     /** Which way an anchored element grows past its anchors to reach its minimum size (default end). */
     public Layout growDirection(int slot, GrowDirection horizontal, GrowDirection vertical) {
         own(slot);
@@ -744,6 +795,7 @@ public final class Layout {
         growV[s] = G_END;
         textDir[s] = T_INHERIT;
         hidden[s] = false;
+        collapsed[s] = false;
         measured[s] = false;
         width[s] = 0;
         height[s] = 0;
@@ -787,6 +839,10 @@ public final class Layout {
         gridRowSpan[s] = 1;
         columnCount[s] = 0;
         rowCount[s] = 0;
+        scrollX[s] = 0;
+        scrollY[s] = 0;
+        independent[s] = false;
+        scrollMoved[s] = false;
         lcValid[s] = false;
         mcCount[s] = 0;
         laidOutAt[s] = 0;
@@ -818,6 +874,7 @@ public final class Layout {
         growV = grow(growV, n);
         textDir = grow(textDir, n);
         hidden = grow(hidden, n);
+        collapsed = grow(collapsed, n);
         measured = grow(measured, n);
         width = grow(width, n);
         height = grow(height, n);
@@ -863,6 +920,10 @@ public final class Layout {
         rowTracks = rowTracks == null ? new float[n][] : Arrays.copyOf(rowTracks, n);
         columnCount = grow(columnCount, n);
         rowCount = grow(rowCount, n);
+        scrollX = grow(scrollX, n);
+        scrollY = grow(scrollY, n);
+        independent = grow(independent, n);
+        scrollMoved = grow(scrollMoved, n);
         lcValid = grow(lcValid, n);
         lcAw = grow(lcAw, n);
         lcAh = grow(lcAh, n);
@@ -934,6 +995,11 @@ public final class Layout {
     @AllowAllocation("grows to the most changes in one update, once")
     private void growChanged() {
         changed = Arrays.copyOf(changed, changed.length * 2);
+    }
+
+    @AllowAllocation("grows to the most elements scrolled in one update, once")
+    private void growScrollQueue() {
+        scrollQueue = Arrays.copyOf(scrollQueue, scrollQueue.length * 2);
     }
 
     @AllowAllocation("grows to the most relayout roots in one update, once")
@@ -1016,6 +1082,17 @@ public final class Layout {
                 }
             }
         }
+        // scrolled elements not visited above: only their children's positions change
+        for (int i = 0; i < scrollQueueCount; i++) {
+            int r = scrollQueue[i];
+            if (scrollMoved[r] && store.alive(r) && owner[r] == store.element(r)) {
+                scrollMoved[r] = false;
+                if (laidOutAt[r] != 0 && !hidden[r] && (store.isRoot(r) || inShownTree(r))) {
+                    visitChildren(r, absX[r], absY[r], s, true);
+                }
+            }
+        }
+        scrollQueueCount = 0;
     }
 
     @AllowAllocation("grows with the UI's layers, rarely")
@@ -1038,7 +1115,7 @@ public final class Layout {
             if (store.isRoot(s)) {
                 return;
             }
-            if (!(s == d && self) && laidOutAt[s] != 0 && fixedSize(s)) {
+            if (!(s == d && self) && laidOutAt[s] != 0 && (fixedSize(s) || independent[s] && !hidden[s])) {
                 if (rootCount == roots.length) {
                     growRoots();
                 }
@@ -1071,23 +1148,45 @@ public final class Layout {
     /** Absolute positions, snapped outputs and the changed list for {@code s} and what moved below it. */
     private void visit(int s, float pax, float pay, float scale, boolean force) {
         visitedAt[s] = update;
+        collapsed[s] = false;
         float ax = pax + relX[s];
         float ay = pay + relY[s];
         boolean moved = force || ax != absX[s] || ay != absY[s];
         absX[s] = ax;
         absY[s] = ay;
         output(s, ax, ay, ax + lcRw[s], ay + lcRh[s], scale);
-        if (moved || laidOutAt[s] == update) {
-            // Hidden children get an empty rectangle; their subtrees are not laid out and keep their last outputs.
+        boolean scrolled = scrollMoved[s];
+        scrollMoved[s] = false;
+        if (moved || scrolled || laidOutAt[s] == update) {
+            visitChildren(s, ax, ay, scale, moved || scrolled);
+        }
+    }
+
+    /** Visits the children of {@code s}, whose border box is at {@code ax, ay}, shifted by its scroll. */
+    private void visitChildren(int s, float ax, float ay, float scale, boolean moved) {
+        float cx = ax - scrollX[s];
+        float cy = ay - scrollY[s];
+        // Hidden children and their subtrees collapse to an empty rectangle (not shown: nothing draws or picks
+        // there); their layout is kept for when they show again.
+        for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
+            if (hidden[c]) {
+                collapse(c, cx, cy, scale);
+            } else {
+                visit(c, cx, cy, scale, moved);
+            }
+        }
+    }
+
+    private void collapse(int s, float x, float y, float scale) {
+        visitedAt[s] = update;
+        absX[s] = x;
+        absY[s] = y;
+        if (!collapsed[s] || outW[s] != 0 || outH[s] != 0) {
+            collapsed[s] = true;
+            output(s, x, y, x, y, scale);
             for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
-                if (hidden[c]) {
-                    visitedAt[c] = update;
-                    absX[c] = ax;
-                    absY[c] = ay;
-                    output(c, ax, ay, ax, ay, scale);
-                } else {
-                    visit(c, ax, ay, scale, moved);
-                }
+                own(c);
+                collapse(c, x, y, scale);
             }
         }
     }
@@ -1123,7 +1222,8 @@ public final class Layout {
      * what picking and focus check before reading {@link #x}, {@link #y}, {@link #width}, {@link #height}.
      */
     public boolean shown(int slot) {
-        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot];
+        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot]
+            && !collapsed[slot];
     }
 
     /** The element's left edge in UI pixels (snapped). */
@@ -1310,7 +1410,7 @@ public final class Layout {
             long size = measure == null ? 0 : measure.measure(s, iw, iwm, ih, ihm);
             resW = Measure.width(size);
             resH = Measure.height(size);
-        } else if (store.firstChild(s) != UiStore.NONE) {
+        } else if (store.firstChild(s) != UiStore.NONE && !independent[s]) {
             content(s, iw, iwm, ih, ihm, minW - padH, maxW - padH, minH - padV, maxH - padV, rtl);
         } else {
             resW = 0;

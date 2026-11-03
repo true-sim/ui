@@ -2,7 +2,6 @@ package com.truesim.ui.controls.windows;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.Overlay;
 import com.truesim.ui.controls.overlay.OverlayInput;
 import com.truesim.ui.controls.overlay.Overlays;
@@ -33,7 +32,7 @@ import java.util.List;
  * click (or {@code ACCEPT}), close on a press outside them and their children and on {@code CANCEL}, and take focus
  * when opened from the keyboard, returning it to the trigger when closed.
  */
-public final class Popovers implements UiFrameHook {
+public final class Popovers implements Ui.FrameListener {
 
     /** How long the pointer rests on a hover card's trigger before the card opens. */
     public static final Tunable OPEN_DELAY = Tunable.of("ui.hover.openDelay", 0.35f, 0, 5,
@@ -68,7 +67,7 @@ public final class Popovers implements UiFrameHook {
         this.interaction = ui.interaction();
         this.store = ui.store();
         this.layout = ui.layout();
-        ui.addFrameHook(this);
+        ui.addFrameListener(this);
     }
 
     /** The tunables popovers read. */
@@ -233,7 +232,8 @@ public final class Popovers implements UiFrameHook {
     // ================================================================ hover intent
 
     @Override
-    public void frame(Ui frameUi, UiInput input, long nanos) {
+    public void frame(long nanos) {
+        UiInput input = ui.input();
         now = nanos;
         Pointer pointer = null;
         if (input != null) {

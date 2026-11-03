@@ -3,7 +3,6 @@ package com.truesim.ui.controls.windows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.Overlays;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiInput;
@@ -31,13 +30,10 @@ class WindowsBenchmarkTest {
         WindowManager windows = new WindowManager(overlays);
         DockSpace dock = new DockSpace(overlays, windows);
         ui.root().add(dock.root());
-        ui.addFrameHook(new UiFrameHook() {
-            @Override
-            public void beforeLayout(Ui frame) {
-                frame.layout().kind(frame.store().rootSlot(), LayoutKind.FLEX);
-                frame.layout().grow(dock.root().slot(), 1).width(dock.root().slot(), 100, Unit.PERCENT);
-            }
-        });
+        ui.ownLayout(ui.store().rootSlot(), Ui.CODE_KIND);
+        ui.layout().kind(ui.store().rootSlot(), LayoutKind.FLEX);
+        ui.codeLayout(dock.root(), Ui.CODE_FLEX | Ui.CODE_WIDTH);
+        ui.layout().grow(dock.root().slot(), 1).width(dock.root().slot(), 100, Unit.PERCENT);
         StringBuilder layout = new StringBuilder("dock split(row; 0.3 0.4 0.3;");
         for (int column = 0; column < 3; column++) {
             layout.append(" split(column; 0.5 0.5;");

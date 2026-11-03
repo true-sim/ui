@@ -1,7 +1,6 @@
 package com.truesim.ui.controls.windows;
 
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.Overlays;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
@@ -58,7 +57,7 @@ public final class WindowsScene {
         Element options = button("Options");
         toolbar.add(save).add(options);
         ui.root().add(toolbar).add(dock.root());
-        ui.addFrameHook(new Place(toolbar, dock.root(), height));
+        place(toolbar, dock.root());
         tooltips.text(save, "Save the scene (Ctrl+S)");
         Element popContent = ui.panel(null);
         popContent.add(ui.label("title", "Options")).add(ui.label("caption", "Grid snapping: 0.25 m"));
@@ -137,14 +136,14 @@ public final class WindowsScene {
         return frames(1);
     }
 
-    /** Keeps the toolbar across the top and the dock space under it, filling the screen. */
-    private record Place(Element toolbar, Element dock, float height) implements UiFrameHook {
-        @Override
-        public void beforeLayout(Ui ui) {
-            int root = ui.store().rootSlot();
-            ui.layout().kind(root, LayoutKind.FLEX).padding(root, 0, 0, 0, 0);
-            ui.layout().direction(toolbar.slot(), com.truesim.ui.layout.Direction.ROW);
-            ui.layout().grow(dock.slot(), 1).width(dock.slot(), 100, Unit.PERCENT);
-        }
+    /** Keeps the toolbar across the top and the dock space under it, filling the screen (code-owned inputs). */
+    private void place(Element bar, Element space) {
+        int root = ui.store().rootSlot();
+        ui.ownLayout(root, Ui.CODE_KIND);
+        ui.layout().kind(root, LayoutKind.FLEX).padding(root, 0, 0, 0, 0);
+        ui.codeLayout(bar, Ui.CODE_KIND);
+        ui.layout().kind(bar.slot(), LayoutKind.STACK).direction(bar.slot(), com.truesim.ui.layout.Direction.ROW);
+        ui.codeLayout(space, Ui.CODE_FLEX | Ui.CODE_WIDTH);
+        ui.layout().grow(space.slot(), 1).width(space.slot(), 100, Unit.PERCENT);
     }
 }

@@ -3,6 +3,7 @@
 // looking like the default theme under it holds a presentational value in code instead of reading a style.
 
 @use "mixins" as *;
+@import "data-test";
 
 $hot: #ff00ff;
 $lime: #39ff14;

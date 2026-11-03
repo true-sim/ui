@@ -2,7 +2,6 @@ package com.truesim.ui.controls.windows;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.ElementAnchor;
 import com.truesim.ui.controls.overlay.Overlay;
 import com.truesim.ui.controls.overlay.OverlayInput;
@@ -40,7 +39,7 @@ import java.util.List;
  * rich content replaces it. The tooltip's semantics are {@link Role#TOOLTIP} named by its text (or the name given for
  * rich content).
  */
-public final class Tooltips implements UiFrameHook {
+public final class Tooltips implements Ui.FrameListener {
 
     /** How long after a tooltip hides the next one shows without the delay. */
     public static final Tunable WARM_TIME = Tunable.of("ui.tooltip.warmTime", 0.5f, 0, 5,
@@ -93,7 +92,7 @@ public final class Tooltips implements UiFrameHook {
         this.overlay = overlays.create(container, Layers.TOOLTIP).input(OverlayInput.PASS_THROUGH)
             .anchor(elementAnchor);
         container.semantics(Role.TOOLTIP, null);
-        ui.addFrameHook(this);
+        ui.addFrameListener(this);
     }
 
     /** The tunables tooltips read besides the interaction's delay ({@code ui.input.tooltipDelay}). */
@@ -275,7 +274,8 @@ public final class Tooltips implements UiFrameHook {
     }
 
     @Override
-    public void frame(Ui frameUi, UiInput input, long nanos) {
+    public void frame(long nanos) {
+        UiInput input = ui.input();
         now = nanos;
         if (pending != null) {
             if (!pending.alive() || interaction.focusedSlot(0) != pending.slot()) {

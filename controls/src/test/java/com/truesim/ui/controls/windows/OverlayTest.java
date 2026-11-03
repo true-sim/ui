@@ -52,12 +52,7 @@ class OverlayTest {
         assertThat(f.overlays.showingCount()).isEqualTo(1);
         assertThat(f.overlays.showingAt(0)).isSameAs(o);
         // the anchor moves (a restyle, a layout change): the overlay follows in the same frame
-        f.ui.addFrameHook(new com.truesim.ui.controls.UiFrameHook() {
-            @Override
-            public void beforeLayout(com.truesim.ui.controls.Ui ui) {
-                ui.layout().offsets(anchor.slot(), 400, 10, 0, 0);
-            }
-        });
+        f.ui.layout().offsets(anchor.slot(), 400, 10, 0, 0);
         f.run();
         assertThat(f.y(tip)).isEqualTo(34); // no room above: flipped below
         assertThat(o.side()).isEqualTo(Placement.BOTTOM);

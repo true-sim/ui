@@ -2,7 +2,6 @@ package com.truesim.ui.controls.overlay;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Layer;
 import com.truesim.ui.core.event.Interaction;
@@ -15,7 +14,7 @@ import java.util.Arrays;
 
 /**
  * The overlays of one {@link Ui} (design: the layer stack's pop-ups, tooltips, dialogs): made by {@link #create},
- * placed every frame as a {@linkplain UiFrameHook frame hook} right after layout, so an overlay sits next to where its
+ * placed every frame as a {@linkplain Ui.FrameListener frame listener} right after layout, so an overlay sits next to where its
  * anchor was laid out in the same frame, and laid out again at its place. A frame with nothing moving costs a few
  * comparisons per showing overlay and allocates nothing.
  *
@@ -25,7 +24,7 @@ import java.util.Arrays;
  * tip.show();
  * }</pre>
  */
-public final class Overlays implements UiFrameHook {
+public final class Overlays implements Ui.FrameListener {
 
     private static final Facts[] SIDES = {Facts.of("side", "top"), Facts.of("side", "bottom"),
         Facts.of("side", "left"), Facts.of("side", "right")};
@@ -38,12 +37,12 @@ public final class Overlays implements UiFrameHook {
     private final float[] out = new float[3];
     private boolean rtl;
 
-    /** The overlays of {@code ui}; registers itself as one of its frame hooks. */
+    /** The overlays of {@code ui}; registers itself as one of its frame listeners. */
     @AllowAllocation("one per UI")
     public Overlays(Ui ui) {
         this.ui = ui;
         this.layout = ui.layout();
-        ui.addFrameHook(this);
+        ui.addFrameListener(this);
     }
 
     /** The UI. */
@@ -107,7 +106,7 @@ public final class Overlays implements UiFrameHook {
     }
 
     @Override
-    public void beforeLayout(Ui frameUi) {
+    public void frame(long nanos) {
         for (int i = 0; i < count; i++) {
             Overlay o = showing[i];
             if (!o.root().alive()) {
@@ -122,15 +121,18 @@ public final class Overlays implements UiFrameHook {
     /** Sets the overlay's (and its backdrop's) layout inputs for its current place. */
     void place(Overlay o) {
         int hostSlot = o.host().slot();
+        ui.ownLayout(hostSlot, Ui.CODE_KIND);
         layout.kind(hostSlot, LayoutKind.NONE);
         float scale = scale();
         int slot = o.root().slot();
+        ui.ownLayout(slot, Ui.CODE_PLACEMENT);
         layout.offsets(slot, (o.x - HostBox.left(ui, hostSlot)) / scale, (o.y - HostBox.top(ui, hostSlot)) / scale, 0,
             0);
         layout.visible(slot, o.anchorVisible);
         Element backdrop = o.backdrop();
         if (backdrop != null && backdrop.parent() != null) {
             int b = backdrop.slot();
+            ui.ownLayout(b, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
             layout.offsets(b, 0, 0, 0, 0);
             layout.width(b, 100, Unit.PERCENT);
             layout.height(b, 100, Unit.PERCENT);
@@ -139,7 +141,7 @@ public final class Overlays implements UiFrameHook {
     }
 
     @Override
-    public void afterLayout(Ui frameUi) {
+    public void afterLayout() {
         for (int i = 0; i < count; i++) {
             Overlay o = showing[i];
             if (o.anchor() == null && !o.centredNow()) {

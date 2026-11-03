@@ -2,7 +2,6 @@ package com.truesim.ui.controls.windows;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
-import com.truesim.ui.controls.UiFrameHook;
 import com.truesim.ui.controls.overlay.HostBox;
 import com.truesim.ui.controls.overlay.Overlays;
 import com.truesim.ui.core.Element;
@@ -35,7 +34,7 @@ import java.util.Map;
  * w.open();
  * }</pre>
  */
-public final class WindowManager implements UiFrameHook {
+public final class WindowManager implements Ui.FrameListener {
 
     /** How near (UI pixels) a moved or resized edge snaps to the host's or another window's edge. */
     public static final Tunable SNAP_DISTANCE = Tunable.of("ui.window.snapDistance", 8, 0, 64,
@@ -98,7 +97,7 @@ public final class WindowManager implements UiFrameHook {
         if (!ownHost) {
             modalHost = host;
         }
-        ui.addFrameHook(this);
+        ui.addFrameListener(this);
     }
 
     /** The tunables windows read. */
@@ -483,17 +482,25 @@ public final class WindowManager implements UiFrameHook {
     // ================================================================ the frame
 
     @Override
-    public void beforeLayout(Ui frameUi) {
+    public void frame(long nanos) {
+        assertLayout();
+    }
+
+    /** Sets the layout inputs the windows own: hosts, places, sizes and modes, backdrops. */
+    private void assertLayout() {
         if (ownHost) {
             int h = host.slot();
+            ui.ownLayout(h, Ui.CODE_KIND | Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
             layout.kind(h, LayoutKind.NONE);
             layout.offsets(h, 0, 0, 0, 0);
             layout.width(h, 100, Unit.PERCENT).height(h, 100, Unit.PERCENT);
         } else {
+            ui.ownLayout(host.slot(), Ui.CODE_KIND);
             layout.kind(host.slot(), LayoutKind.NONE);
         }
         if (modalHost != null && modalHost != host) {
             int h = modalHost.slot();
+            ui.ownLayout(h, Ui.CODE_KIND | Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
             layout.kind(h, LayoutKind.NONE);
             layout.offsets(h, 0, 0, 0, 0);
             layout.width(h, 100, Unit.PERCENT).height(h, 100, Unit.PERCENT);
@@ -504,6 +511,7 @@ public final class WindowManager implements UiFrameHook {
             Element b = w.backdrop();
             if (b != null && b.parent() != null) {
                 int s = b.slot();
+                ui.ownLayout(s, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
                 layout.offsets(s, 0, 0, 0, 0);
                 layout.width(s, 100, Unit.PERCENT).height(s, 100, Unit.PERCENT);
             }
@@ -511,7 +519,8 @@ public final class WindowManager implements UiFrameHook {
     }
 
     @Override
-    public void afterLayout(Ui frameUi) {
+    public void afterLayout() {
+        assertLayout(); // what a restyle in this frame took (a minimised window's min-height): laid out again
         FloatingWindow pendingFocus = focusPending;
         if (pendingFocus != null && layout.shown(pendingFocus.root().slot())) {
             focusPending = null;

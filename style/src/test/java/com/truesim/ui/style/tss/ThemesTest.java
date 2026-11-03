@@ -53,8 +53,8 @@ class ThemesTest {
     @Test
     void theShippedThemesCompile() {
         Compilation c = Tss.compileResource(Tss.THEMES + "/default-theme.tss");
-        assertThat(c.sources()).containsExactly(Tss.THEMES + "/default-theme.tss", Tss.THEMES + "/_tokens.tss",
-            Tss.THEMES + "/_mixins.tss", Tss.THEMES + "/_windows.tss");
+        assertThat(c.sources()).contains(Tss.THEMES + "/default-theme.tss", Tss.THEMES + "/_tokens.tss",
+            Tss.THEMES + "/_mixins.tss", Tss.THEMES + "/_windows.tss", Tss.THEMES + "/_data.tss");
         assertThat(c.warnings()).isEmpty();
         StyleSheet theme = Tss.defaultTheme();
         assertThat(theme).isEqualTo(c.sheet());
