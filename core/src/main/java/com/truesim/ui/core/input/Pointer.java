@@ -2,7 +2,7 @@ package com.truesim.ui.core.input;
 
 /**
  * One pointer (design 4.7): a mouse, a finger, a pen, a gamepad's virtual cursor, an XR ray. Reused: sources write it
- * every frame, so events are never allocated. Screen pointers have a position in UI pixels; rays come with stage 4.
+ * every frame, so events are never allocated. Screen pointers have a position in UI pixels; rays come with world panels.
  */
 public final class Pointer {
 
@@ -14,6 +14,21 @@ public final class Pointer {
     public static final int SECONDARY = 2;
     public static final int MIDDLE = 4;
 
+    /** Modifier bits ({@link #modifiers()}): Shift held (extends selections). */
+    public static final int SHIFT = 1;
+    /** Ctrl held. */
+    public static final int CTRL = 2;
+    /** Alt (Option) held. */
+    public static final int ALT = 4;
+    /** Meta (Cmd, Windows key) held. */
+    public static final int META = 8;
+    /** The platform's shortcut modifier held: Ctrl, or Cmd on macOS (toggles items in multi-selections). */
+    public static final int SHORTCUT = 16;
+    /** The {@code ui.pointer.dragCopy} action held: a drag copies. */
+    public static final int DRAG_COPY = 32;
+    /** The {@code ui.pointer.dragLink} action held: a drag links. */
+    public static final int DRAG_LINK = 64;
+
     private int id;
     private Kind kind = Kind.MOUSE;
     private int player;
@@ -22,6 +37,7 @@ public final class Pointer {
     private int buttons;
     private float scrollX;
     private float scrollY;
+    private int modifiers;
 
     void reset(int newId, Kind newKind) {
         id = newId;
@@ -32,6 +48,7 @@ public final class Pointer {
         buttons = 0;
         scrollX = 0;
         scrollY = 0;
+        modifiers = 0;
     }
 
     /** Sets where it is, in UI pixels; returns this. */
@@ -51,6 +68,12 @@ public final class Pointer {
     public Pointer scroll(float dx, float dy) {
         scrollX = dx;
         scrollY = dy;
+        return this;
+    }
+
+    /** Sets the modifiers held ({@link #SHIFT} and the others); returns this. */
+    public Pointer modifiers(int bits) {
+        modifiers = bits;
         return this;
     }
 
@@ -90,5 +113,10 @@ public final class Pointer {
 
     public float scrollY() {
         return scrollY;
+    }
+
+    /** The modifiers held. */
+    public int modifiers() {
+        return modifiers;
     }
 }

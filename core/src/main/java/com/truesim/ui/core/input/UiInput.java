@@ -38,10 +38,13 @@ public final class UiInput {
         }
     }
 
-    /** Forgets last frame's commands and text; pointers stay where they are. */
+    /** Forgets last frame's commands, text and scroll; pointers stay where they are, with their buttons. */
     public void beginFrame() {
         commandCount = 0;
         text.setLength(0);
+        for (int i = 0; i < pointerCount; i++) {
+            pointers[i].scroll(0, 0);
+        }
     }
 
     /** Adds a command from {@code player}; false if this frame's room is used up. */

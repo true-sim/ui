@@ -211,6 +211,7 @@ public final class Layout {
     private int update;
     private float lastScale = -1;
     private boolean lastSnapping;
+    private boolean[] topRan = new boolean[4];
     private float lastRootW = -1;
     private float lastRootH = -1;
 
@@ -960,8 +961,13 @@ public final class Layout {
         lastSnapping = snapping;
         float rw = viewportWidth / s;
         float rh = viewportHeight / s;
-        int root = store.rootSlot();
-        own(root);
+        int tops = store.rootCount();
+        if (topRan.length < tops) {
+            growTops(tops);
+        }
+        for (int t = 0; t < tops; t++) {
+            own(store.rootAt(t));
+        }
 
         int[] queue = store.dirtySlots();
         int n = store.dirtyCount();
@@ -970,19 +976,24 @@ public final class Layout {
             if (store.alive(d) && (store.dirty(d) & UiStore.DIRTY_LAYOUT) != 0) {
                 store.clearDirty(d, UiStore.DIRTY_LAYOUT);
                 own(d);
-                bubble(d, root);
+                bubble(d);
             }
         }
 
-        boolean rootRan = !lcValid[root] || rw != lastRootW || rh != lastRootH;
+        // every root (the main one and each layer's) covers the viewport
+        boolean viewportChanged = rw != lastRootW || rh != lastRootH;
         lastRootW = rw;
         lastRootH = rh;
-        if (rootRan) {
-            layoutNode(root, rw, EXACTLY, rh, EXACTLY, rw, rh, true, false);
+        for (int t = 0; t < tops; t++) {
+            int top = store.rootAt(t);
+            topRan[t] = !lcValid[top] || viewportChanged;
+            if (topRan[t]) {
+                layoutNode(top, rw, EXACTLY, rh, EXACTLY, rw, rh, true, false);
+            }
         }
         for (int i = 0; i < rootCount; i++) {
             int r = roots[i];
-            if (!shown(r, root)) {
+            if (!inShownTree(r)) {
                 roots[i] = UiStore.NONE; // detached or hidden: laid out when it is shown again
             } else if (!lcValid[r]) {
                 layoutNode(r, lcAw[r], lcModes[r] & 3, lcAh[r], lcModes[r] >> 2, lcOw[r], lcOh[r], true, lcRtl[r]);
@@ -991,12 +1002,12 @@ public final class Layout {
             }
         }
 
-        if (rescaled) {
-            visit(root, 0, 0, s, true);
-        } else {
-            if (rootRan) {
-                visit(root, 0, 0, s, false);
+        for (int t = 0; t < tops; t++) {
+            if (rescaled || topRan[t]) {
+                visit(store.rootAt(t), 0, 0, s, rescaled);
             }
+        }
+        if (!rescaled) {
             for (int i = 0; i < rootCount; i++) {
                 int r = roots[i];
                 if (r != UiStore.NONE && visitedAt[r] != update) {
@@ -1007,8 +1018,13 @@ public final class Layout {
         }
     }
 
+    @AllowAllocation("grows with the UI's layers, rarely")
+    private void growTops(int count) {
+        topRan = new boolean[count];
+    }
+
     /** Invalidates {@code d} and its ancestors up to one whose size cannot depend on its content. */
-    private void bubble(int d, int root) {
+    private void bubble(int d) {
         boolean self = selfChanged[d];
         selfChanged[d] = false;
         int s = d;
@@ -1019,7 +1035,7 @@ public final class Layout {
             invalidAt[s] = update;
             lcValid[s] = false;
             mcCount[s] = 0;
-            if (s == root) {
+            if (store.isRoot(s)) {
                 return;
             }
             if (!(s == d && self) && laidOutAt[s] != 0 && fixedSize(s)) {
@@ -1038,8 +1054,8 @@ public final class Layout {
     }
 
     /** Whether {@code s} is in the tree and no ancestor is hidden. */
-    private boolean shown(int s, int root) {
-        for (int p = store.parent(s); p != root; p = store.parent(p)) {
+    private boolean inShownTree(int s) {
+        for (int p = store.parent(s); !store.isRoot(p); p = store.parent(p)) {
             if (p == UiStore.NONE || hidden[p]) {
                 return false;
             }
@@ -1101,6 +1117,14 @@ public final class Layout {
     }
 
     // ================================================================ outputs
+
+    /**
+     * Whether the element has a rectangle from an update and takes part in layout itself (not {@link #visible hidden}):
+     * what picking and focus check before reading {@link #x}, {@link #y}, {@link #width}, {@link #height}.
+     */
+    public boolean shown(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot];
+    }
 
     /** The element's left edge in UI pixels (snapped). */
     public float x(int slot) {

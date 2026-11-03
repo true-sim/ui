@@ -8,4 +8,22 @@ public interface Clipboard {
 
     /** Puts {@code text} on the clipboard. */
     void text(String text);
+
+    /** A clipboard in a field: for tests, and a UI whose engine gives none. */
+    @com.truesim.annotations.AllowAllocation("one per UI")
+    static Clipboard inMemory() {
+        return new Clipboard() {
+            private String text = "";
+
+            @Override
+            public String text() {
+                return text;
+            }
+
+            @Override
+            public void text(String value) {
+                text = value == null ? "" : value;
+            }
+        };
+    }
 }

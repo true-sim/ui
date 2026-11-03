@@ -14,9 +14,18 @@ public final class UiState {
     public static final int CHECKED = 1 << 5;
     public static final int EXPANDED = 1 << 6;
     public static final int EDITING = 1 << 7;
+    /**
+     * Focused by navigation (keys, gamepad), not by a pointer: what focus rings select ({@code :focus-visible}, as in
+     * CSS), so a clicked button shows no ring and a tabbed-to one does.
+     */
+    public static final int FOCUS_VISIBLE = 1 << 8;
+    /** A drop target the dragged payload is over and that accepts it ({@code :drop-target}). */
+    public static final int DROP_TARGET = 1 << 9;
+    /** The source of a drag session in progress ({@code :dragging}). */
+    public static final int DRAGGING = 1 << 10;
 
     private static final String[] NAMES = {"hover", "pressed", "focused", "disabled", "selected", "checked",
-        "expanded", "editing"};
+        "expanded", "editing", "focus-visible", "drop-target", "dragging"};
 
     private UiState() {
     }
