@@ -14,7 +14,8 @@ import java.util.Arrays;
  *
  * <p><b>Sticky headers.</b> {@link #section(Element, Element)} makes a {@code scroll-section} of a header and a body:
  * while the section crosses the viewport's top, its header stays there, pushed up by the next section's header.
- * Headers move by a scroll offset, without layout; they draw over their own body.
+ * Headers move by a scroll offset, without layout (of an unstyled {@code scroll-stick} holding the
+ * {@code scroll-sticky} bar, so the bar's background moves with its header); they draw over their own body.
  *
  * <pre>{@code
  * ScrollPane pane = new ScrollPane(ui, "Settings");
@@ -69,19 +70,25 @@ public final class ScrollPane extends ScrollView {
     @AllowAllocation("controls are made when a UI is built")
     public Element section(Element header, Element body) {
         Element section = ui.element("scroll-section", null);
+        // the header's bar (scroll-sticky, the theme's background) inside an unstyled holder whose scroll offset
+        // pushes it down: the bar moves with the header, so its background covers the rows scrolling under it
+        Element holder = ui.element("scroll-stick", null);
         Element sticky = ui.element("scroll-sticky", null);
         ui.codeLayout(section, Ui.CODE_KIND);
+        ui.codeLayout(holder, Ui.CODE_KIND);
         // the header goes after the body in tree order, so it draws over it, but shows above it
         layout.kind(section.slot(), LayoutKind.STACK).direction(section.slot(), Direction.COLUMN_REVERSE);
+        layout.kind(holder.slot(), LayoutKind.STACK).direction(holder.slot(), Direction.COLUMN);
         section.add(body);
-        section.add(sticky);
+        section.add(holder);
+        holder.add(sticky);
         sticky.add(header);
         if (sectionCount == sections.length) {
             sections = Arrays.copyOf(sections, sectionCount * 2);
             stickies = Arrays.copyOf(stickies, sectionCount * 2);
         }
         sections[sectionCount] = section;
-        stickies[sectionCount++] = sticky;
+        stickies[sectionCount++] = holder;
         invalidate();
         return section;
     }

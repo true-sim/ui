@@ -40,8 +40,9 @@ textarea {
 }
 textfield:focused selection, textarea:focused selection { background: box(rgba(#3fa7ff, 0.45)); }
 
-// rich text to read: no box, the label's look
+// rich text to read: no box, the label's look; it scrolls when it is taller than its box, so it clips there
 richtext {
+  clip: true;
   font-family: tokens.$font-ui;
   font-size: map-get(tokens.$text-sizes, body);
   line-height: 1.35;

@@ -76,7 +76,8 @@ class DataThemesTest {
             "table-column-drop-indicator", "value-check", "label#number", "label#text", "label#enum");
         for (String type : normal.keySet()) {
             if (type.equals("list-body") || type.equals("tree-body") || type.equals("table-body")
-                || type.equals("table-cells") || type.equals("table-frozen") || type.equals("scroll-section")) {
+                || type.equals("table-cells") || type.equals("table-frozen") || type.equals("scroll-section")
+                || type.equals("scroll-stick")) {
                 continue; // structure only: placed by code, nothing to see
             }
             assertThat(differs(normal.get(type), plain.get(type))).as("the default theme styles %s", type).isTrue();

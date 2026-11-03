@@ -34,8 +34,8 @@ scroll-content {
   padding: tokens.$space-m;
 }
 
-// a stuck header covers the content scrolling under it
-scroll-sticky { layout: stack; direction: column; background: box(var(--surface-raised)); }
+// a stuck header covers the content scrolling under it: opaque, or the rows show through
+scroll-sticky { layout: stack; direction: column; background: box(alpha(var(--surface-raised), 1)); }
 
 // thin overlay bars that show while in use and on hover
 scroll-bar {

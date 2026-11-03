@@ -93,7 +93,9 @@ layer {
   layout: none;
 }
 
-panel.hud {
+// The HUD's root covers its layer. Only the root: the style name is inherited by unnamed panels inside it, which
+// stack like any panel (as anchors filling the root they would all draw over one another).
+root > panel.hud, layer > panel.hud {
   layout: anchors;
   anchors: full;
   padding: tokens.$space-xl;

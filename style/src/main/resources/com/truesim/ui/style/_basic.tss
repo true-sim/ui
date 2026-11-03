@@ -437,7 +437,7 @@ image.icon#crumb-separator { size: 12px; }
 
 // ------------------------------------------------------------------ tabs
 
-tab-pane { layout: flex; tab-overflow: scroll; }
+tab-pane { layout: flex; tab-overflow: menu; }
 tab-pane[side=top] { direction: column; }
 tab-pane[side=bottom] { direction: column-reverse; }
 tab-pane[side=left] { direction: row; }
@@ -521,16 +521,28 @@ card-footer { layout: flex; direction: row; justify-content: end; gap: tokens.$s
 
 // ------------------------------------------------------------------ split panes
 
-split-pane { layout: flex; align-items: stretch; }
+split-pane { layout: flex; align-items: stretch; gap: 2px; }
 split-pane[orientation=horizontal] { direction: row; }
 split-pane[orientation=vertical] { direction: column; }
+// the panes are surfaces of their own, so where each one ends shows; their content clips at their edges
+split-first, split-second {
+  layout: stack;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s tokens.$space-m;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  clip: true;
+}
 split-first { shrink: 1; min-width: 40px; }
 split-second { grow: 1; shrink: 1; basis: 0px; min-width: 40px; }
 split-pane[orientation=vertical] split-first, split-pane[orientation=vertical] split-second { min-width: auto;
   min-height: 40px; }
 splitter {
   shrink: 0;
-  background: box(var(--edge));
+  radius: 2px;
+  background: box(rgba(#8b949e, 0.45));
   transition: background tokens.$fast ease-out;
   &:hover, &:pressed { background: box(var(--accent)); }
   &:focus-visible { focus-ring: 2px var(--accent); focus-ring-offset: 0px; }
@@ -547,9 +559,17 @@ carousel {
   gap: tokens.$space-s;
   &:focus-visible { focus-ring: 2px var(--accent); }
 }
-carousel-viewport { layout: anchors; height: 140px; clip: true; radius: tokens.$radius-m; }
+// One page at a time: the viewport clips the track, a row of pages each as wide as the viewport; a page's content
+// fills it (or sits in its middle at its own size).
+carousel-viewport {
+  layout: anchors;
+  height: 96px;
+  clip: true;
+  radius: tokens.$radius-m;
+  background: box(var(--surface-raised));
+}
 carousel-track { layout: flex; direction: row; transition: offsets tokens.$normal ease-out; }
-carousel-page { grow: 1; basis: 0px; layout: flex; align-items: stretch; }
+carousel-page { grow: 1; basis: 0px; layout: overlay; align-items: stretch; padding: tokens.$space-s; }
 carousel-dots { grid-column: 1 span 3; layout: flex; direction: row; justify-content: center; gap: tokens.$space-s; }
 button.carousel-dot {
   size: 8px;

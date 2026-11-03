@@ -151,9 +151,11 @@ class ContainersTest {
         for (int i = 0; i < 8; i++) {
             t.add("Tab number " + i, box(f, "x", 50, 20), false);
         }
-        width(f, t.element(), 300);
+        f.ui.styles().inline(t.element().slot(), InlineStyle.builder().set(Styles.WIDTH, Length.px(300))
+            .set(BasicStyles.TAB_OVERFLOW, BasicStyles.TabOverflow.SCROLL).build());
         f.settle();
         assertThat(t.overflowButton().element().parent()).as("scroll mode: the menu is offered").isNotNull();
+        assertThat(t.overflowing(7)).as("scroll mode: tabs out of view are clipped, not hidden").isFalse();
         f.synthetic.mouse(f.cx(t.tab(1).button().element()), y, 0).scroll(com.truesim.ui.testkit.SyntheticInput.MOUSE,
             0, -2);
         f.run();
@@ -165,8 +167,30 @@ class ContainersTest {
         assertThat(t.selected()).isEqualTo(8);
         f.click(t.overflowButton().element());
         f.click(t.overflowButton().element());
+
+        // menu mode: only whole tabs show, the selected one always; the rest are in the menu
+        f.ui.styles().inline(t.element().slot(), InlineStyle.builder().set(Styles.WIDTH, Length.px(300))
+            .set(BasicStyles.TAB_OVERFLOW, BasicStyles.TabOverflow.MENU).build());
+        f.settle();
+        assertThat(t.overflowButton().element().parent()).as("menu mode: the menu is offered").isNotNull();
+        assertThat(t.overflowing(8)).as("the selected tab shows").isFalse();
+        int hidden = 0;
+        for (int i = 0; i < t.count(); i++) {
+            hidden += t.overflowing(i) ? 1 : 0;
+        }
+        assertThat(hidden).isPositive();
+        f.click(t.tab(0).button().element()); // hidden: not picked
+        assertThat(t.selected()).isEqualTo(8);
+        f.click(t.overflowButton().element());
+        f.settle();
+        f.click(t.overflowMenu().item(0).element());
+        assertThat(t.selected()).isZero();
+        f.settle();
+        assertThat(t.overflowing(0)).isFalse();
+        assertThat(t.overflowing(8)).as("revealing the first tab hid the last").isTrue();
         t.bind(f.c.clock().intValue(0));
         assertThat(t.model().get()).isZero();
+        width(f, t.element(), 300); // the theme's mode again
         f.ui.styles().sheet(Fixture.GARISH);
         f.settle();
         assertThat(t.overflowButton().element().parent()).as("wrap mode: no menu").isNull();

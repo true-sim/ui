@@ -11,9 +11,6 @@ import com.truesim.ui.style.value.Insets;
 import com.truesim.ui.style.value.Length;
 import com.truesim.ui.style.value.LayoutKind;
 import com.truesim.ui.style.value.Wrap;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.time.LocalDate;
 import java.util.List;
@@ -28,16 +25,12 @@ import java.util.Locale;
  * <pre>{@code
  * Ui ui = new Ui(Tss.defaultTheme(), textSystem);          // or Tss.testTheme()
  * Controls controls = new Controls(ui);
- * ControlsGallery.registerIcons(ui);                         // simple test icons for "icons/<id>"
+ * ControlsGallery.registerIcons(ui);                         // the test theme's checker icon
  * ControlsGallery.Gallery g = ControlsGallery.build(controls, ui.root());
  * // frames until the atlas settled, then render ui.layers() (and again after g.openOverlays())
  * }</pre>
  */
 public final class ControlsGallery {
-
-    /** The icon ids the controls and the default theme use. */
-    static final String[] ICONS = {"previous", "next", "more", "close", "dismiss", "up", "down", "dropdown-arrow",
-        "menu-arrow", "collapsible-arrow", "crumb-separator"};
 
     private ControlsGallery() {
     }
@@ -104,11 +97,11 @@ public final class ControlsGallery {
         }
     }
 
-    /** Registers simple drawn icons as {@code icons/<id>} for every id the controls use, and {@code test/checker}. */
+    /**
+     * Registers {@code test/checker}, the picture the garish test theme gives every icon; the default theme's icons are
+     * the toolkit's built-in ones ({@link com.truesim.ui.controls.BuiltinIcons}), registered by nothing.
+     */
     public static void registerIcons(Ui ui) {
-        for (int i = 0; i < ICONS.length; i++) {
-            ui.images().add("icons/" + ICONS[i], icon(i));
-        }
         BufferedImage checker = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 8; y++) {
             for (int x = 0; x < 8; x++) {
@@ -116,33 +109,6 @@ public final class ControlsGallery {
             }
         }
         ui.images().add("test/checker", checker);
-    }
-
-    private static BufferedImage icon(int kind) {
-        BufferedImage img = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = img.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setColor(Color.WHITE);
-        switch (ICONS[kind]) {
-            case "previous" -> g.fillPolygon(new int[] {11, 4, 11}, new int[] {2, 8, 14}, 3);
-            case "next", "menu-arrow", "crumb-separator" -> g.fillPolygon(new int[] {5, 12, 5},
-                new int[] {2, 8, 14}, 3);
-            case "up" -> g.fillPolygon(new int[] {2, 8, 14}, new int[] {11, 4, 11}, 3);
-            case "down", "dropdown-arrow", "collapsible-arrow" -> g.fillPolygon(new int[] {2, 8, 14},
-                new int[] {5, 12, 5}, 3);
-            case "more" -> {
-                g.fillOval(1, 6, 4, 4);
-                g.fillOval(6, 6, 4, 4);
-                g.fillOval(11, 6, 4, 4);
-            }
-            default -> {
-                g.setStroke(new java.awt.BasicStroke(2));
-                g.drawLine(3, 3, 13, 13);
-                g.drawLine(13, 3, 3, 13);
-            }
-        }
-        g.dispose();
-        return img;
     }
 
     private static Element section(Controls c, Element parent, String title) {
@@ -159,10 +125,11 @@ public final class ControlsGallery {
         return e;
     }
 
+    /** A panel showing {@code text}, at least {@code w x h} (larger when a theme's text and padding need more). */
     private static Element sized(Controls c, String text, float w, float h) {
         Element e = c.ui().panel(null);
-        c.ui().styles().inline(e.slot(), InlineStyle.builder().set(Styles.WIDTH, Length.px(w))
-            .set(Styles.HEIGHT, Length.px(h)).build());
+        c.ui().styles().inline(e.slot(), InlineStyle.builder().set(Styles.MIN_WIDTH, Length.px(w))
+            .set(Styles.MIN_HEIGHT, Length.px(h)).build());
         e.add(c.ui().label(null, text));
         return e;
     }
@@ -320,7 +287,9 @@ public final class ControlsGallery {
         s.add(g.split.element());
         g.carousel = c.carousel("Screenshots", clock.intValue(1));
         for (String t : new String[] {"One", "Two", "Three"}) {
-            g.carousel.add(sized(c, t, 120, 40));
+            Element slide = ui.panel("card"); // fills its page
+            slide.add(ui.label(null, t));
+            g.carousel.add(slide);
         }
         ui.styles().inline(g.carousel.element().slot(), InlineStyle.builder().set(Styles.WIDTH, Length.px(240))
             .build());
@@ -332,11 +301,14 @@ public final class ControlsGallery {
         g.stepper.add("Profile", sized(c, "Profile", 160, 30));
         g.stepper.add("Done", sized(c, "Done", 160, 30));
         s.add(g.stepper.element());
-        Element drawerRow = row(c);
+        Element drawerRow = c.ui().panel(null); // the drawer pushes the content beside it aside
+        c.ui().styles().inline(drawerRow.slot(), InlineStyle.builder().set(Styles.LAYOUT, LayoutKind.FLEX)
+            .set(Styles.DIRECTION, com.truesim.ui.style.value.Direction.ROW).set(Styles.GAP, 8f)
+            .set(Styles.ALIGN_ITEMS, com.truesim.ui.style.value.Align.STRETCH).set(Styles.MIN_HEIGHT, Length.px(80))
+            .build());
         g.drawer = c.drawer("Sidebar", Drawer.Side.LEFT, false, clock.booleanValue(true));
         g.drawer.content().add(ui.label(null, "Sidebar"));
         drawerRow.add(g.drawer.element()).add(sized(c, "Content", 80, 60));
-        ui.styles().inline(drawerRow.slot(), InlineStyle.builder().set(Styles.HEIGHT, Length.px(80)).build());
         s.add(drawerRow);
         g.modalDrawer = c.drawer("Settings drawer", Drawer.Side.RIGHT, true, clock.booleanValue(false));
         g.modalDrawer.content().add(ui.label(null, "Drawer settings"));

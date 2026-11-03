@@ -62,3 +62,8 @@ collapsible-body { transition: height 700ms linear; }
 carousel-track { transition: offsets 900ms linear; }
 drawer { transition: offsets 900ms linear, width 900ms linear, height 900ms linear; }
 switch-knob { transition: offsets 500ms ease-in; }
+// room for the theme's larger text in the fixed-size parts
+date-weekdays, date-grid { grid-template-columns: 44px 44px 44px 44px 44px 44px 44px; }
+date-day { height: 40px; }
+badge { height: 30px; }
+label.step-number { size: 34px; }

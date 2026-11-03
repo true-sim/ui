@@ -3,10 +3,13 @@ package com.truesim.ui.controls.basic;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.state.VersionedInt;
 import com.truesim.common.state.Watch;
+import com.truesim.ui.controls.Ui;
+import com.truesim.ui.controls.anim.Visuals;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.UiState;
 import com.truesim.ui.core.event.EventType;
+import com.truesim.ui.core.event.PointerEvents;
 import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.layout.Layout;
@@ -22,8 +25,9 @@ import java.util.Arrays;
  * {@code tab-close} button when closable.
  *
  * <p>How the strip handles more tabs than fit is the theme's {@code tab-overflow}: {@code scroll} (one row scrolled by
- * the wheel and kept on the selected tab), {@code wrap} (more rows: the theme wraps the row) or {@code menu} (one row
- * clipped; the overflow menu reaches the rest). Arrow keys along the strip select the neighbouring tab, home and end
+ * the wheel and kept on the selected tab, clipped before the overflow button), {@code wrap} (more rows: the theme
+ * wraps the row) or {@code menu} (one row showing only the tabs that fit whole, the selected one always; the others
+ * are hidden, not pickable, and reached through the overflow menu). Arrow keys along the strip select the neighbouring tab, home and end
  * the first and last. Closable tabs ask {@link #onClose} (by default they are removed); with {@link #reorderable}
  * tabs are dragged along the strip to reorder them.
  */
@@ -95,6 +99,17 @@ public final class TabPane extends Control {
     private BasicStyles.TabOverflow mode;
     private Tab dragged;
     private int shownContent = -1;
+    private final Ui.FrameListener fit = new Ui.FrameListener() {
+        @Override
+        public void frame(long nanos) {
+            // nothing before layout
+        }
+
+        @Override
+        public void afterLayout() {
+            fitTabs();
+        }
+    };
 
     /** A tab pane named {@code name} with its strip on {@code side}, bound to {@code model}. */
     @AllowAllocation("controls are built once")
@@ -120,6 +135,7 @@ public final class TabPane extends Control {
         listen(strip, EventType.WHEEL.bit());
         facts(BasicStyles.TAB_OVERFLOW.defaultValue());
         controls.poll(this);
+        ui.addFrameListener(fit);
         bind(model);
     }
 
@@ -303,6 +319,37 @@ public final class TabPane extends Control {
                 overflow.element().detach();
             }
         }
+    }
+
+    /** In menu mode, hides the tabs the strip does not show whole (after layout: their places are known). */
+    private void fitTabs() {
+        Layout l = ui.layout();
+        int st = strip.slot();
+        boolean menuMode = mode == BasicStyles.TabOverflow.MENU;
+        float from = horizontal() ? l.x(st) : l.y(st);
+        float to = from + (horizontal() ? l.width(st) : l.height(st));
+        for (int i = 0; i < count; i++) {
+            Element b = tabs[i].button.element();
+            int s = b.slot();
+            float start = horizontal() ? l.x(s) : l.y(s);
+            float end = start + (horizontal() ? l.width(s) : l.height(s));
+            boolean hidden = menuMode && l.shown(s) && (start < from - 0.5f || end > to + 0.5f);
+            boolean wasHidden = ui.visuals().has(s, Visuals.OPACITY);
+            if (hidden != wasHidden) {
+                if (hidden) {
+                    ui.visuals().opacity(s, 0);
+                    interaction().pickable(b, PointerEvents.NONE);
+                } else {
+                    ui.visuals().clear(s, Visuals.OPACITY);
+                    interaction().pickable(b, PointerEvents.AUTO);
+                }
+            }
+        }
+    }
+
+    /** Whether tab {@code index} is hidden because it does not fit (menu mode). */
+    public boolean overflowing(int index) {
+        return ui.visuals().has(tabs[index].button.element().slot(), Visuals.OPACITY);
     }
 
     private int tabAt(int slot) {
