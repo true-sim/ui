@@ -86,6 +86,8 @@ class RichTextBlockTest {
         assertThat(list.colorAt(0, Primitive.COLOR_A)).as("run 0's own colour, faded").isEqualTo(Rgba.pack(0, 1, 0,
             0.5f));
         assertThat(list.colorAt(4, Primitive.COLOR_A)).as("no colour: the block's").isEqualTo(Rgba.BLACK);
+        assertThat(list.colorAt(2, Primitive.COLOR_A)).as("a colour change within a shaping run")
+            .isEqualTo(Rgba.pack(1, 0, 0, 0.5f));
         assertThat(list.floatAt(4, Primitive.PIXEL_RANGE)).as("the run's size").isEqualTo(6 * 20 / 40f);
 
         DrawList second = new DrawList();

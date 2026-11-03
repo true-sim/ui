@@ -705,7 +705,7 @@ public final class TextBlock {
                 }
                 if (!Character.isWhitespace(chars[c])) {
                     addGlyph(shapedGlyphs.glyph(g), runFace[r], pen + shapedGlyphs.offsetX(g),
-                        baseline - shapedGlyphs.offsetY(g), c, runSize[r], runStyle[r]);
+                        baseline - shapedGlyphs.offsetY(g), c, runSize[r], runs == null ? -1 : charStyle[c]);
                 }
                 pen += advance;
             }

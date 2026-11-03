@@ -57,6 +57,8 @@ public final class EditableText {
 
     private int[] breaks = new int[16]; // the line feeds' positions, ascending
     private int breakCount;
+    private int damageFrom = Integer.MAX_VALUE; // lines changed since the last clearDamage: none
+    private int damageTail = Integer.MAX_VALUE;
 
     private final BufferIterator iterator = new BufferIterator();
     private BreakIterator graphemes;
@@ -702,6 +704,7 @@ public final class EditableText {
         if (from == to) {
             return;
         }
+        damage(lineOf(from), lineOf(to));
         int n = to - from;
         int w = 0;
         for (int i = 0; i < breakCount; i++) {
@@ -722,6 +725,8 @@ public final class EditableText {
         if (n == 0) {
             return;
         }
+        int line = lineOf(at);
+        damage(line, line);
         int first = breakCount;
         for (int i = 0; i < breakCount; i++) {
             if (breaks[i] >= at) {
@@ -751,6 +756,32 @@ public final class EditableText {
             breakCount += added;
         }
         text.insert(at, value);
+    }
+
+    /** Lines {@code first} to {@code last} (before the edit) change: the lines before and after them stay. */
+    private void damage(int first, int last) {
+        damageFrom = Math.min(damageFrom, first);
+        damageTail = Math.min(damageTail, breakCount - last);
+    }
+
+    /**
+     * The first hard line changed since {@link #clearDamage()}, or {@link Integer#MAX_VALUE} when none did; with
+     * {@link #damageTail()}: a view keeping per-line state (shaped paragraphs, heights) keeps the lines before this one
+     * and the last {@code damageTail()} lines (moved), and redoes the ones between.
+     */
+    public int damageFrom() {
+        return damageFrom;
+    }
+
+    /** How many lines at the end are unchanged since {@link #clearDamage()} ({@link Integer#MAX_VALUE}: all). */
+    public int damageTail() {
+        return damageTail;
+    }
+
+    /** Forgets the damage: the view caught up. */
+    public void clearDamage() {
+        damageFrom = Integer.MAX_VALUE;
+        damageTail = Integer.MAX_VALUE;
     }
 
     /** Hard lines (paragraphs): line feeds plus one. */
