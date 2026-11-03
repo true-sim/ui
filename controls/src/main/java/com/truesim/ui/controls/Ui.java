@@ -1233,6 +1233,16 @@ public final class Ui {
         float cy0 = y0 + bw + padding.top() * scale;
         float cx1 = x1 - bw - padding.right() * scale;
         float cy1 = y1 - bw - padding.bottom() * scale;
+        if (content[slot] != NONE && ownClip[slot] != DrawList.NO_CLIP) {
+            // content clips to its own element's box, as its children do (text that does not fit, a painter's)
+            rec.clip(ownClip[slot]);
+            shift(slot); // its own clip's content space: its own scroll too
+            float ox = visuals.composedX() + shiftX[slot];
+            float oy = visuals.composedY() + shiftY[slot];
+            if (ox != composedX || oy != composedY) {
+                rec.transform(visuals.composedScale(), ox, oy);
+            }
+        }
         if (content[slot] == TEXT) {
             shape(slot, cx1 - cx0 + 1); // snapping to whole pixels may have taken up to a pixel off the measured width
             TextOutline outline = s.get(Styles.TEXT_OUTLINE);
@@ -1244,15 +1254,6 @@ public final class Ui {
         } else if (content[slot] == IMAGE) {
             recordImage(s.get(Styles.IMAGE), opacity, cx0, cy0, cx1, cy1);
         } else if (content[slot] == PAINTED) {
-            if (ownClip[slot] != DrawList.NO_CLIP) {
-                rec.clip(ownClip[slot]);
-                shift(slot); // its own clip's content space: its own scroll too
-                float ox = visuals.composedX() + shiftX[slot];
-                float oy = visuals.composedY() + shiftY[slot];
-                if (ox != composedX || oy != composedY) {
-                    rec.transform(visuals.composedScale(), ox, oy);
-                }
-            }
             painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, opacity);
         }
     }
