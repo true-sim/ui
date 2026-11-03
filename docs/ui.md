@@ -1748,6 +1748,32 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A2 groundwork (2026-11-03): built, local branch `a2-groundwork`, not yet in CI
+
+The shared interaction core the parallel feature branches (text editing; overlays, windows and docking; basic and
+container controls; data controls) build on. Engine-agnostic, in `ui-core` (`com.truesim.ui.core.event`), wired into
+the frame by `ui-controls`' `Ui`. Not built here: world panels, scene picking (`Interactive`, the mesh BVH, GPU
+picking), engine pointer sources (touch, pen, XR), the IME rectangle in `engine-platform`.
+
+| Piece | Built | Where |
+|---|---|---|
+| Layers | `Layers`/`Layer`: HUD (the store's root), overlay 100, modal 200 (modal), popup 300, tooltip 400, drag 500 and debug 1000 (no input), custom by z; each a root of the store (`UiStore.createRoot`, laid out over the viewport) with its own `DrawList`; input `PASS_THROUGH`, `BLOCK` or `NONE`; a modal or blocking layer showing anything blocks those below; `Ui.layers()`/`layerCount()` hand all lists to the renderer back to front, each layer rebuilt on its own | `ui-core`, `ui-layout`, `ui-controls` |
+| Picking | per layer a uniform grid (64 px cells, coarsened to 4,096 cells) over pickable elements, rebuilt only when one of them or a clipping ancestor moved or was restyled, or the layer's structure changed; precise rounded-rect test, clips (style `clip`) respected; front to back over layers; `pointer-events: auto/none/all` in styles or code | `Picking` |
+| Events and routing | `EventType` (enter, exit, move, press, release, click with count, long press, context, wheel, drag start/drag/drag end, drop enter/over/leave/drop, focus in/out, command, text, composition, tooltip, press outside); DOM-like capture, target, bubble with `consume()`; Lemur's pass-through of unconsumed pointer events to the next hit; capture on press; hover per pointer; listeners in arrays, events reused (16 nesting levels) | `Interaction`, `UiEvent` |
+| Drag and drop | `DragSession` per pointer with a typed payload (`DataFormat<T>`), allowed and preferred operations (`DragOperation`, Ctrl/Alt modifiers), a preview element moved on the drag layer, drop targets found through picking (`acceptDrop`) | `DragSession` |
+| States | hover, pressed, focused, `focus-visible` (navigation only), `drop-target`, `dragging` set from events; disabled elements get no events | `UiState` |
+| Focus | a focus per player (8), explicit neighbours, container `FocusTraversal`s bubbling, default weighted spatial search within 45 degrees, tree order for next/previous, focus memory per container, modal scopes (`pushModal`, modal layers) trapping focus and restoring it, focus ring from `focus-ring`/`focus-ring-offset` | `Interaction`, `Ui` |
+| Commands and text | `UiCommand`s to the player's focused element (capture/bubble), unconsumed navigation moves focus, ACCEPT clicks, CANCEL closes the top modal scope (or cancels a drag), CONTEXT_MENU asks for a menu; text and IME composition to the focused text-taking element; `TextInputHost` started and stopped with its IME area (the element or a caret rectangle, following layout); `Clipboard` (the engine's or one in memory) | `Interaction` |
+| Frame | `Ui.update(w, h, UiInput, nanos)` processes input first (picking against the layout last drawn), then styles, layout and recording: one frame; tunables `ui.input.longPressDelay`, `doubleClickTime`, `doubleClickDistance`, `dragThreshold`, `touchDragThreshold`, `tooltipDelay`, `ui.focus.sidewaysWeight` | `Ui` |
+| Semantics | actions per node (activate, focus, show-menu, scroll, drag, drop, edit-text) and states; `Semantics.unnamed` lists interactive nodes a screen reader could not announce; roles for the planned controls | `Semantics`, `Role` |
+| Styles | `pointer-events`, `clip`, `cursor`, `focus-ring`, `focus-ring-offset`; both themes style `layer` and `:focus-visible`, `:drop-target`, `:dragging` | `Styles`, themes |
+
+**Benchmark** (Ryzen 9 9950X3D, without JaCoCo, `PickingBenchmarkTest`): on a 2,001-element HUD (1,680 pickable), the
+grid answers the front-most hit in 0.017 µs and every hit in 0.023 µs per pointer; a plain tree walk (front to back,
+stopping at the first hit) takes 16.6 µs. The grid stays (target 5 µs); the walk is kept only as a test oracle. A
+frame of interaction with one mouse moving over that HUD costs 0.2 µs. Steady-state frames with two pointers moving,
+pressing and scrolling and commands arriving allocate nothing (`InteractionUiTest`, without escape analysis).
+
 ### Group A1 (2026-11-03): built, local branches, not yet in CI
 
 Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text-native`, `ui-fonts`,
