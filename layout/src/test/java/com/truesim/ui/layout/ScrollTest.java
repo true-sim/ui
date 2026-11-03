@@ -102,4 +102,28 @@ class ScrollTest {
         assertThat(ui.store.alive(view)).isTrue();
         assertThat(UiStore.NONE).isNegative();
     }
+
+    @Test
+    void aHiddenElementsSubtreeCollapsesAndShowsAgain() {
+        TestUi ui = new TestUi();
+        int r = ui.root();
+        int box = ui.node(r);
+        int inner = ui.node(box);
+        int leaf = ui.text(inner, 3);
+        ui.run();
+        assertThat(ui.layout.shown(leaf)).isTrue();
+        ui.layout.visible(box, false);
+        ui.run();
+        assertThat(ui.layout.shown(box)).isFalse();
+        assertThat(ui.layout.shown(inner)).isFalse(); // inside a hidden element: nothing to draw or pick
+        assertThat(ui.layout.shown(leaf)).isFalse();
+        assertThat(ui.layout.width(leaf)).isZero();
+        ui.layout.scroll(r, 0, 5); // visited again while hidden: stays collapsed
+        ui.run();
+        assertThat(ui.layout.shown(leaf)).isFalse();
+        ui.layout.visible(box, true).scroll(r, 0, 0);
+        ui.run();
+        assertThat(ui.layout.shown(leaf)).isTrue();
+        assertRect(ui, leaf, 0, 0, 400, 16);
+    }
 }

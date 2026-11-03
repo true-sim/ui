@@ -107,6 +107,8 @@ public final class Layout {
     byte[] growV;
     byte[] textDir;
     boolean[] hidden;
+    /** Inside a hidden element's subtree: collapsed to an empty rectangle, not {@link #shown}. */
+    private boolean[] collapsed;
     boolean[] measured;
     float[] width;
     float[] height;
@@ -689,8 +691,9 @@ public final class Layout {
 
     /**
      * Declares that the element's size never depends on its content (a scroll viewport, a virtualized list's body:
-     * its parent or its style sizes it), so a change below it is laid out from it alone, at its last constraints, as
-     * for an element of fixed size, instead of from its ancestors up. Default off.
+     * its parent or its style sizes it). It measures as if empty (its padding, minimum and style sizes), so content
+     * larger than it scrolls instead of growing it, and a change below it is laid out from it alone, at its last
+     * constraints, as for an element of fixed size, instead of from its ancestors up. Default off.
      */
     public Layout independent(int slot, boolean value) {
         own(slot);
@@ -792,6 +795,7 @@ public final class Layout {
         growV[s] = G_END;
         textDir[s] = T_INHERIT;
         hidden[s] = false;
+        collapsed[s] = false;
         measured[s] = false;
         width[s] = 0;
         height[s] = 0;
@@ -870,6 +874,7 @@ public final class Layout {
         growV = grow(growV, n);
         textDir = grow(textDir, n);
         hidden = grow(hidden, n);
+        collapsed = grow(collapsed, n);
         measured = grow(measured, n);
         width = grow(width, n);
         height = grow(height, n);
@@ -1143,6 +1148,7 @@ public final class Layout {
     /** Absolute positions, snapped outputs and the changed list for {@code s} and what moved below it. */
     private void visit(int s, float pax, float pay, float scale, boolean force) {
         visitedAt[s] = update;
+        collapsed[s] = false;
         float ax = pax + relX[s];
         float ay = pay + relY[s];
         boolean moved = force || ax != absX[s] || ay != absY[s];
@@ -1160,15 +1166,27 @@ public final class Layout {
     private void visitChildren(int s, float ax, float ay, float scale, boolean moved) {
         float cx = ax - scrollX[s];
         float cy = ay - scrollY[s];
-        // Hidden children get an empty rectangle; their subtrees are not laid out and keep their last outputs.
+        // Hidden children and their subtrees collapse to an empty rectangle (not shown: nothing draws or picks
+        // there); their layout is kept for when they show again.
         for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
             if (hidden[c]) {
-                visitedAt[c] = update;
-                absX[c] = cx;
-                absY[c] = cy;
-                output(c, cx, cy, cx, cy, scale);
+                collapse(c, cx, cy, scale);
             } else {
                 visit(c, cx, cy, scale, moved);
+            }
+        }
+    }
+
+    private void collapse(int s, float x, float y, float scale) {
+        visitedAt[s] = update;
+        absX[s] = x;
+        absY[s] = y;
+        if (!collapsed[s] || outW[s] != 0 || outH[s] != 0) {
+            collapsed[s] = true;
+            output(s, x, y, x, y, scale);
+            for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
+                own(c);
+                collapse(c, x, y, scale);
             }
         }
     }
@@ -1204,7 +1222,8 @@ public final class Layout {
      * what picking and focus check before reading {@link #x}, {@link #y}, {@link #width}, {@link #height}.
      */
     public boolean shown(int slot) {
-        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot];
+        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot]
+            && !collapsed[slot];
     }
 
     /** The element's left edge in UI pixels (snapped). */
@@ -1391,7 +1410,7 @@ public final class Layout {
             long size = measure == null ? 0 : measure.measure(s, iw, iwm, ih, ihm);
             resW = Measure.width(size);
             resH = Measure.height(size);
-        } else if (store.firstChild(s) != UiStore.NONE) {
+        } else if (store.firstChild(s) != UiStore.NONE && !independent[s]) {
             content(s, iw, iwm, ih, ihm, minW - padH, maxW - padH, minH - padV, maxH - padV, rtl);
         } else {
             resW = 0;
