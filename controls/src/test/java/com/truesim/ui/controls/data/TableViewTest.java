@@ -351,6 +351,8 @@ class TableViewTest {
         f.run();
         assertThat(t.currentColumn()).isZero();
         assertThat(t.selectionMode()).isEqualTo(TableView.SelectionMode.CELL);
+        assertThat(t.columnAt(-5)).isEqualTo(-1);
+        assertThat(t.columnAt(500)).isEqualTo(-1);
         f.synthetic.press(UiCommand.ACCEPT); // Name is not editable: selects
         f.run();
         assertThat(t.editing()).isFalse();

@@ -12,7 +12,6 @@ import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.event.DataFormat;
 import com.truesim.ui.core.event.DragOperation;
 import com.truesim.ui.core.event.EventType;
-import com.truesim.ui.core.event.PointerEvents;
 import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.event.UiListener;
 import com.truesim.ui.core.input.Pointer;
@@ -101,7 +100,6 @@ public final class TableView<R> extends VirtualView<R> {
     private int cLast = -1;
 
     private RowCells[] cellsBySlot = new RowCells[64];
-    private int[] columnBySlot = new int[64]; // cell slot -> column id + 1
 
     private final List<Column<R>> sortBy = new ArrayList<>();
     private final List<Boolean> sortAscending = new ArrayList<>();
@@ -587,29 +585,30 @@ public final class TableView<R> extends VirtualView<R> {
         part.add(cell);
         ui.codeLayout(cell, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH);
         layout.anchors(cell.slot(), 0, 0, 0, 1);
-        int slot = cell.slot();
-        if (slot >= columnBySlot.length) {
-            columnBySlot = Arrays.copyOf(columnBySlot, Math.max(slot + 1, columnBySlot.length * 2));
-        }
         cell.semantics(Role.CELL, null);
-        interaction.pickable(cell, PointerEvents.ALL); // clicks find their column; cells show :hover
         return cell;
     }
 
-    void cellColumn(Element cell, int columnId) {
-        int slot = cell.slot();
-        if (slot >= columnBySlot.length) {
-            columnBySlot = Arrays.copyOf(columnBySlot, Math.max(slot + 1, columnBySlot.length * 2));
+    /**
+     * The display position of the column under UI pixel {@code x}, or -1: by the columns' places, so cells need not
+     * be pickable (thousands of cells would fill the picking grid).
+     */
+    public int columnAt(float x) {
+        double local = (x - layout.x(viewport.slot())) / scale();
+        if (local < 0 || local >= horizontal().viewport()) {
+            return -1;
         }
-        columnBySlot[slot] = columnId + 1;
-    }
-
-    /** The display position of the column of the cell {@code slot} is in (or is), or -1. */
-    private int columnAt(int slot) {
-        UiStore store = ui.store();
-        for (int s = slot; s != UiStore.NONE; s = store.parent(s)) {
-            if (s < columnBySlot.length && columnBySlot[s] > 0 && "table-cell".equals(store.type(s))) {
-                return shown.indexOf(columns.get(columnBySlot[s] - 1));
+        int from = 0;
+        int to = frozen;
+        double at = local;
+        if (local >= frozenWidth || frozen == 0) {
+            from = frozen;
+            to = shown.size();
+            at = local + horizontal().position();
+        }
+        for (int d = from; d < to; d++) {
+            if (at >= columnX[d] && at < columnX[d + 1]) {
+                return d;
             }
         }
         return -1;
@@ -661,7 +660,6 @@ public final class TableView<R> extends VirtualView<R> {
             }
             claimed[found] = true;
             column[found] = c.id;
-            table.cellColumn(cells[found], c.id);
             if (hidden[found]) {
                 hidden[found] = false;
                 table.layout.visible(cells[found].slot(), true);
@@ -813,7 +811,7 @@ public final class TableView<R> extends VirtualView<R> {
     @Override
     protected void pressRow(int index, UiEvent e) {
         if (mode == SelectionMode.CELL) {
-            int d = columnAt(e.targetSlot());
+            int d = columnAt(e.x());
             if (d >= 0 && d != currentColumn) {
                 currentColumn = d;
                 shownX = Double.NaN;
@@ -1048,7 +1046,7 @@ public final class TableView<R> extends VirtualView<R> {
         public void handle(UiEvent e) {
             if (e.type() == EventType.CLICK && e.clickCount() == 2) {
                 int index = indexOf(ui.store().element(e.targetSlot()));
-                int d = columnAt(e.targetSlot());
+                int d = columnAt(e.x());
                 if (index >= 0 && d >= 0 && shown.get(d).editable()) {
                     edit(index, shown.get(d));
                     e.consume();
