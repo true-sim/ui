@@ -1,0 +1,13 @@
+// The garish look of docking's OS windows, imported by test-theme.tss: every element differs obviously from the
+// default theme.
+
+dock-window {
+  layout: flex;
+  direction: column;
+  align-items: stretch;
+  padding: 6px;
+  background: box($hot);
+  border: 5px $lime;
+
+  > dock-space { grow: 1; basis: 0px; }
+}

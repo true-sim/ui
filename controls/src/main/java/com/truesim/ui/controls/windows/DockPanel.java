@@ -35,6 +35,13 @@ public final class DockPanel {
     final Element content;
     DockSpace.Tabs tabs;
     boolean floating;
+    // where it last was in the main area: beside the first of these panels still there, at this position (and tab
+    // index for the centre)
+    java.util.List<DockPanel> homeNear = java.util.List.of();
+    DockPosition homePosition = DockPosition.CENTER;
+    int homeIndex = -1;
+    int homeUp; // how far up from the pane of those panels the node it docked beside was
+    float homeShare; // the share of its split it had
     private boolean closable = true;
     Listener listener = NONE;
 
