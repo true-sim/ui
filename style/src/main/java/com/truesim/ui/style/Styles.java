@@ -22,6 +22,7 @@ import com.truesim.ui.style.value.Radii;
 import com.truesim.ui.style.value.Shadow;
 import com.truesim.ui.style.value.Size;
 import com.truesim.ui.style.value.TextAlign;
+import com.truesim.ui.style.value.TextDecoration;
 import com.truesim.ui.style.value.TextOutline;
 import com.truesim.ui.style.value.Track;
 import com.truesim.ui.style.value.Transition;
@@ -108,6 +109,11 @@ public final class Styles {
     public static final StyleKey<TextAlign> TEXT_ALIGN = StyleKey.of("text-align", TextAlign.class, TextAlign.START);
     /** Line height as a multiple of the font size. */
     public static final StyleKey<Float> LINE_HEIGHT = StyleKey.number("line-height", 1.25f, 0.1f, 10);
+    /** Lines with the text, in its colour: {@code underline} (links), {@code line-through}. */
+    public static final StyleKey<TextDecoration> TEXT_DECORATION =
+        StyleKey.of("text-decoration", TextDecoration.class, TextDecoration.NONE);
+    /** The character a password field shows for each of its characters ({@code "•"}); empty: the text itself. */
+    public static final StyleKey<String> TEXT_MASK = StyleKey.of("text-mask", StyleTypes.string(), "");
 
     // ---------------------------------------------------------------- layout of the children
 
