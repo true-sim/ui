@@ -50,6 +50,8 @@ public final class Primitive {
 
     /** Flag: a box's fill is a linear gradient from colour A to colour B. */
     public static final int FLAG_GRADIENT = 1;
+    /** Flag: a glyph's texels are coverage (a hinted raster glyph), not an MTSDF. */
+    public static final int FLAG_RASTER = 2;
 
     /** Word offsets. */
     public static final int HEADER = 0;

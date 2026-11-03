@@ -46,6 +46,7 @@ class DrawListTest {
         list.image(0, 0, 8, 8, 0, 0, 1, 1, 3, Rgba.WHITE);
         list.nineSlice(0, 0, 80, 40, 0, 0, 1, 1, 4, Rgba.WHITE, 8, 8, 8, 8, 12, 12, 12, 255);
         list.line(0, 0, 10, 10, 2, Rgba.WHITE);
+        list.rasterGlyph(3, 4, 9, 12, 0.5f, 0, 1, 0.25f, 7, Rgba.WHITE);
         assertThat(list.end()).isTrue();
 
         assertThat(Primitive.flags(list.header(start))).isEqualTo(Primitive.FLAG_GRADIENT);
@@ -62,6 +63,13 @@ class DrawListTest {
         assertThat(Primitive.kind(list.header(start + 3))).isEqualTo(Primitive.IMAGE);
         assertThat(list.intAt(start + 4, Primitive.SOURCE_INSETS) >>> 24).isEqualTo(255);
         assertThat(Primitive.kind(list.header(start + 5))).isEqualTo(Primitive.LINE);
+        assertThat(Primitive.kind(list.header(start + 6))).isEqualTo(Primitive.GLYPH);
+        assertThat(Primitive.flags(list.header(start + 6))).isEqualTo(Primitive.FLAG_RASTER);
+        assertThat(Primitive.flags(list.header(start + 2))).as("an MTSDF glyph").isZero();
+        assertThat(list.intAt(start + 6, Primitive.TEXTURE)).isEqualTo(7);
+        assertThat(list.intAt(start + 6, Primitive.UV) & 0xFFFF).isEqualTo(32768); // 0.5
+        assertThat(list.floatAt(start + 6, Primitive.X1)).isEqualTo(9);
+        assertThat(list.floatAt(start + 6, Primitive.PIXEL_RANGE)).isZero();
         float[] clips = list.clips();
         assertThat(list.clipCount()).isEqualTo(2);
         assertThat(clips[clip * DrawList.CLIP_FLOATS + 4]).isEqualTo(4);

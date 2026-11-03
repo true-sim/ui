@@ -195,6 +195,19 @@ public final class DrawList {
         emit(p);
     }
 
+    /**
+     * A raster glyph ({@link Primitive#FLAG_RASTER}): the quad {@code x0..y1} on screen, on whole pixels, shows
+     * coverage region {@code u0..v1} of {@code texture} texel for pixel, in {@code color}.
+     */
+    public void rasterGlyph(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
+        int texture, long color) {
+        int[] p = start(Primitive.GLYPH, Primitive.FLAG_RASTER, x0, y0, x1, y1, color, 0);
+        p[Primitive.UV] = Primitive.unorm16(u0, v0);
+        p[Primitive.UV + 1] = Primitive.unorm16(u1, v1);
+        p[Primitive.TEXTURE] = texture; // pixel range, outline and weight stay 0
+        emit(p);
+    }
+
     /** An image: region {@code u0..v1} of {@code texture}, multiplied by {@code tint}. */
     public void image(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int texture,
         long tint) {

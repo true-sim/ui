@@ -217,4 +217,34 @@ class UiStoreTest {
         assertThatThrownBy(() -> Tunable.of("x", 5, 0, 1, "")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Tunable.of("x", -1, 0, 1, "")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void choiceTunablesHoldAnOptionsIndex() {
+        Tunable mode = Tunable.choice("ui.text.smallText", List.of("HINTED", "MTSDF"), "MTSDF", "small text");
+        assertThat(mode.isChoice()).isTrue();
+        assertThat(mode.options()).containsExactly("HINTED", "MTSDF");
+        assertThat(mode.index()).isEqualTo(1);
+        assertThat(mode.option()).isEqualTo("MTSDF");
+        assertThat(mode).hasToString("ui.text.smallText=MTSDF");
+        assertThat(mode.initial()).isEqualTo(1);
+        assertThat(mode.min()).isEqualTo(0);
+        assertThat(mode.max()).isEqualTo(1);
+        long v = mode.version();
+        mode.select("HINTED");
+        assertThat(mode.index()).isZero();
+        assertThat(mode.version()).isEqualTo(v + 1);
+        mode.set(0.7f);
+        assertThat(mode.get()).as("rounded to an index").isEqualTo(1);
+        mode.set(9);
+        assertThat(mode.option()).isEqualTo("MTSDF");
+        assertThat(Tunable.of("n", 1, 0, 2, "").isChoice()).isFalse();
+        assertThat(Tunable.of("n", 1, 0, 2, "").option()).isNull();
+        assertThat(Tunable.of("n", 1, 0, 2, "").options()).isEmpty();
+        assertThatThrownBy(() -> mode.select("SOFT")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Tunable.choice("x", List.of(), "A", "")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Tunable.choice("x", List.of("A", "A"), "A", ""))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Tunable.choice("x", List.of("A"), "B", ""))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
 }
