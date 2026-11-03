@@ -65,9 +65,11 @@ import java.util.List;
  * drag and debug layers made when first asked for ({@link #layer}), each with its own draw list; {@link #layers()}
  * hands them to the renderer back to front.
  *
- * <p><b>Input.</b> {@link #update(float, float, UiInput, long)} processes the frame's input first, through the
- * {@link Interaction} (picking against what was drawn last, events, states, focus, commands, text), then resolves
- * styles, lays out and records, so whatever the input changed shows in the same frame.
+ * <p><b>The frame, in two phases</b> (no frame of latency either way). {@link #input(UiInput, long)} at the frame's
+ * start processes its input through the {@link Interaction} (picking against what was drawn last, events, states,
+ * focus, commands, text), so the game's update after it sees this frame's clicks; {@link #update(float, float)} after
+ * the game's update runs the frame listeners, animations, styles, layout and recording, so whatever the input and the
+ * game changed shows in the same frame. {@link #update(float, float, UiInput, long)} does both at once.
  *
  * <pre>{@code
  * Ui ui = new Ui(Tss.defaultTheme(), textSystem);
@@ -77,13 +79,15 @@ import java.util.List;
  * ui.on(health, EventType.CLICK, e -> heal());
  * // each frame:
  * input.beginFrame(); sources.poll(input);
+ * ui.input(input, System.nanoTime());   // clicks reach heal() now
+ * game.update();                        // ... which the game's update sees
  * ui.text(health, hpText);
- * ui.update(width, height, input, System.nanoTime());
+ * ui.update(width, height);             // and its changes show this frame
  * renderer.submit(ui.layers(), ui.layerCount(), ui.textures(), width, height);
  * }</pre>
  *
  * <p><b>Animation.</b> Changed styles animate the keys their {@code transition} names ({@link Animator#restyled}),
- * driven by the clock {@link #update(float, float, UiInput, long)} is given; {@link #visuals()} holds the per-element
+ * driven by the clock {@link #input(UiInput, long)} is given; {@link #visuals()} holds the per-element
  * values animations and controls write over the style (opacity, scale, drawn offsets, colours, sizes, offsets,
  * anchors). An element's opacity and scale (its style's or animated) apply to its whole subtree.
  *
@@ -197,6 +201,8 @@ public final class Ui {
     private FrameListener[] listeners = new FrameListener[4];
     private int listenerCount;
     private UiInput frameInput;
+    private long frameNanos;
+    private boolean inputGiven; // input() was called since the last update()
 
     private boolean[] rebuild = new boolean[8];
     private boolean[] rebuilt = new boolean[8];
@@ -527,7 +533,10 @@ public final class Ui {
         }
     }
 
-    /** The input of the frame being updated (null in frames without input): for frame listeners. */
+    /**
+     * The input of the frame being updated: what {@link #input(UiInput, long)} processed this frame, in both phases
+     * (null in frames without input): for frame listeners.
+     */
     public UiInput input() {
         return frameInput;
     }
@@ -574,32 +583,47 @@ public final class Ui {
     // ---------------------------------------------------------------- the frame
 
     /**
-     * Brings the UI up to date for a {@code width x height} pixel screen without input: hands over finished glyphs,
-     * applies a reloaded sheet and token changes, resolves the styles of changed elements, lays out what changed and
-     * records what changed. Call once a frame, after game code changed the UI's state, before submitting.
+     * The frame's first phase, at its start: processes {@code input} (null: none) at time {@code nanos} on the UI
+     * clock (real time, for long presses, double clicks and tooltips). Pointers are picked against the layout drawn
+     * last frame, events dispatched, states and focus changed, commands and text routed, so game code running after it
+     * sees this frame's clicks, focus and text. Fill {@code input} first ({@link UiInput#beginFrame()}, then the
+     * sources). The second phase, {@link #update(float, float)}, follows after the game's update; listeners there read
+     * this input through {@link #input()}.
      */
-    public void update(float width, float height) {
-        update(width, height, null, 0);
-    }
-
-    /**
-     * As {@link #update(float, float)}, first processing {@code input} (null: none) at time {@code nanos} on the UI
-     * clock (real time, for long presses, double clicks and tooltips): pointers are picked against the layout drawn
-     * last frame, events dispatched, states and focus changed, commands and text routed, all before styles and layout,
-     * so the frame shows their effects. Fill {@code input} first ({@link UiInput#beginFrame()}, then the sources).
-     */
-    public void update(float width, float height, UiInput input, long nanos) {
-        frames++;
-        recorded = 0;
+    public void input(UiInput input, long nanos) {
         if (layerStack.version() != seenLayers) {
             seenLayers = layerStack.version();
             ensure();
             rebuildAll();
         }
         frameInput = input;
+        frameNanos = nanos;
+        inputGiven = true;
         if (input != null) {
             interaction.process(input, nanos);
             ensure();
+        }
+    }
+
+    /**
+     * The frame's second phase: brings the UI up to date for a {@code width x height} pixel screen: runs the frame
+     * listeners (with the input and time of this frame's {@link #input}, if it had one), animations, hands over
+     * finished glyphs, applies a reloaded sheet and token changes, resolves the styles of changed elements, lays out
+     * and records what changed. Call once a frame after game code changed the UI's state (so its changes show in this
+     * frame), before submitting. Without an {@link #input} call this frame it runs without input, at time 0.
+     */
+    public void update(float width, float height) {
+        frames++;
+        recorded = 0;
+        long nanos = inputGiven ? frameNanos : 0;
+        if (!inputGiven) {
+            frameInput = null;
+        }
+        inputGiven = false;
+        if (layerStack.version() != seenLayers) {
+            seenLayers = layerStack.version();
+            ensure();
+            rebuildAll();
         }
         for (int i = 0; i < listenerCount; i++) {
             listeners[i].frame(nanos);
@@ -643,6 +667,16 @@ public final class Ui {
             layOut(width, height);
         }
         recordChanges();
+    }
+
+    /**
+     * Both phases at once: {@link #input(UiInput, long)} then {@link #update(float, float)}, for a frame whose game code
+     * changes nothing in between (tests, tools). An engine calls {@code input} at the frame's start and {@code update}
+     * after the game's update, so neither the game's reaction to input nor its changes to the UI wait a frame.
+     */
+    public void update(float width, float height, UiInput input, long nanos) {
+        input(input, nanos);
+        update(width, height);
     }
 
     /** Records what changed into the layers' draw lists and ends the frame. */
