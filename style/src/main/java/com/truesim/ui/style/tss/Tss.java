@@ -1,16 +1,19 @@
 package com.truesim.ui.style.tss;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.ui.style.StyleKeyProvider;
 import com.truesim.ui.style.StyleKeys;
 import com.truesim.ui.style.StyleSheet;
 import com.truesim.ui.style.Styles;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.ServiceLoader;
 
 /**
  * Compiles {@code .tss} ("true-sim style sheets", a Sass-like language) into typed {@link StyleSheet}s, all at load
- * time. Keys are found by name in {@link StyleKeys}: the standard {@link Styles} always, and the keys of the holder
- * classes passed in (a control's style keys), so a new control's keys are usable at once.
+ * time. Keys are found by name in {@link StyleKeys}: the standard {@link Styles} always, those of every
+ * {@link StyleKeyProvider} on the class path (the controls' keys), and those of the holder classes passed in, so a new
+ * control's keys are usable at once.
  *
  * <pre>{@code
  * StyleSheet theme = Tss.defaultTheme();
@@ -32,6 +35,9 @@ public final class Tss {
     /** Compiles {@code path} from {@code loader}, after loading the keys of {@code keyHolders}. */
     public static Compilation compile(SourceLoader loader, String path, Class<?>... keyHolders) {
         StyleKeys.load(Styles.class);
+        for (StyleKeyProvider provider : ServiceLoader.load(StyleKeyProvider.class, Tss.class.getClassLoader())) {
+            StyleKeys.load(provider.holders().toArray(new Class<?>[0]));
+        }
         StyleKeys.load(keyHolders);
         return new Compiler(loader).compile(path);
     }
