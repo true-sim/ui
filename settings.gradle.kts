@@ -21,12 +21,14 @@ rootProject.name = "ui"
 
 // Each module is published on its own, so a tool or server takes only what it needs. Only ui-text-native has native
 // libraries (LWJGL's FreeType, HarfBuzz, msdfgen); the others need the JDK and true-sim's repositories alone.
-include("ui-core", "ui-style", "ui-layout", "ui-text", "ui-text-native", "ui-controls", "ui-testkit")
+include("ui-core", "ui-style", "ui-layout", "ui-text", "ui-text-native", "ui-fonts", "ui-fonts-cjk", "ui-controls", "ui-testkit")
 project(":ui-core").projectDir = file("core")
 project(":ui-style").projectDir = file("style")
 project(":ui-layout").projectDir = file("layout")
 project(":ui-text").projectDir = file("text")
 project(":ui-text-native").projectDir = file("text-native")
+project(":ui-fonts").projectDir = file("fonts")
+project(":ui-fonts-cjk").projectDir = file("fonts-cjk")
 project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
 

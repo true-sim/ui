@@ -73,8 +73,11 @@ public final class SystemFonts {
     private SystemFonts() {
     }
 
-    /** The known fonts found in this machine's font directories. */
+    /** The known fonts found in this machine's font directories; none with {@code TRUESIM_SYSTEM_FONTS=false}. */
     public static List<FontSource> discover() {
+        if ("false".equals(System.getenv("TRUESIM_SYSTEM_FONTS"))) {
+            return List.of(); // a machine without fonts, as a CI runner may be: checks that bundled fonts suffice
+        }
         List<Path> dirs = new ArrayList<>();
         String windir = System.getenv("WINDIR");
         if (windir != null) {
