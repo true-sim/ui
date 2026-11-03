@@ -144,6 +144,9 @@ public final class Overlays implements Ui.FrameListener {
     public void afterLayout() {
         for (int i = 0; i < count; i++) {
             Overlay o = showing[i];
+            if (o.appearing) {
+                o.appear(); // styled now: fades in by its opacity transition
+            }
             if (o.anchor() == null && !o.centredNow()) {
                 continue;
             }

@@ -1,6 +1,9 @@
 package com.truesim.ui.controls.overlay;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.ui.controls.anim.Animator;
+import com.truesim.ui.style.Styles;
+import com.truesim.ui.style.value.Transition;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Layer;
 import com.truesim.ui.core.Role;
@@ -57,6 +60,9 @@ public final class Overlay {
     int index = -1;
     private final Runnable cancel = new Cancel();
     private final UiListener backdropPress = new BackdropPress();
+    private final Animator.Listener faded = new Faded();
+    boolean appearing; // shown this frame: fades in from transparent once styled (Overlays.afterLayout)
+    private boolean fadingOut;
 
     @AllowAllocation("overlays are made when a UI is built")
     Overlay(Overlays owner, Element root, Layer layer) {
@@ -224,6 +230,8 @@ public final class Overlay {
         host.add(root);
         boolean was = showing;
         showing = true;
+        appearing = !was;
+        fadingOut = false; // shown again while fading out: fades back in from where it is
         anchorVisible = true;
         applyInput();
         owner.shown(this);
@@ -233,22 +241,105 @@ public final class Overlay {
         return this;
     }
 
-    /** Hides the overlay: its root (and backdrop) leave the layer; focus returns from a modal one. */
+    /**
+     * Hides the overlay: its root (and backdrop) leave the layer, after fading out when its style has an
+     * {@code opacity} transition (taking no input meanwhile); focus returns from a modal one at once.
+     */
     public void hide() {
         if (!showing) {
             return;
         }
         showing = false;
+        appearing = false;
         if (modal) {
             owner.interaction().popModal(root);
         }
-        if (root.alive() && root.parent() != null) {
-            root.detach();
-        }
-        if (backdrop != null && backdrop.parent() != null) {
-            backdrop.detach();
-        }
         owner.hidden(this);
+        boolean rootFades = fade(root, 0, true);
+        boolean backdropFades = backdrop != null && fade(backdrop, 0, true);
+        fadingOut = rootFades || backdropFades;
+        if (fadingOut) {
+            owner.interaction().pickable(root, PointerEvents.NONE);
+            if (backdrop != null) {
+                owner.interaction().pickable(backdrop, PointerEvents.NONE);
+            }
+        }
+        if (!rootFades) {
+            detach(root);
+        }
+        if (!backdropFades && backdrop != null) {
+            detach(backdrop);
+        }
+    }
+
+    /** Whether it is fading out after {@link #hide()} (still on its layer, taking no input). */
+    public boolean fadingOut() {
+        return fadingOut;
+    }
+
+    /** Fades it in from transparent: the first frame it is styled after {@link #show()}. */
+    void appear() {
+        appearing = false;
+        fade(root, 1, false);
+        if (backdrop != null) {
+            fade(backdrop, 1, false);
+        }
+    }
+
+    /**
+     * Animates {@code e}'s opacity out (to 0) or in (from 0 to its style's) by its style's {@code opacity}
+     * transition; false (nothing animated) without one, with animations off, or when {@code e} is not shown.
+     */
+    private boolean fade(Element e, float target, boolean out) {
+        if (!e.alive() || e.parent() == null || Animator.SPEED.get() <= 0) {
+            return false;
+        }
+        com.truesim.ui.style.ResolvedStyle s = owner.ui().styles().styleOf(e.slot());
+        Transition t = Animator.find(s.get(Styles.TRANSITION), "opacity");
+        if (t == null || t.duration() <= 0) {
+            return false;
+        }
+        Animator a = owner.ui().animator();
+        float styled = s.getFloat(Styles.OPACITY);
+        if (out) {
+            a.animate(e.slot(), Animator.OPACITY, Float.NaN, 0, t.duration(), t.easing(), true, faded);
+        } else {
+            a.animate(e.slot(), Animator.OPACITY, a.running(e.slot(), Animator.OPACITY) ? Float.NaN : 0, styled,
+                t.duration(), t.easing(), false, null);
+        }
+        return true;
+    }
+
+    private void detach(Element e) {
+        if (!e.alive()) {
+            return;
+        }
+        if (e.parent() != null) {
+            e.detach();
+        }
+        owner.ui().visuals().clear(e.slot(), com.truesim.ui.controls.anim.Visuals.OPACITY);
+    }
+
+    /** A fade-out ended: what faded leaves the layer, unless the overlay was shown again meanwhile. */
+    private final class Faded implements Animator.Listener {
+        @Override
+        public void finished(int key, int channel, boolean completed) {
+            if (!fadingOut || !completed) {
+                return;
+            }
+            if (key == root.slot()) {
+                detach(root);
+            } else if (backdrop != null && key == backdrop.slot()) {
+                detach(backdrop);
+            }
+            if (root.parent() == null && (backdrop == null || backdrop.parent() == null)) {
+                fadingOut = false;
+                applyInput();
+                if (backdrop != null) {
+                    owner.interaction().pickable(backdrop, PointerEvents.ALL);
+                }
+            }
+        }
     }
 
     /** Tells the listener the user dismissed the overlay (by default it hides). */

@@ -173,4 +173,53 @@ class OverlayTest {
         assertThat(o.toString()).contains("showing");
         assertThat(f.mouse(30, 30, Pointer.PRIMARY).ui.interaction().overUi(0)).isTrue();
     }
+
+    @Test
+    void anOverlayFadesInAndOutByItsOpacityTransitionAndTakesNoInputWhileFadingOut() {
+        Fx f = new Fx(Tss.compileString("fade.tss", """
+            layer { layout: none; }
+            panel { layout: none; }
+            panel.tip { width: 100px; height: 40px; transition: opacity 100ms linear; }
+            backdrop { background: box(rgba(black, 0.5)); transition: opacity 200ms linear; }
+            """), false);
+        Element tip = f.ui.panel("tip");
+        Overlay o = f.overlays.create(tip, Layers.MODAL).input(OverlayInput.BLOCK_SCREEN).centred();
+        f.run();
+        o.show();
+        f.run();
+        com.truesim.ui.controls.anim.Animator a = f.ui.animator();
+        assertThat(a.running(tip.slot(), com.truesim.ui.controls.anim.Animator.OPACITY)).isTrue();
+        assertThat(a.running(o.backdrop().slot(), com.truesim.ui.controls.anim.Animator.OPACITY)).isTrue();
+        f.idle(0.3);
+        assertThat(a.running(tip.slot(), com.truesim.ui.controls.anim.Animator.OPACITY)).isFalse();
+        o.hide();
+        f.run();
+        assertThat(o.showing()).isFalse();
+        assertThat(o.fadingOut()).isTrue();
+        assertThat(tip.parent()).isNotNull(); // still fading
+        assertThat(f.ui.interaction().pickable(tip.slot())).isFalse();
+        f.idle(0.12);
+        assertThat(tip.parent()).isNull(); // the overlay's own fade ended
+        assertThat(o.backdrop().parent()).isNotNull(); // the backdrop's is longer
+        f.idle(0.15);
+        assertThat(o.backdrop().parent()).isNull();
+        assertThat(o.fadingOut()).isFalse();
+        // shown again while fading out: back without leaving
+        o.show();
+        f.idle(0.3);
+        o.hide();
+        f.run();
+        o.show();
+        f.idle(0.3);
+        assertThat(tip.parent()).isNotNull();
+        assertThat(o.fadingOut()).isFalse();
+        // animations off: hidden at once
+        com.truesim.ui.controls.anim.Animator.SPEED.set(0);
+        try {
+            o.hide();
+            assertThat(tip.parent()).isNull();
+        } finally {
+            com.truesim.ui.controls.anim.Animator.SPEED.set(1);
+        }
+    }
 }
