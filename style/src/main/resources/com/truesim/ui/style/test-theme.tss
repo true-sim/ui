@@ -45,6 +45,17 @@ panel {
   &:pressed { scale: 0.85; }
   &:focused { border: 7px var(--fg); }
   &:disabled { opacity: 0.3; }
+  &:focus-visible { focus-ring: 6px $lime; focus-ring-offset: 5px; }
+  &:drop-target { background: box($sun); border: 9px $hot; }
+  &:dragging { opacity: 0.2; scale: 1.3; }
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+layer {
+  layout: none;
+  cursor: wait;
+  clip: true;
 }
 
 label {

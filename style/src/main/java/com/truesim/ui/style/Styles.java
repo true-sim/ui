@@ -1,6 +1,8 @@
 package com.truesim.ui.style;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.ui.core.event.PointerEvents;
+import com.truesim.ui.core.input.Cursor;
 import com.truesim.ui.style.value.Align;
 import com.truesim.ui.style.value.Anchors;
 import com.truesim.ui.style.value.Border;
@@ -60,6 +62,27 @@ public final class Styles {
         StyleKey.of("transition", StyleTypes.transitions(), List.of());
     /** What an image element shows: {@code "icons/heart" #ff4040 contain}. */
     public static final StyleKey<ImageSpec> IMAGE = StyleKey.of("image", StyleTypes.image(), ImageSpec.NONE);
+
+    // ---------------------------------------------------------------- interaction (read by the UI frame for picking)
+
+    /**
+     * Whether pointers hit the element: {@code auto} (when it is interactive: listening, focusable), {@code none}
+     * (never; its descendants still can), {@code all} (always: an opaque surface that keeps pointers from what is
+     * below).
+     */
+    public static final StyleKey<PointerEvents> POINTER_EVENTS =
+        StyleKey.of("pointer-events", PointerEvents.class, PointerEvents.AUTO);
+    /** Whether the element clips its descendants to its rounded box, in drawing and in picking. */
+    public static final StyleKey<Boolean> CLIP = StyleKey.of("clip", StyleTypes.bool(), false);
+    /** The pointer's shape over the element: {@code auto} (the parent's), {@code pointer}, {@code text}, ... */
+    public static final StyleKey<Cursor> CURSOR = StyleKey.of("cursor", Cursor.class, Cursor.AUTO);
+    /**
+     * A ring drawn around the element (outside its border by {@code focus-ring-offset}), following its radii: themes
+     * set it under {@code :focus-visible}, so keyboard and gamepad focus shows and a clicked control does not.
+     */
+    public static final StyleKey<Border> FOCUS_RING = StyleKey.of("focus-ring", StyleTypes.border(), Border.NONE);
+    /** How far the focus ring lies outside the element's border box (negative: inside). */
+    public static final StyleKey<Float> FOCUS_RING_OFFSET = StyleKey.number("focus-ring-offset", 2, -64, 64);
 
     // ---------------------------------------------------------------- text
 

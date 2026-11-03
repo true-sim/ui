@@ -71,4 +71,34 @@ class TestkitTest {
         assertThat(input.pointerAt(0).x()).isEqualTo(5);
         assertThat(input.pointerAt(0).buttons()).isEqualTo(Pointer.PRIMARY);
     }
+
+    @Test
+    void syntheticPointersKeepTheirStateUntilLifted() {
+        SyntheticInput synthetic = new SyntheticInput()
+            .pointer(3, Pointer.Kind.TOUCH, 10, 20, Pointer.PRIMARY).player(3, 1).modifiers(3, Pointer.SHIFT)
+            .scroll(3, 0, 2).command(UiCommand.UP, 2, UiInput.EXTEND_SELECTION).compose("ka", 1);
+        UiInput input = new UiInput(8);
+        synthetic.poll(input);
+        Pointer finger = input.pointerAt(0);
+        assertThat(finger.id()).isEqualTo(3);
+        assertThat(finger.kind()).isEqualTo(Pointer.Kind.TOUCH);
+        assertThat(finger.player()).isEqualTo(1);
+        assertThat(finger.modifiers()).isEqualTo(Pointer.SHIFT);
+        assertThat(finger.scrollY()).isEqualTo(2);
+        assertThat(input.player(0)).isEqualTo(2);
+        assertThat(input.flags(0)).isEqualTo(UiInput.EXTEND_SELECTION);
+        assertThat(input.composition().toString()).isEqualTo("ka");
+        assertThat(input.compositionCursor()).isEqualTo(1);
+        input.beginFrame();
+        synthetic.poll(input);
+        assertThat(input.pointerAt(0).scrollY()).isZero(); // scroll is handed over once
+        assertThat(input.pointerAt(0).x()).isEqualTo(10);
+        synthetic.lift(3).lift(99).poll(input);
+        assertThat(input.pointerCount()).isZero();
+        for (int i = 0; i < UiInput.MAX_POINTERS; i++) {
+            synthetic.pointer(i, Pointer.Kind.PEN, i, i, 0);
+        }
+        assertThatThrownBy(() -> synthetic.pointer(99, Pointer.Kind.PEN, 0, 0, 0))
+            .isInstanceOf(IllegalStateException.class);
+    }
 }

@@ -1,8 +1,10 @@
 // The toolkit's default theme: a neutral, quiet dark game HUD. It is an ordinary style sheet, loaded like any other,
 // so everything presentational in the toolkit is styled here and a theme replaces all of it.
 //
-// Element types: panel, label, image. Style names (inherited by children that have none): hud (the HUD's root),
-// card (a raised group), title, value, caption (text roles), primary, danger (emphasis), meter (a bar and its fill).
+// Element types: panel, label, image, layer (the root of a UI layer: layer#popup, layer#modal...). Style names
+// (inherited by children that have none): hud (the HUD's root), card (a raised group), title, value, caption (text
+// roles), primary, danger (emphasis), meter (a bar and its fill). States: hover, pressed, focused, focus-visible
+// (focus from keys or a gamepad: the focus ring), disabled, drop-target (accepts what is dragged over it), dragging.
 
 @use "tokens";
 @use "mixins" as *;
@@ -72,9 +74,20 @@ panel {
   layout: stack;
   direction: column;
   gap: tokens.$space-s;
+  focus-ring-offset: 2px;
   @include reactive;
 
-  &:disabled { opacity: 0.45; }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:drop-target { background: box(rgba(#3fa7ff, 0.18)); border: 1px var(--accent); }
+  &:dragging { opacity: 0.55; }
+}
+
+// ------------------------------------------------------------------ layers
+
+// A layer's root covers the screen; its children (pop-ups, tooltips, dialogs) sit at their offsets.
+layer {
+  layout: none;
 }
 
 panel.hud {
@@ -90,6 +103,7 @@ panel.card {
   padding: tokens.$space-m tokens.$space-l;
   gap: space(1.5);
   @include raised(1);
+  pointer-events: all; // a card is a surface: it takes the pointer (and shows :hover) even without listeners
 
   &:hover { background: box(var(--surface-raised)); }
 }
@@ -98,6 +112,7 @@ panel.primary {
   background: box(var(--accent));
   radius: tokens.$radius-s;
   padding: tokens.$space-s tokens.$space-m;
+  cursor: pointer;
 
   &:hover { background: box(lighten(var(--accent), 8%)); }
   &:pressed { scale: 0.97; background: box(darken(var(--accent), 6%)); }
@@ -108,6 +123,7 @@ panel.danger {
   background: box(var(--danger));
   radius: tokens.$radius-s;
   padding: tokens.$space-s tokens.$space-m;
+  cursor: pointer;
 }
 
 // a meter is a track; its child panel is the fill, sized by the control
@@ -118,6 +134,7 @@ panel.meter {
   height: 8px;
   min-width: 80px;
   background: box(var(--track));
+  clip: true; // the fill stays inside the rounded track
   @include pill(0, 0);
 
   > panel { background: box(var(--good)); radius: 999px; }

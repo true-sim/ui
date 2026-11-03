@@ -2,6 +2,8 @@ package com.truesim.ui.controls;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.Element;
+import com.truesim.ui.core.Layer;
+import com.truesim.ui.core.Layers;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.Tunable;
 import com.truesim.ui.core.UiStore;
@@ -9,6 +11,14 @@ import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.draw.UiTexture;
 import com.truesim.ui.core.draw.UiTextures;
+import com.truesim.ui.core.event.DragSession;
+import com.truesim.ui.core.event.EventType;
+import com.truesim.ui.core.event.Interaction;
+import com.truesim.ui.core.event.PickGeometry;
+import com.truesim.ui.core.event.PointerEvents;
+import com.truesim.ui.core.event.UiListener;
+import com.truesim.ui.core.input.Cursor;
+import com.truesim.ui.core.input.UiInput;
 import com.truesim.ui.layout.Layout;
 import com.truesim.ui.layout.Measure;
 import com.truesim.ui.layout.Unit;
@@ -46,17 +56,28 @@ import java.util.List;
  * uploaded. A frame where nothing changed costs a few comparisons and allocates nothing.
  *
  * <p>Everything presentational comes from the style sheet ({@link Styles}' keys): sizes, colours, fonts, spacing,
- * radii, borders, shadows, images, layout. Code makes elements, sets their type, id, style name, state and text.
+ * radii, borders, shadows, images, layout, clipping, focus rings, cursors, pointer-events. Code makes elements, sets
+ * their type, id, style name, state and text, and listens to their events.
+ *
+ * <p><b>Layers.</b> The UI is a stack of {@link Layers}: the HUD (the {@link #root()}) and pop-up, tooltip, modal,
+ * drag and debug layers made when first asked for ({@link #layer}), each with its own draw list; {@link #layers()}
+ * hands them to the renderer back to front.
+ *
+ * <p><b>Input.</b> {@link #update(float, float, UiInput, long)} processes the frame's input first, through the
+ * {@link Interaction} (picking against what was drawn last, events, states, focus, commands, text), then resolves
+ * styles, lays out and records, so whatever the input changed shows in the same frame.
  *
  * <pre>{@code
  * Ui ui = new Ui(Tss.defaultTheme(), textSystem);
  * Element hud = ui.panel("hud");
  * Element health = ui.label("value", "100");
  * ui.root().add(hud.add(health));
+ * ui.on(health, EventType.CLICK, e -> heal());
  * // each frame:
+ * input.beginFrame(); sources.poll(input);
  * ui.text(health, hpText);
- * ui.update(width, height);
- * renderer.submit(ui.layers(), 1, ui.textures(), width, height);
+ * ui.update(width, height, input, System.nanoTime());
+ * renderer.submit(ui.layers(), ui.layerCount(), ui.textures(), width, height);
  * }</pre>
  */
 public final class Ui {
@@ -81,9 +102,10 @@ public final class Ui {
     private final TextSystem text;
     private final UiTextures textures;
     private final UiImages images;
-    private final DrawList list = new DrawList();
-    private final DrawList[] layers = {list};
+    private final Layers layerStack;
+    private final Interaction interaction;
     private final Measure measure = this::measure;
+    private DrawList rec; // the list being recorded
     private StyleWatcher watcher;
 
     // per slot
@@ -95,8 +117,18 @@ public final class Ui {
     private long[] appliedVersion = new long[0];
     private int[] textSlots = new int[16];
     private int textSlotCount;
+    private int[] clipOf = new int[0]; // the clip index the element's primitives use
+    private int[] ownClip = new int[0]; // the clip index the element gives its descendants, 0 if it clips nothing
+    private int[] clipOwner = new int[0]; // the nearest clipping ancestor, or NONE
+    private int[] clipStamp = new int[0];
+    private float[] clipRect = new float[0];
+    private int clipPass;
+    private boolean clipsMoved;
+    private final Element[] previews = new Element[UiInput.MAX_POINTERS];
 
-    private boolean rebuild = true;
+    private boolean[] rebuild = new boolean[8];
+    private boolean[] rebuilt = new boolean[8];
+    private long seenLayers = -1;
     private boolean worldSpace;
     private long seenCompletions = -1;
     private long seenTechnique = -1;
@@ -122,6 +154,8 @@ public final class Ui {
         }
         this.textures = own;
         this.images = new UiImages(own);
+        this.layerStack = new Layers(store);
+        this.interaction = new Interaction(layerStack, new Geometry());
         ensure();
         store.semantics(store.rootSlot(), Role.GROUP, null);
     }
@@ -132,9 +166,34 @@ public final class Ui {
 
     // ---------------------------------------------------------------- building
 
-    /** The root: the screen the UI covers. */
+    /** The root: the screen the UI covers, the root of the {@link Layers#HUD} layer. */
     public Element root() {
         return store.root();
+    }
+
+    /**
+     * The layer named {@code name} ({@link Layers#POPUP} and the other standard names), made the first time it is
+     * asked for; add content under its {@link Layer#root()}.
+     */
+    public Layer layer(String name) {
+        Layer layer = layerStack.get(name);
+        ensure();
+        return layer;
+    }
+
+    /** The layer stack: custom layers ({@link Layers#add}), inputs and modality per layer. */
+    public Layers layerStack() {
+        return layerStack;
+    }
+
+    /** The interaction: listeners, focus, capture, drag sessions, clipboard and text input. */
+    public Interaction interaction() {
+        return interaction;
+    }
+
+    /** Listens to events of {@code type} at {@code element}: {@link Interaction#on}. */
+    public void on(Element element, EventType type, UiListener listener) {
+        interaction.on(element, type, listener);
     }
 
     /** A new panel (type {@code panel}) with style name {@code style} (or null). */
@@ -231,7 +290,13 @@ public final class Ui {
             }
         }
         content[slot] = NONE;
-        rebuild = true;
+        rebuildAll();
+    }
+
+    private void rebuildAll() {
+        for (int i = 0; i < rebuild.length; i++) {
+            rebuild[i] = true;
+        }
     }
 
     /**
@@ -271,19 +336,48 @@ public final class Ui {
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
             applied = Arrays.copyOf(applied, n);
             appliedVersion = Arrays.copyOf(appliedVersion, n);
+            clipOf = Arrays.copyOf(clipOf, n);
+            ownClip = Arrays.copyOf(ownClip, n);
+            clipOwner = Arrays.copyOf(clipOwner, n);
+            clipStamp = Arrays.copyOf(clipStamp, n);
+            clipRect = Arrays.copyOf(clipRect, n * 4);
+        }
+        if (rebuild.length < layerStack.count()) {
+            rebuild = Arrays.copyOf(rebuild, layerStack.count() * 2);
+            rebuilt = Arrays.copyOf(rebuilt, layerStack.count() * 2);
         }
     }
 
     // ---------------------------------------------------------------- the frame
 
     /**
-     * Brings the UI up to date for a {@code width x height} pixel screen: hands over finished glyphs, applies a
-     * reloaded sheet and token changes, resolves the styles of changed elements, lays out what changed and records
-     * what changed. Call once a frame, after input and game code changed the UI's state, before submitting.
+     * Brings the UI up to date for a {@code width x height} pixel screen without input: hands over finished glyphs,
+     * applies a reloaded sheet and token changes, resolves the styles of changed elements, lays out what changed and
+     * records what changed. Call once a frame, after game code changed the UI's state, before submitting.
      */
     public void update(float width, float height) {
+        update(width, height, null, 0);
+    }
+
+    /**
+     * As {@link #update(float, float)}, first processing {@code input} (null: none) at time {@code nanos} on the UI
+     * clock (real time, for long presses, double clicks and tooltips): pointers are picked against the layout drawn
+     * last frame, events dispatched, states and focus changed, commands and text routed, all before styles and layout,
+     * so the frame shows their effects. Fill {@code input} first ({@link UiInput#beginFrame()}, then the sources).
+     */
+    public void update(float width, float height, UiInput input, long nanos) {
         frames++;
         recorded = 0;
+        if (layerStack.version() != seenLayers) {
+            seenLayers = layerStack.version();
+            ensure();
+            rebuildAll();
+        }
+        if (input != null) {
+            interaction.process(input, nanos);
+            ensure();
+        }
+        attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
             atlas.beginFrame();
@@ -303,6 +397,7 @@ public final class Ui {
             watcher.apply(resolver);
         }
         resolver.update();
+        ensure();
 
         // styles and text: the queue grows while resolving (children of changed contexts)
         for (int i = 0; i < store.dirtyCount(); i++) {
@@ -317,40 +412,118 @@ public final class Ui {
             // compared, not taken from the bit: resolving a child resolves its parents first and clears their bits
             ResolvedStyle style = resolver.styleOf(slot);
             if (style != applied[slot] || style.version() != appliedVersion[slot]) {
+                ResolvedStyle before = applied[slot];
                 applied[slot] = style;
                 appliedVersion[slot] = style.version();
                 apply(slot, style);
+                restyled(slot, before, style);
                 store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
             }
             if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
-                rebuild = true;
+                int li = layerStack.indexOf(slot);
+                if (li >= 0) {
+                    rebuild[li] = true;
+                }
+                interaction.picking().invalidate(slot);
             }
         }
 
+        placePreviews(); // after styles: a restyled preview keeps the place set here
         layout.update(measure, width, height);
         int[] moved = layout.changedSlots();
         for (int i = 0; i < layout.changedCount(); i++) {
-            store.markDirty(moved[i], UiStore.DIRTY_DRAW);
+            int slot = moved[i];
+            store.markDirty(slot, UiStore.DIRTY_DRAW);
+            interaction.picking().moved(slot);
+            if (ownClip[slot] != DrawList.NO_CLIP) {
+                clipsMoved = true;
+            }
         }
 
-        if (rebuild) {
-            rebuildDrawList();
-        } else {
-            for (int i = 0; i < store.dirtyCount(); i++) {
-                int slot = store.dirtySlots()[i];
-                if (store.alive(slot) && (store.dirty(slot) & UiStore.DIRTY_DRAW) != 0) {
-                    store.clearDirty(slot, UiStore.DIRTY_DRAW);
-                    if (!record(slot)) {
-                        rebuildDrawList();
-                        break;
-                    }
+        for (int li = 0; li < layerStack.count(); li++) {
+            rebuilt[li] = rebuild[li];
+            if (rebuild[li]) {
+                rebuildLayer(li);
+            }
+        }
+        for (int i = 0; i < store.dirtyCount(); i++) {
+            int slot = store.dirtySlots()[i];
+            if (store.alive(slot) && (store.dirty(slot) & UiStore.DIRTY_DRAW) != 0) {
+                store.clearDirty(slot, UiStore.DIRTY_DRAW);
+                int li = layerStack.indexOf(slot);
+                if (li >= 0 && !rebuilt[li] && !record(slot, layerStack.at(li).drawList())) {
+                    rebuildLayer(li);
+                    rebuilt[li] = true;
                 }
             }
+        }
+        if (clipsMoved) {
+            clipsMoved = false;
+            moveClips();
         }
         for (int i = 0; i < store.dirtyCount(); i++) {
             store.clearDirty(store.dirtySlots()[i], -1);
         }
         store.clearDirtyQueue();
+        interaction.laidOut();
+    }
+
+    /** Tells picking about a new style: a changed shape, clip or pointer-events of an element it may hold. */
+    private void restyled(int slot, ResolvedStyle before, ResolvedStyle after) {
+        boolean clips = after.get(Styles.CLIP);
+        boolean clipChanged = before == null || clips != before.get(Styles.CLIP).booleanValue();
+        if (clipChanged) {
+            int li = layerStack.indexOf(slot);
+            if (li >= 0) {
+                rebuild[li] = true; // clip indices are given out in tree order
+            }
+        }
+        if (clipChanged || after.get(Styles.POINTER_EVENTS) != before.get(Styles.POINTER_EVENTS)
+            || !after.get(Styles.RADIUS).equals(before.get(Styles.RADIUS))) {
+            interaction.picking().invalidate(slot);
+        }
+    }
+
+    /** Puts drag previews on the drag layer; takes those of ended drags off. */
+    private void attachPreviews() {
+        for (int p = 0; p < UiInput.MAX_POINTERS; p++) {
+            DragSession session = interaction.sessionAt(p);
+            Element preview = session.active() ? session.preview() : null;
+            Element shown = previews[p];
+            if (shown != null && shown != preview) {
+                if (shown.alive() && shown.parent() != null) {
+                    shown.detach();
+                }
+                previews[p] = null;
+            }
+            if (preview == null || !preview.alive()) {
+                continue;
+            }
+            Layer drag = layerStack.get(Layers.DRAG);
+            ensure();
+            if (layerStack.version() != seenLayers) {
+                seenLayers = layerStack.version();
+                rebuildAll();
+            }
+            if (store.parent(preview.slot()) != drag.rootSlot()) {
+                drag.root().add(preview);
+            }
+            previews[p] = preview;
+        }
+    }
+
+    /** Puts drag previews under their pointers. */
+    private void placePreviews() {
+        for (int p = 0; p < UiInput.MAX_POINTERS; p++) {
+            Element preview = previews[p];
+            if (preview == null) {
+                continue;
+            }
+            DragSession session = interaction.sessionAt(p);
+            float scale = layout.scale() > 0 ? layout.scale() : 1;
+            layout.offsets(preview.slot(), (session.x() - session.previewOffsetX()) / scale,
+                (session.y() - session.previewOffsetY()) / scale, 0, 0);
+        }
     }
 
     // ---------------------------------------------------------------- styles onto layout and text
@@ -469,54 +642,117 @@ public final class Ui {
 
     // ---------------------------------------------------------------- drawing
 
-    private void rebuildDrawList() {
+    private void rebuildLayer(int li) {
+        rebuild[li] = false;
+        DrawList list = layerStack.at(li).drawList();
         list.reset();
-        rebuild = false;
-        allocate(store.rootSlot());
+        allocate(layerStack.at(li).rootSlot(), list, UiStore.NONE);
     }
 
-    /** Gives {@code slot} and its subtree ranges in tree order (parents under children), recording them. */
-    private void allocate(int slot) {
+    /**
+     * Gives {@code slot} and its subtree ranges in tree order (parents under children), recording them; {@code owner}
+     * is the nearest clipping ancestor.
+     */
+    private void allocate(int slot, DrawList list, int owner) {
+        clipOwner[slot] = owner;
+        clipOf[slot] = owner == UiStore.NONE ? DrawList.NO_CLIP : ownClip[owner];
         int start = list.size();
         list.begin(start, 0); // count only
+        rec = list;
         recordPrimitives(slot);
         list.end();
         int needed = list.needed();
-        // text grows by a few glyphs (a counter's digits) without a rebuild
-        int capacity = needed + (content[slot] == TEXT ? Math.max(4, needed / 4) : 0);
+        // text grows by a few glyphs (a counter's digits) and focusable elements by a focus ring without a rebuild
+        int capacity = needed + (content[slot] == TEXT ? Math.max(4, needed / 4) : 0)
+            + (interaction.focusable(store.element(slot)) ? 1 : 0);
         if (capacity > 0) {
             start = list.allocate(capacity);
         }
         store.range(slot, start, capacity);
         if (needed > 0) {
-            record(slot);
+            record(slot, list);
+        }
+        int childOwner = owner;
+        ownClip[slot] = DrawList.NO_CLIP;
+        if (resolver.styleOf(slot).get(Styles.CLIP)) {
+            clipBox(slot, owner);
+            int o = slot * 4;
+            ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
+                clipRadius(slot));
+            childOwner = slot;
         }
         for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
-            allocate(c);
+            allocate(c, list, childOwner);
         }
     }
 
-    /** Records the element's primitives into its range; false if they do not fit (a rebuild gives it a larger one). */
-    private boolean record(int slot) {
-        if (!attached(slot)) {
-            return true; // not shown: recorded when added (adding rebuilds)
+    /** The clip rectangle of {@code slot}: its box within its clipping ancestor's. */
+    private void clipBox(int slot, int owner) {
+        int o = slot * 4;
+        float x0 = layout.x(slot);
+        float y0 = layout.y(slot);
+        float x1 = x0 + layout.width(slot);
+        float y1 = y0 + layout.height(slot);
+        if (owner != UiStore.NONE) {
+            int p = owner * 4;
+            x0 = Math.max(x0, clipRect[p]);
+            y0 = Math.max(y0, clipRect[p + 1]);
+            x1 = Math.min(x1, clipRect[p + 2]);
+            y1 = Math.min(y1, clipRect[p + 3]);
         }
+        clipRect[o] = x0;
+        clipRect[o + 1] = y0;
+        clipRect[o + 2] = x1;
+        clipRect[o + 3] = y1;
+    }
+
+    private float clipRadius(int slot) {
+        return resolver.styleOf(slot).get(Styles.RADIUS).topLeft() * layout.scale();
+    }
+
+    /** Moves every clip after a clipping element moved: outer clips first, each within its owner's. */
+    private void moveClips() {
+        clipPass++;
+        for (int s = 0; s < store.highWater(); s++) {
+            if (store.alive(s) && ownClip[s] != DrawList.NO_CLIP) {
+                moveClip(s);
+            }
+        }
+    }
+
+    private void moveClip(int slot) {
+        if (clipStamp[slot] == clipPass) {
+            return;
+        }
+        clipStamp[slot] = clipPass;
+        int owner = clipOwner[slot];
+        if (owner != UiStore.NONE && store.alive(owner) && ownClip[owner] != DrawList.NO_CLIP) {
+            moveClip(owner);
+        }
+        int li = layerStack.indexOf(slot);
+        if (li < 0) {
+            return;
+        }
+        clipBox(slot, owner);
+        int o = slot * 4;
+        layerStack.at(li).drawList().setClip(ownClip[slot], clipRect[o], clipRect[o + 1], clipRect[o + 2],
+            clipRect[o + 3], clipRadius(slot));
+    }
+
+    /** Records the element's primitives into its range; false if they do not fit (a rebuild gives it a larger one). */
+    private boolean record(int slot, DrawList list) {
         list.begin(store.rangeStart(slot), store.rangeCapacity(slot));
+        if (clipOf[slot] != DrawList.NO_CLIP) {
+            list.clip(clipOf[slot]);
+        }
+        rec = list;
         recordPrimitives(slot);
         recorded++;
         return list.end();
     }
 
-    private boolean attached(int slot) {
-        int s = slot;
-        while (store.parent(s) != UiStore.NONE) {
-            s = store.parent(s);
-        }
-        return s == store.rootSlot();
-    }
-
     private void recordPrimitives(int slot) {
-        if (slot == store.rootSlot() && !resolver.styleOf(slot).isSet(Styles.BACKGROUND)) {
+        if (store.isRoot(slot) && !resolver.styleOf(slot).isSet(Styles.BACKGROUND)) {
             return;
         }
         ResolvedStyle s = resolver.styleOf(slot);
@@ -538,7 +774,7 @@ public final class Ui {
             float spread = sh.spread() * scale;
             float dx = sh.x() * scale;
             float dy = sh.y() * scale;
-            list.shadow(x0 + dx - spread, y0 + dy - spread, x1 + dx + spread, y1 + dy + spread,
+            rec.shadow(x0 + dx - spread, y0 + dy - spread, x1 + dx + spread, y1 + dy + spread,
                 Rgba.fade(sh.color().rgba(), opacity), tl + spread, tr + spread, br + spread, bl + spread,
                 sh.blur() * scale * 0.5f);
         }
@@ -548,14 +784,14 @@ public final class Ui {
         long borderColor = Rgba.fade(border.color().rgba(), opacity);
         Paint paint = s.get(Styles.BACKGROUND);
         switch (paint) {
-            case Paint.Box box -> list.box(x0, y0, x1, y1, Rgba.fade(box.color().rgba(), opacity), tl, tr, br, bl, bw,
+            case Paint.Box box -> rec.box(x0, y0, x1, y1, Rgba.fade(box.color().rgba(), opacity), tl, tr, br, bl, bw,
                 borderColor);
-            case Paint.LinearGradient g -> list.gradientBox(x0, y0, x1, y1, Rgba.fade(g.from().rgba(), opacity),
+            case Paint.LinearGradient g -> rec.gradientBox(x0, y0, x1, y1, Rgba.fade(g.from().rgba(), opacity),
                 Rgba.fade(g.to().rgba(), opacity), (g.angle() - 90) * RADIANS, tl, tr, br, bl, bw, borderColor);
             case Paint.Image image -> {
                 UiTexture t = images.get(image.name());
                 if (t != null) {
-                    list.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(image.tint().rgba(), opacity));
+                    rec.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(image.tint().rgba(), opacity));
                 }
                 borderOnly(x0, y0, x1, y1, tl, tr, br, bl, bw, borderColor);
             }
@@ -567,12 +803,20 @@ public final class Ui {
                     float tp = d == null ? nine.top() * scale : d.top() * scale;
                     float rt = d == null ? nine.right() * scale : d.right() * scale;
                     float bt = d == null ? nine.bottom() * scale : d.bottom() * scale;
-                    list.nineSlice(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(nine.tint().rgba(), opacity), l, tp, rt,
+                    rec.nineSlice(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(nine.tint().rgba(), opacity), l, tp, rt,
                         bt, nine.left(), nine.top(), nine.right(), nine.bottom());
                 }
                 borderOnly(x0, y0, x1, y1, tl, tr, br, bl, bw, borderColor);
             }
             default -> borderOnly(x0, y0, x1, y1, tl, tr, br, bl, bw, borderColor);
+        }
+
+        Border ring = s.get(Styles.FOCUS_RING);
+        if (ring.width() > 0) {
+            float rw = ring.width() * scale;
+            float off = s.getFloat(Styles.FOCUS_RING_OFFSET) * scale + rw;
+            rec.box(x0 - off, y0 - off, x1 + off, y1 + off, Rgba.TRANSPARENT, ringRadius(tl, off), ringRadius(tr, off),
+                ringRadius(br, off), ringRadius(bl, off), rw, Rgba.fade(ring.color().rgba(), opacity));
         }
 
         Insets padding = s.get(Styles.PADDING);
@@ -584,7 +828,7 @@ public final class Ui {
             shape(slot, cx1 - cx0 + 0.5f);
             TextOutline outline = s.get(Styles.TEXT_OUTLINE);
             TextBlock b = blocks[slot];
-            b.record(list, cx0, cy0, Rgba.fade(s.rgba(Styles.COLOR), opacity), outline.width() * scale,
+            b.record(rec, cx0, cy0, Rgba.fade(s.rgba(Styles.COLOR), opacity), outline.width() * scale,
                 Rgba.fade(outline.color().rgba(), opacity), 0);
             drawnTextVersion[slot] = b.version();
         } else if (content[slot] == IMAGE) {
@@ -592,10 +836,14 @@ public final class Ui {
         }
     }
 
+    private static float ringRadius(float r, float off) {
+        return r > 0 ? Math.max(0, r + off) : 0;
+    }
+
     private void borderOnly(float x0, float y0, float x1, float y1, float tl, float tr, float br, float bl, float bw,
         long color) {
         if (bw > 0) {
-            list.box(x0, y0, x1, y1, Rgba.TRANSPARENT, tl, tr, br, bl, bw, color);
+            rec.box(x0, y0, x1, y1, Rgba.TRANSPARENT, tl, tr, br, bl, bw, color);
         }
     }
 
@@ -611,19 +859,19 @@ public final class Ui {
         float ih = t.height() * layout.scale();
         ImageFit fit = spec.fit();
         if (fit == ImageFit.FILL) {
-            list.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), tint);
+            rec.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), tint);
         } else if (fit == ImageFit.COVER) {
             float k = Math.max(w / iw, h / ih);
             float du = (1 - w / (iw * k)) * 0.5f;
             float dv = (1 - h / (ih * k)) * 0.5f;
-            list.image(x0, y0, x1, y1, du, dv, 1 - du, 1 - dv, t.id(), tint);
+            rec.image(x0, y0, x1, y1, du, dv, 1 - du, 1 - dv, t.id(), tint);
         } else {
             float k = fit == ImageFit.CONTAIN ? Math.min(w / iw, h / ih) : 1;
             float dw = iw * k;
             float dh = ih * k;
             float ox = x0 + (w - dw) * 0.5f;
             float oy = y0 + (h - dh) * 0.5f;
-            list.image(ox, oy, ox + dw, oy + dh, 0, 0, 1, 1, t.id(), tint);
+            rec.image(ox, oy, ox + dw, oy + dh, 0, 0, 1, 1, t.id(), tint);
         }
     }
 
@@ -654,14 +902,14 @@ public final class Ui {
         return textures;
     }
 
-    /** The draw lists, back to front (one layer in A1). */
+    /** The layers' draw lists, back to front: what the renderer draws. */
     public DrawList[] layers() {
-        return layers;
+        return layerStack.drawLists();
     }
 
     /** How many layers {@link #layers()} holds. */
     public int layerCount() {
-        return 1;
+        return layerStack.count();
     }
 
     /** The text system, or null. */
@@ -686,9 +934,66 @@ public final class Ui {
         all.add(Layout.UI_SCALE);
         all.add(StyleResolver.CACHE_LIMIT);
         all.add(StyleWatcher.DELAY);
+        all.addAll(Interaction.tunables());
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
         }
         return all;
+    }
+
+    /** What picking and focus read: the layout's rectangles and the resolved styles' shape and interaction keys. */
+    private final class Geometry implements PickGeometry {
+
+        @Override
+        public float x(int slot) {
+            return layout.shown(slot) ? layout.x(slot) : 0;
+        }
+
+        @Override
+        public float y(int slot) {
+            return layout.shown(slot) ? layout.y(slot) : 0;
+        }
+
+        @Override
+        public float width(int slot) {
+            return layout.shown(slot) ? layout.width(slot) : 0;
+        }
+
+        @Override
+        public float height(int slot) {
+            return layout.shown(slot) ? layout.height(slot) : 0;
+        }
+
+        @Override
+        public boolean shown(int slot) {
+            return layout.shown(slot);
+        }
+
+        @Override
+        public float radius(int slot, int corner) {
+            Radii r = resolver.styleOf(slot).get(Styles.RADIUS);
+            float v = switch (corner) {
+                case 0 -> r.topLeft();
+                case 1 -> r.topRight();
+                case 2 -> r.bottomRight();
+                default -> r.bottomLeft();
+            };
+            return v * layout.scale();
+        }
+
+        @Override
+        public boolean clips(int slot) {
+            return resolver.styleOf(slot).get(Styles.CLIP);
+        }
+
+        @Override
+        public PointerEvents pointerEvents(int slot) {
+            return resolver.styleOf(slot).get(Styles.POINTER_EVENTS);
+        }
+
+        @Override
+        public Cursor cursor(int slot) {
+            return resolver.styleOf(slot).get(Styles.CURSOR);
+        }
     }
 }
