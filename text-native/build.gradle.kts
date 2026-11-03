@@ -53,14 +53,15 @@ tasks.register<JavaExec>("bakeAtlas") {
     classpath = tools.runtimeClasspath
     mainClass = "com.truesim.ui.text.natives.tools.BakeAtlas"
     jvmArgs("--enable-native-access=ALL-UNNAMED")
-    argumentProviders.add(CommandLineArgumentProvider {
+    // resolved when the task is configured: Gradle properties are configuration inputs of the cache anyway
+    args(
         listOf(
             "--out", atlasOut.get().path,
             "--families", atlasFamilies.get(),
             "--em-size", atlasEmSize.get(),
             "--pixel-range", atlasPixelRange.get(),
-        ) + (if (atlasText.get().isEmpty()) emptyList() else listOf("--text-file", atlasText.get()))
-    })
+        ) + (if (atlasText.get().isEmpty()) emptyList() else listOf("--text-file", atlasText.get())),
+    )
     outputs.file(atlasOut)
 }
 
