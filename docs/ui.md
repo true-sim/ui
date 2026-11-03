@@ -1822,3 +1822,56 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 - Colour emoji: no emoji font is bundled; with bundled fonts only, emoji draws as `.notdef` (a test pins that), and an
   installed emoji font is used when the registry includes installed fonts.
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
+
+### Data controls (2026-11-03): built, local branch `data-controls`, not yet in CI
+
+Scroll views, value renderers, virtualized lists, sorted and filtered views, trees and tables, in `ui-controls`'
+package `com.truesim.ui.controls.data`; the looks in `_data.tss` (default) and `_data-test.tss` (garish).
+
+| Piece | Built | Where |
+|---|---|---|
+| Scrolling | `Scroller` (one axis, doubles: wheel steps, touch drag with a rubber band, flings with `ui.scroll.friction`, spring back, `ui.scroll.overscroll` none/bounce); `ScrollView`: clipping viewport, stylable bars (track, start/end buttons that repeat while held, thumb; thickness, `scrollbar-visibility`, `scrollbar-overlay`, `thumb-min` from styles; `[active=true]` while in use for auto-hiding themes, `ui.scroll.autoHideDelay`), wheel and trackpad (Shift sideways, passed on at the ends), touch momentum, PAGE_UP/DOWN, HOME/END, arrows on the focused view, scroll-into-view of what navigation focuses; `ScrollPane` with sticky section headers | `Scroller`, `ScrollView`, `ScrollPane` |
+| Virtualization | only rows in the viewport plus `ui.list.overscan` have elements, recycled by kind; fixed heights (the row style's `height`) O(1) (`FixedExtents`), else measured into a Fenwick tree of measured and estimated heights (`MeasuredExtents`), the top row kept in place; rows placed from a moving origin (a million rows exact); the body scrolls by a layout scroll offset | `VirtualView`, `Extents` |
+| Renderers and editors | design 4.3: `ValueRenderer` (kind, create, bind, unbind, `viewType` to share views), `CellState`, `ValueEditor` (also the hook for the text-editing controls), `ValueRenderers` (exact class, records, superclasses, interfaces, built-ins, `String.valueOf`; names; a dynamic renderer for mixed values); built-ins for text, numbers and row fields without boxing, booleans, enums, vectors, colours; `Editors` for numbers (typed or stepped), booleans, enums | `ValueRenderer`, `ValueRenderers`, `Renderers`, `Editors` |
+| Lists | `ListView` over a `RowSource` (a `VersionedList`, a `DataView`): idle frames compare one version, value changes rebind only changed rows shown (`changesSince`), structural changes reconcile the visible window by key; single or multiple selection (`Selection`, a `VersionedSet` of items: Shift ranges, shortcut toggles), keys, type-ahead, drag and drop reordering | `ListView`, `Selection`, `RowSource` |
+| Data views | `DataView`: sorted and filtered, sorted once, then each changed row out and into its place in an `OrderIndex` (blocks of at most 1,024 indices, a Fenwick tree over block sizes): O(log n + B) a change; in-place changes logged for rebinding, moves change the structure | `DataView`, `OrderIndex` |
+| Trees | `TreeModel`/`TreeNode` (per-node versions, a log of value changes, lazy children loaded on first expand, also asynchronously), `TreeRows` (visible rows), `TreeView`: indent, expander, RIGHT/LEFT, clicks, drag and drop into nodes and between rows | `TreeModel`, `TreeView` |
+| Tables | `TableView`/`Column`: columns in code (renderer, order, editor, filter, width), header sort (Shift adds), resize by the header's grip (`column-min-width`), move by dragging headers, frozen columns (drawn over the rest), a filter row hook (`Column.filterView`) and per-column filters, inline editing (double click, or ACCEPT in cell selection; ACCEPT/SUBMIT commit, CANCEL cancels, focus leaving commits), row, multi-row or cell selection, columns virtualized (cells recycled per view type and kind) | `TableView`, `Column` |
+| Semantics | LIST/LIST_ITEM, TREE/TREE_ITEM (`:expanded`), TABLE/ROW/CELL/COLUMN_HEADER, SCROLL_VIEW, SCROLL_BAR, SEPARATOR (column grips), CHECKBOX, SPIN_BUTTON, COMBO_BOX; rows and cells named by their renderers with live text | all |
+
+**Shared changes** (separate commits): `Layout.scroll` (children shifted without relayout) and
+`Layout.independent` (an element sized by its parent: measures as empty, stops the dirty bubble); hidden subtrees
+collapse (they no longer draw or pick at their last place); `Ui.codeLayout` (code owns kind and direction,
+placement, width, height) and `Ui.addUpdater` (control code before layout and after it, with one more styles and
+layout pass when asked); labels name themselves with their live text (`UiStore.semantics` takes a `CharSequence`);
+`Interaction` read per-slot arrays before growing them; `StyleKeyProvider` (ServiceLoader) so the shipped themes
+compile with controls' keys, ui-style's tests run with ui-controls on the class path.
+
+**Benchmarks** (`DataBenchmarkTest`, `TRUESIM_BENCHMARK=true`, default theme, HarfBuzz and msdfgen, 1920 x 1080; the
+machine was shared with three other builds, so p99 is noisy):
+
+| Target | Budget | Measured |
+|---|---|---|
+| `ListView` of 10,000 rows (480 x 900, 34 visible), scrolling continuously | ≤ 0.1 ms; memory O(visible rows) | 0.018 to 0.028 ms median, 0.042 to 0.048 ms p99; 40 row elements, 93 elements in all |
+| 1,000,000 rows, sorted and filtered `DataView` (750,000 shown) in a list, 100 changes a frame | ≤ 0.5 ms | 0.018 to 0.021 ms median, 0.045 to 0.058 ms p99 (built once in 0.3 s) |
+| `TableView` 100,000 x 20 (1880 x 1000: 38 rows x 19 columns visible, one frozen), scrolling | ≤ 0.3 ms | 0.17 to 0.29 ms median, 0.36 to 0.43 ms p99 |
+
+The table's frame is 80% recording: every visible cell moved, so about 1,800 elements and 6,000 glyphs are recorded
+again each scrolling frame (`TextBlock.record` alone is 38%); the data controls' own work is 3%. Meeting the p99
+budget at this size needs scrolling without re-recording: a translation per clip in the draw list and
+`GpuUiRenderer` (a scrolled viewport's primitives in content space, the clip entry moving them), which is engine
+work. Smaller tables (or fewer columns) are within budget.
+
+Steady-state frames allocate nothing (allocation tests without escape analysis): idle, scrolling and 100 changes a
+frame for lists; scrolling for tables.
+
+**Left:**
+- The text editor for cells and filter fields comes from the text-editing branch (through `ValueEditor` and
+  `Column.filterView`); `Editors` has numbers, booleans and enums only.
+- `VersionedTree` should move to `common-state` (design 4.2): `TreeModel` depends on `ChangeClock` only.
+- Translation per clip for scrolling without re-recording (above).
+- Renderers chosen by styles (by name exists, a style key does not); records by their metadata (section 5.11) through
+  `ValueRenderers.records`; colours as swatches (now hex text).
+- Box select, hiding columns, grouping headers, horizontal scrolling of lists, a loading look for lazy tree nodes.
+- An element hidden and shown again rebuilds its layer's draw list once (its draw range was empty).
+- GPU screenshots of `DataGallery` (a test helper) by the integrator.
