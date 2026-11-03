@@ -1822,3 +1822,40 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 - Colour emoji: no emoji font is bundled; with bundled fonts only, emoji draws as `.notdef` (a test pins that), and an
   installed emoji font is used when the registry includes installed fonts.
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
+
+### Overlays, hovers, windows and docking (2026-11-03): built, local branch `windows`, not yet in CI
+
+Built on the A2 groundwork in `ui-controls`: `com.truesim.ui.controls.overlay` (anchoring and placement, shared by
+pop-ups of every kind) and `com.truesim.ui.controls.windows` (tooltips, popovers, floating windows, docking).
+
+| Piece | Built | Where |
+|---|---|---|
+| Frame hooks | `UiFrameHook` (`Ui.addFrameHook`): `frame` once a frame (timers, the frame's `UiInput`), `beforeLayout` before every layout pass (positions and sizes set in code, re-set because a restyle applies the style's), `afterLayout` (what depends on layout); a change made after layout is styled and laid out again in the same frame (up to four passes), so an overlay sits at its anchor in the frame the anchor moved | `Ui`, `UiFrameHook` |
+| Overlays | `Overlays` (one per UI) and `Overlay`: an element on a layer (or any host element), anchored (`OverlayAnchor`: `ElementAnchor`, `PointAnchor`, or a scene object the engine projects each frame; hidden anchors hide the overlay), centred or at a position; placement from styles (`placement` top/bottom/left/right/start/end, `placement-align`, `placement-gap`, `placement-shift`, `viewport-margin`, `placement-flip`) by `Placer`: preferred side, opposite, the two across, else the roomier; shifted back inside the viewport; the side ends up as the fact `side` (`tooltip[side=bottom]`); input `PASS_THROUGH`, `BLOCK_BOUNDS` or `BLOCK_SCREEN` (a stylable `backdrop` under it, light dismiss optional); modal overlays trap focus and close on CANCEL | `overlay` |
+| Tooltips | `Tooltips`: text or rich content (any subtree) per target, one `tooltip` element on the tooltip layer; pointer rest (`ui.input.tooltipDelay`), hidden on leave, press, wheel; warm moves to the next target within `ui.tooltip.warmTime`; touch and pen by long press (no click), hidden on lift; keys and gamepad by visible focus after the delay; `tooltip-mode: anchored` or `follow` (the pointer) | `Tooltips` |
+| Popovers | `Popovers.hover` (hover cards: open after `ui.hover.openDelay`, safe triangle from the leave point to the card's near edge for up to `ui.hover.intentTime`, else closed after the grace `ui.hover.closeDelay`; by visible focus and by a tap too) and `Popovers.click` (toggle on click or ACCEPT, close on a press outside it and its children and on CANCEL, focus in from the keyboard and back to the trigger); popovers opened from popovers are children: they keep their parent open and close with it | `Popover`, `Popovers` |
+| Floating windows | `WindowManager` (a `window-host` on the overlay layer, or any host element: world panels, panes) and `FloatingWindow`: title bar (icon, title, minimise, maximise, close), move by the title (snapping to the host's and other windows' edges within `ui.window.snapDistance`, kept on screen by `ui.window.keepVisible`), resize by eight `window-resize` edges and corners (their `cursor`s, `resize-handle` thickness, `min-width`/`min-height`), minimise to the title bar, maximise (double click), restore (dragging a maximised window restores it under the pointer), close (vetoable), modal on the modal layer over a backdrop, raise and activate on press (`window:selected`), focus cycling (`focusNext`, Ctrl+F6), keyboard and d-pad move and resize (`keyboardMove`, `keyboardResize`: arrows by `ui.window.keyStep`, ACCEPT ends, CANCEL puts it back); `WindowLayout` text (one line a window) through `LayoutStore`, applied to windows made later | `WindowManager`, `FloatingWindow`, `WindowLayout`, `LayoutStore` |
+| Docking | `DockSpace` and `DockPanel`: panes (`dock-tabs`) in nested `dock-split`s with `dock-splitter`s (drag, or arrows when focused; `dock-min-pane`), docking left/right/top/bottom/centre beside a pane or at the outer edges, tab activation (press, arrows), drag to reorder, into another pane, to a pane's side (zones `dock-zone` deep) or the outer edge; `dock-drop-preview` and the `dock-zones` guides while dragging; Shift docks nothing; dropped elsewhere a tab floats in a window (`WindowDockHost`), whose title dragged over the space docks it again; close (vetoable), collapsing emptied panes and merging same-direction splits; `DockLayout` text (`dock split.style(row; ratios; nodes)`, `tabs.style(active; ids)`, `floating id x y w h`), round trip exact, through `LayoutStore` | `DockSpace`, `DockPanel`, `DockLayout`, `DockHost`, `WindowDockHost` |
+| Styles | keys in `OverlayStyles` and `WindowStyles`, registered for `.tss` as `StyleKeyHolder` services (`META-INF/services`), so the shipped themes compile wherever `ui-controls` is; `_windows.tss` and `_windows-test.tss` imported by both themes | `ui-style`, themes |
+| Semantics | windows `WINDOW` (modal `DIALOG`) named by their title, title bar buttons `BUTTON`, edges and splitters `SEPARATOR`, tooltips `TOOLTIP` named by their text, click popovers `DIALOG`, tab strips `TAB_LIST`, tabs `TAB`, pane bodies `TAB_PANEL`; `Semantics.unnamed` is empty for the scene | all |
+
+**Decisions.** Positions and sizes set in code are layout inputs re-set every pass rather than inline styles (no
+allocation, no style cache entries per position). Overlays are placed after layout in the same frame (no frame of
+lag). Hover intent combines a safe triangle and a grace period. Docking rebuilds its container elements on a
+structural change (user action), never per frame; ratios are flex grow factors. The dock space's tab strip and
+splitter are docking's own parts (inside `DockSpace`): when the generic `TabbedPane` and `SplitPane` of the basic and
+container controls exist, they can replace them without API changes. Undocked panels float through a `DockHost` per
+dock space: `WindowDockHost` (floating windows of the same UI) is built; OS windows need an engine-side host (an OS
+window, presenter and input per viewport) implementing `DockHost` and reporting window drags through
+`DockSpace.dragFloating`/`dropFloating`.
+
+**Benchmark** (Ryzen 9 9950X3D, without JaCoCo, `WindowsBenchmarkTest`, `TRUESIM_BENCHMARK=true`): 50 open windows
+and a dock space of 30 panels in 6 panes (1,091 elements, 1920 x 1080): idle 0.0074 ms median (0.0080 ms p99; target
+0.05 ms); dragging a window 0.031 ms median (0.052 ms p99; target 0.3 ms). Steady-state frames allocate nothing
+without escape analysis: idle with windows, a tooltip, a popover and the dock space; the pointer moving over chrome,
+tabs, splitters and tooltip targets; dragging a window, a splitter, and a tab across panes (`WindowsAllocationTest`).
+
+**Left:** style transitions are declared (`backdrop`, `tooltip`, popovers) but the frame does not animate them yet;
+OS windows for docking (engine side); an action of the `ui` group bound to `keyboardMove`/`keyboardResize` and
+`focusNext` (the engine's bindings); `TabbedPane`/`SplitPane` unification with the container controls; CPU previews
+were not made (the integrator renders GPU screenshots of `WindowsScene`).

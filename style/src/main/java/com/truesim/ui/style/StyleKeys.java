@@ -5,11 +5,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 
 /**
  * The registry of every declared {@link StyleKey} and {@link Shorthand}: lookup by name for style sheets, "did you
  * mean" suggestions for unknown names, and the dense index of each key. Keys register themselves when their holder
- * class initialises; {@link #load} initialises holder classes a sheet needs before it is compiled.
+ * class initialises; {@link #load} initialises holder classes a sheet needs before it is compiled, and
+ * {@link #loadServices} every {@link StyleKeyHolder} listed as a service on the class path.
  */
 @AllowAllocation("keys are registered and looked up when sheets are built")
 public final class StyleKeys {
@@ -18,6 +20,7 @@ public final class StyleKeys {
     private static final Map<String, Shorthand<?>> SHORTHANDS = new HashMap<>();
     private static final List<StyleKey<?>> BY_INDEX = new ArrayList<>();
     private static volatile int count;
+    private static volatile boolean servicesLoaded;
 
     private StyleKeys() {
     }
@@ -48,6 +51,24 @@ public final class StyleKeys {
                 Class.forName(holder.getName(), true, holder.getClassLoader());
             } catch (ClassNotFoundException e) {
                 throw new IllegalStateException(e); // cannot happen: the class is loaded already
+            }
+        }
+    }
+
+    /**
+     * Initialises every {@link StyleKeyHolder} listed as a service on the class path of {@code loader} (once per
+     * run): the keys of control modules, which the shipped themes' partials use.
+     */
+    public static void loadServices(ClassLoader loader) {
+        if (servicesLoaded) {
+            return;
+        }
+        synchronized (StyleKeys.class) {
+            if (!servicesLoaded) {
+                for (StyleKeyHolder holder : ServiceLoader.load(StyleKeyHolder.class, loader)) {
+                    holder.getClass(); // creating it initialised the class: its keys are registered
+                }
+                servicesLoaded = true;
             }
         }
     }
