@@ -1728,7 +1728,7 @@ started in A1 because the frame that resolves styles, lays out, shapes and recor
 | HUD with 10% changing (50 counters a frame), CPU | ≤ 0.3 ms | 0.11 ms median, 0.18 ms p99 |
 | HUD (500 elements, 5,000 glyphs) at 4K, GPU | ≤ 0.15 ms | 0.10 ms (`UiBenchmark`) |
 | 100,000 glyphs, GPU | ≤ 0.4 ms | 0.29 ms alone; 0.44 ms over a full-screen translucent backdrop (above) |
-| Reload of a 2,000-rule sheet, re-resolved | ≤ 5 ms once | 3.0 to 4.8 ms median (`ReloadBenchmarkTest`) |
+| Reload of a 2,000-rule sheet, re-resolved | ≤ 5 ms once | 3.0 to 4.8 ms median (`StyleReloadBenchmark`) |
 | Reshape of a 200-character label | ≤ 50 µs | 9.6 µs Latin, 28 µs mixed Latin, Arabic and CJK with BiDi |
 | Unchanged frame upload | 0 bytes | 0 bytes; a changed counter a few hundred bytes |
 | Steady-state allocation | 0 bytes | 0 (allocation tests: idle and 10% changing frames, layout, recording, input mapping) |
