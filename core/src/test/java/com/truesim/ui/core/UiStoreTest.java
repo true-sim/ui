@@ -192,7 +192,7 @@ class UiStoreTest {
         assertThat(UiState.of("pressed")).isEqualTo(UiState.PRESSED);
         assertThat(UiState.of("nope")).isZero();
         assertThat(UiState.name(UiState.EDITING)).isEqualTo("editing");
-        assertThat(UiState.count()).isEqualTo(11);
+        assertThat(UiState.count()).isEqualTo(12);
         assertThatThrownBy(() -> UiState.name(3)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> UiState.name(1 << 12)).isInstanceOf(IllegalArgumentException.class);
     }

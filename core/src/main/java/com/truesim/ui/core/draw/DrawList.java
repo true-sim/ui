@@ -40,6 +40,9 @@ public final class DrawList {
     private int rangeEnd;
     private int needed;
     private int clip;
+    private float scale = 1; // the range's transform: x' = scale * x + offsetX
+    private float offsetX;
+    private float offsetY;
     private final int[] scratch = new int[WORDS];
 
     /** An empty list. */
@@ -84,6 +87,9 @@ public final class DrawList {
         rangeEnd = start + capacity;
         needed = 0;
         clip = NO_CLIP;
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
     }
 
     /**
@@ -111,6 +117,19 @@ public final class DrawList {
             throw new IllegalArgumentException("no clip " + index);
         }
         this.clip = index;
+    }
+
+    /**
+     * Transforms the next primitives of the range (until {@link #begin} starts another): every point maps to
+     * {@code scale * p + (offsetX, offsetY)}, and radii, border, line and outline widths, shadow blur, glyph pixel
+     * ranges and nine-slice insets scale with it. An element's {@code scale} style and animated offsets draw this way
+     * (a per-element transform kept in the primitives themselves, so the renderer needs nothing new); clip rectangles
+     * are not transformed.
+     */
+    public void transform(float scale, float offsetX, float offsetY) {
+        this.scale = scale;
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
     }
 
     /** A new clip rectangle with rounded corners: its index. */
@@ -257,10 +276,10 @@ public final class DrawList {
         int[] p = scratch;
         Arrays.fill(p, 0);
         p[Primitive.HEADER] = Primitive.header(kind, flags, clip);
-        p[Primitive.X0] = Float.floatToRawIntBits(x0);
-        p[Primitive.Y0] = Float.floatToRawIntBits(y0);
-        p[Primitive.X1] = Float.floatToRawIntBits(x1);
-        p[Primitive.Y1] = Float.floatToRawIntBits(y1);
+        p[Primitive.X0] = Float.floatToRawIntBits(scale * x0 + offsetX);
+        p[Primitive.Y0] = Float.floatToRawIntBits(scale * y0 + offsetY);
+        p[Primitive.X1] = Float.floatToRawIntBits(scale * x1 + offsetX);
+        p[Primitive.Y1] = Float.floatToRawIntBits(scale * y1 + offsetY);
         p[Primitive.COLOR_A] = (int) a;
         p[Primitive.COLOR_A + 1] = (int) (a >>> 32);
         p[Primitive.COLOR_B] = (int) b;
@@ -269,11 +288,48 @@ public final class DrawList {
     }
 
     private void emit(int[] p) {
+        if (scale != 1) {
+            scaleSizes(p);
+        }
         needed++;
         if (cursor < rangeEnd) {
             put(cursor, p);
         }
         cursor++;
+    }
+
+    /** Scales the sizes of primitive {@code p} (not its corners: {@link #start} moved those) by the transform. */
+    private void scaleSizes(int[] p) {
+        int kind = Primitive.kind(p[Primitive.HEADER]);
+        switch (kind) {
+            case Primitive.BOX, Primitive.SHADOW -> {
+                p[Primitive.RADII] = scaleHalves(p[Primitive.RADII]);
+                p[Primitive.RADII + 1] = scaleHalves(p[Primitive.RADII + 1]);
+                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+            }
+            case Primitive.GLYPH -> {
+                p[Primitive.PIXEL_RANGE] = scaleFloat(p[Primitive.PIXEL_RANGE]);
+                p[Primitive.OUTLINE] = scaleFloat(p[Primitive.OUTLINE]);
+                p[Primitive.WEIGHT] = scaleFloat(p[Primitive.WEIGHT]);
+            }
+            case Primitive.NINE_SLICE -> {
+                p[Primitive.INSETS] = scaleHalves(p[Primitive.INSETS]);
+                p[Primitive.INSETS + 1] = scaleHalves(p[Primitive.INSETS + 1]);
+            }
+            case Primitive.LINE -> p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+            default -> {
+                // images: the quad alone
+            }
+        }
+    }
+
+    private int scaleFloat(int bits) {
+        return Float.floatToRawIntBits(Float.intBitsToFloat(bits) * scale);
+    }
+
+    private int scaleHalves(int word) {
+        return Primitive.halves(Float.float16ToFloat((short) word) * scale,
+            Float.float16ToFloat((short) (word >>> 16)) * scale);
     }
 
     private void put(int index, int[] p) {

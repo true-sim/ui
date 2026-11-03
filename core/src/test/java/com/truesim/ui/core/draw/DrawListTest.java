@@ -76,6 +76,38 @@ class DrawListTest {
     }
 
     @Test
+    void aTransformMovesAndScalesEveryKind() {
+        DrawList list = new DrawList();
+        int start = list.allocate(8);
+        list.begin(start, 8);
+        list.transform(2, 10, 20);
+        list.box(0, 0, 10, 10, Rgba.WHITE, 1, 2, 3, 4, 1, Rgba.BLACK);
+        list.shadow(0, 0, 10, 10, Rgba.BLACK, 2, 2, 2, 2, 3);
+        list.glyph(0, 0, 8, 8, 0, 0, 1, 1, 7, 2, Rgba.WHITE, 1, Rgba.BLACK, 0.5f);
+        list.image(0, 0, 8, 8, 0, 0, 1, 1, 3, Rgba.WHITE);
+        list.nineSlice(0, 0, 80, 40, 0, 0, 1, 1, 4, Rgba.WHITE, 8, 8, 8, 8, 12, 12, 12, 12);
+        list.line(0, 0, 10, 10, 2, Rgba.WHITE);
+        assertThat(list.end()).isTrue();
+        assertThat(list.floatAt(start, Primitive.X0)).isEqualTo(10);
+        assertThat(list.floatAt(start, Primitive.Y1)).isEqualTo(40);
+        assertThat(Float.float16ToFloat((short) list.intAt(start, Primitive.RADII))).isEqualTo(2);
+        assertThat(Float.float16ToFloat((short) (list.intAt(start, Primitive.RADII + 1) >>> 16))).isEqualTo(8);
+        assertThat(list.floatAt(start, Primitive.WIDTH)).isEqualTo(2);
+        assertThat(list.floatAt(start + 1, Primitive.WIDTH)).as("the blur").isEqualTo(6);
+        assertThat(list.floatAt(start + 2, Primitive.PIXEL_RANGE)).isEqualTo(4);
+        assertThat(list.floatAt(start + 2, Primitive.OUTLINE)).isEqualTo(2);
+        assertThat(list.floatAt(start + 2, Primitive.WEIGHT)).isEqualTo(1);
+        assertThat(list.floatAt(start + 3, Primitive.X1)).isEqualTo(26);
+        assertThat(Float.float16ToFloat((short) list.intAt(start + 4, Primitive.INSETS))).isEqualTo(16);
+        assertThat(list.floatAt(start + 5, Primitive.WIDTH)).isEqualTo(4);
+        assertThat(list.floatAt(start + 5, Primitive.X1)).isEqualTo(30);
+        list.begin(start, 1);
+        list.box(0, 0, 10, 10, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.end();
+        assertThat(list.floatAt(start, Primitive.X1)).as("a new range starts untransformed").isEqualTo(10);
+    }
+
+    @Test
     void reRecordingTheSameDirtiesNothing() {
         DrawList list = new DrawList();
         int a = list.allocate(2);

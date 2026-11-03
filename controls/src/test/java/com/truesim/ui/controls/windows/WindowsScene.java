@@ -116,7 +116,15 @@ public final class WindowsScene {
         s.tooltips.show(save);
         s.popover.open();
         s.frames(2);
-        return s;
+        return s.settle();
+    }
+
+    /** Runs frames until style transitions (tab and button fades) finish, at most two seconds of them. */
+    public WindowsScene settle() {
+        for (int i = 0; i < 120 && ui.animator().running() > 0; i++) {
+            frames(1);
+        }
+        return this;
     }
 
     /** Runs {@code n} frames with the input as it is. */

@@ -32,7 +32,7 @@ public final class Semantics {
     private static final String[] ACTION_NAMES = {"activate", "focus", "show-menu", "scroll", "drag", "drop",
         "edit-text"};
     private static final int STATES = UiState.FOCUSED | UiState.DISABLED | UiState.SELECTED | UiState.CHECKED
-        | UiState.EXPANDED | UiState.EDITING;
+        | UiState.EXPANDED | UiState.EDITING | UiState.INDETERMINATE;
 
     /** One node: a role, a name, the element's state bits ({@link UiState}), its actions, and the nodes under it. */
     public record Node(Role role, String label, int slot, int state, int actions, List<Node> children) {

@@ -4,6 +4,7 @@
 
 @use "mixins" as *;
 @import "data-test";
+@use "basic-test"; // the basic and container controls of ui-controls
 
 $hot: #ff00ff;
 $lime: #39ff14;

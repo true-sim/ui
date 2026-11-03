@@ -1,0 +1,64 @@
+// The basic and container controls in the garish test theme: every element type, part and state they use looks
+// obviously different from the default theme, and their own keys take other values, so a control drawing anything
+// the theme did not give it shows at once. The default rules come first (their layout keeps the controls usable);
+// everything after overrides their look.
+
+@use "basic";
+
+$basic-hot: #ff00ff;
+$basic-lime: #39ff14;
+$basic-sun: #ffef00;
+$basic-cyan: #00ffff;
+
+$basic-types: (button, toggle-button, checkbox, check-box, check-mark, switch, switch-track, switch-knob, radio-group,
+  radio, radio-box, radio-dot, segmented, segment, icon-label, separator, badge, progress, progress-fill, spinner,
+  spinner-dot, slider, slider-track, slider-fill, slider-tick, slider-thumb, color-picker, color-area,
+  color-area-white, color-area-black, color-area-cursor, color-hue, color-hue-strip, color-hue-segment,
+  color-hue-cursor, color-alpha, color-alpha-checker, color-alpha-gradient, color-alpha-cursor, color-preview,
+  color-hex-slot, color-swatches, color-swatch, date-picker, date-header, date-weekdays, date-grid, date-day,
+  time-picker, time-field, key-binding, dropdown, dropdown-list, dropdown-viewport, dropdown-items, dropdown-item,
+  menu, menu-viewport, menu-items, menu-item, menu-check, menu-separator, menu-bar, menu-title, dialog-backdrop,
+  dialog, dialog-buttons, toast-stack, toast, toolbar, toolbar-viewport, toolbar-items, status-bar, breadcrumbs,
+  crumb, tab-pane, tab-header, tab-strip, tab-row, tab, tab-content, collapsible, expander, collapsible-header,
+  collapsible-body, accordion, group-box, group-content, card, card-header, card-body, card-footer, split-pane, split-first, split-second,
+  splitter, carousel, carousel-viewport, carousel-track, carousel-page, carousel-dots, stepper, stepper-steps, step,
+  stepper-content, stepper-buttons, drawer, drawer-content, drawer-backdrop);
+
+@each $t in $basic-types {
+  #{$t} {
+    background: linear-gradient(135deg, $basic-hot, $basic-cyan);
+    border: 3px $basic-lime;
+    radius: 0 11px 0 11px;
+    shadow: 5px 5px 0 $basic-sun;
+    &:hover { background: box($basic-sun); }
+    &:pressed { background: box($basic-lime); scale: 0.8; }
+    &:checked, &:selected { background: box(#ff6600); border: 5px $basic-hot; }
+    &:indeterminate { background: box(#0000ff); }
+    &:expanded { background: box(#8a2be2); border: 6px $basic-cyan; }
+    &:editing { background: box(#ff1493); }
+    &:focus-visible { focus-ring: 5px $basic-lime; focus-ring-offset: 4px; }
+    &:disabled { opacity: 0.25; }
+  }
+}
+
+image.icon { size: 21px; image: "test/checker" $basic-hot fill; border: 2px $basic-sun; }
+label.date-weekday, label.time-separator, label.dropdown-filter, label.menu-shortcut, label.dialog-title,
+label.dialog-message, label.toast-title, label.toast-message, label.status-section, label.group-title,
+label.card-title, label.card-subtitle, label.step-number {
+  color: $basic-sun;
+  font-size: 19px;
+  text-outline: 2px $basic-hot;
+}
+
+spinner { spinner-dots: 5; spinner-period: 2s; spinner-fade: 0.5; size: 33px; }
+progress { progress-period: 3s; width: 150px; height: 13px; }
+progress-fill:indeterminate { width: 60%; }
+button, toggle-button, checkbox, radio, switch, segment, key-binding, dropdown, menu-title, crumb, tab,
+collapsible-header, step { press-flash: 400ms; }
+tab-pane { tab-overflow: wrap; }
+dialog { opacity: 0.2; scale: 0.5; transition: opacity 1s linear, scale 1s linear; }
+dialog:expanded { opacity: 0.9; scale: 1.1; }
+collapsible-body { transition: height 700ms linear; }
+carousel-track { transition: offsets 900ms linear; }
+drawer { transition: offsets 900ms linear, width 900ms linear, height 900ms linear; }
+switch-knob { transition: offsets 500ms ease-in; }

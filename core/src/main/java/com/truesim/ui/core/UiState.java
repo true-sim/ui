@@ -23,9 +23,14 @@ public final class UiState {
     public static final int DROP_TARGET = 1 << 9;
     /** The source of a drag session in progress ({@code :dragging}). */
     public static final int DRAGGING = 1 << 10;
+    /**
+     * Neither on nor off: a tri-state checkbox whose children are mixed, an indeterminate progress bar
+     * ({@code :indeterminate}).
+     */
+    public static final int INDETERMINATE = 1 << 11;
 
     private static final String[] NAMES = {"hover", "pressed", "focused", "disabled", "selected", "checked",
-        "expanded", "editing", "focus-visible", "drop-target", "dragging"};
+        "expanded", "editing", "focus-visible", "drop-target", "dragging", "indeterminate"};
 
     private UiState() {
     }

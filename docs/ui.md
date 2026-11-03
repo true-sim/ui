@@ -1912,3 +1912,64 @@ frame for lists; scrolling for tables.
 - Box select, hiding columns, grouping headers, horizontal scrolling of lists, a loading look for lazy tree nodes.
 - An element hidden and shown again rebuilds its layer's draw list once (its draw range was empty).
 - GPU screenshots of `DataGallery` (a test helper) by the integrator.
+
+### Basic and container controls (2026-11-03): built, local branch `basic-controls`, not yet in CI
+
+The basic and container controls of the plan additions, and the animation engine (design 4.8), in `ui-controls`
+(`com.truesim.ui.controls.basic`, `com.truesim.ui.controls.anim`), on the A2 groundwork. Every control is a facade
+over elements (a root of its own type, parts of their own types); models are `common-state` versioned values polled
+once a frame by `Controls` (a `Ui.FrameListener`), two-way: an edit writes the model, a model change shows in the
+frame it happened. Looks come from the theme partials `_basic.tss` and `_basic-test.tss` only; controls copy their
+checked, selected, indeterminate and expanded states onto their parts, so no rule needs a state on an ancestor
+(those would restyle a subtree on every hover).
+
+| Area | Built |
+|---|---|
+| Buttons and choices | `Button` (text, icon, both; ACCEPT shows `:pressed` for `press-flash`), `ToggleButton`, `Checkbox` (`CheckState`, `:indeterminate`), `RadioGroup`, `Switch`, `SegmentedControl` (arrows move the choice) |
+| Display | `IconLabel`, `ImageView`, `Separator` (`[orientation=]`), `Badge` (counts without allocation), `ProgressBar` (determinate as a percentage width; indeterminate sweep on the UI clock), `Spinner` (dots on a circle, opacity chasing on the clock; dot count, period and fade from the theme) |
+| Sliders | `Slider`: single and range, horizontal and vertical, steps, ticks, pointer drag, arrows/page/home/end, wheel; laid out as anchors so a value change moves the thumb in the same frame without measuring |
+| Pickers | `ColorPicker` (HSV area, hue strip, alpha bar, preview, swatches, `#RRGGBBAA` hex in a slot a text field can take: `hexSlot()`, `hex(CharSequence)`, `onChange`), `DatePicker` (locale's first weekday, month navigation, keys across months), `TimePicker` (12/24 h, seconds, wrap), `KeyBindingField` over the engine-agnostic `InputCapture` |
+| Pop-ups | `DropDown<T>` (pop-up layer, flip, min width of the button, type-ahead, searchable filter or a `FilterSource` from a search field, minimal internal scroll), `Menu`/`MenuItem` (actions, check, radio, separators, submenus with hover intent `ui.menu.submenuDelay`, shortcut labels from `ShortcutGlyphs`, context menus by `attachContext`), `MenuBar`, `Dialog` (message and confirm, modal layer, `pushModal`, default and cancel buttons, fades by transitions), `Toasts` (own `notifications` layer at z 350, timeout paused on hover, limit, dismiss) |
+| Bars | `Toolbar` (overflow menu), `StatusBar`, `Breadcrumbs` |
+| Containers | `TabPane` (strip on any side, `tab-overflow: scroll / wrap / menu`, closable, drag to reorder, overflow menu), `Collapsible` and expanders (height animated by the body's `transition`, reversing), `Accordion` (single or multi), `GroupBox` (fieldset: disabling disables the content), `Card`, `SplitPane` (percentage share, min sizes, drag, keys, collapse and restore), `Carousel` (anchored track, swipe or flick, keys, dots), `Stepper` (guard, finish), `Drawer` (modal sliding from any side, or pushing the content) |
+| Animation | `Animator`: element channels (opacity, scale, drawn offset, background, text and border colours, width, height, offsets, anchors) and controls' own channels (`Animated`), Lemur's fast-forward reversal, completion listeners, CSS easings (`Easings`), `ui.animation.speed` (0: reduced motion); style transitions of opacity, scale, box and gradient colours, text and border colours, pixel sizes and offsets; `Visuals`: the per-element overrides (drawn or applied to layout after every restyle) |
+| Gallery | `ControlsGallery` (tests): every control on a 1280 x 800 screen, `openOverlays()` for the modal drawer, dialog, notification, drop-down and context menu; `CpuPreview` writes rough PNGs with `TRUESIM_SCREENSHOTS=true` |
+
+**Shared changes** (each additive):
+- `ui-core`: `UiState.INDETERMINATE`; `DrawList.transform(scale, x, y)` (a per-range transform applied as primitives
+  are written: positions, radii, widths, blur, pixel ranges, nine-slice insets; clips are not transformed), so the
+  `scale` style and animated scales and offsets draw without a renderer change; `Interaction` evaluated per-slot
+  arrays before growing them in five queries (`focusable(Element)`, `listening`, `neighbour`, `traversal`,
+  `remembered`): an index out of bounds once the store passed 512 elements after the interaction was made.
+- `ui-style`: `StyleKeyHolder` and `StyleKeys.loadInstalled()` (`ServiceLoader`), called by `Tss.compile`, so the
+  shipped themes use control keys (`BasicStyles`); the theme tests run with `ui-controls` on their class path.
+- `ui-controls` `Ui`: `visuals()`, `animator()` (transitions on restyle, advanced each frame), `frame(FrameListener)`
+  (after input, before styles; `laidOut()` at the end of the frame); opacity and scale (style or animated) apply to the
+  subtree, as the `opacity` key always said; labels shape with a pixel of tolerance (snapping took up to a pixel off
+  the measured width and "10" broke into two lines); `ui.animation.speed` in `tunables()`.
+- Themes: one `@use` line each in `default-theme.tss` and `test-theme.tss`; `boxes-test-theme.txt` golden regenerated
+  (nested opacity now multiplies).
+
+**Decisions:**
+- Animated values live in `Visuals` (structure of arrays per slot, generation-checked), never in inline styles:
+  inline values intern a style per value and would allocate per frame.
+- A pop-up opened in a frame is laid out at its end: `Controls.focusSoon` focuses it in `laidOut()`, so the next
+  frame's input goes to it.
+- Pop-ups place themselves by the last layout of their own size: next to a screen edge they settle one frame later.
+- Tab and stepper pages, closed collapsible bodies and toolbar overflow are taken out of the tree, not hidden: hidden
+  subtrees still record their old rectangles.
+
+**Benchmark** (Ryzen 9 9950X3D, `GalleryBenchmarkTest`, JaCoCo off, real text path): the gallery (523 elements) costs
+1.0 µs a frame idle with its spinner and progress sweep animating (1.6 µs p99) and 3.7 µs with the pointer moving to a
+new control every frame (7.3 µs p99). Gallery frames with hover, drags, wheel, keys and a changing model allocate
+nothing without escape analysis (`ControlsAllocationTest`), as do animated frames (`AnimatorTest`).
+
+**Left:**
+- Per-element transforms are baked into primitives; a transform table in the draw list (one entry per element,
+  design 6.1) would let an animated scale rewrite 32 bytes instead of the subtree's primitives. Clips do not follow
+  transforms; glyph raster (hinted) text scales as quads.
+- Mnemonics in menus; a repeat button; logarithmic sliders; an HDR intensity and an eyedropper in the colour picker.
+- The search box of drop-downs and the hex field of the colour picker are hooks for the text-editing branch
+  (`DropDown.FilterSource`, `ColorPicker.hexSlot()`); type-ahead starts the engine's text input while a list is open.
+- Scroll views (and scroll bars) are the data controls'; menus, drop-downs and tab strips scroll minimally inside.
+- GPU screenshots of `ControlsGallery` by the integrator.
