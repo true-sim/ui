@@ -7,4 +7,12 @@ description = "UI text for true-sim: fonts, shaping and rasterizer interfaces, i
 
 dependencies {
     api(project(":ui-core"))
+    api("com.truesim.common:common-jobs:0.3.2")
+}
+
+// Screenshots (TRUESIM_SCREENSHOTS=true) and benchmarks (TRUESIM_BENCHMARK=true) read these; normal runs skip them.
+tasks.test {
+    if (providers.environmentVariable("TRUESIM_BENCHMARK").orNull == "true") {
+        extensions.configure<JacocoTaskExtension> { isEnabled = false } // measure the code, not its coverage probes
+    }
 }
