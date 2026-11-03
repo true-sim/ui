@@ -1037,6 +1037,8 @@ public final class Ui {
         all.add(StyleResolver.CACHE_LIMIT);
         all.add(StyleWatcher.DELAY);
         all.addAll(Interaction.tunables());
+        all.addAll(com.truesim.ui.controls.text.TextEditor.tunables());
+        all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
         }
