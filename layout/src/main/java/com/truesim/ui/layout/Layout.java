@@ -39,6 +39,7 @@ public final class Layout {
     static final int AT_MOST = Measure.AT_MOST;
     static final float INF = Float.POSITIVE_INFINITY;
 
+    private static final LayoutKind[] KIND_VALUES = LayoutKind.values();
     static final byte K_NONE = 0;
     static final byte K_STACK = 1;
     static final byte K_FLEX = 2;
@@ -1240,6 +1241,11 @@ public final class Layout {
     public boolean shown(int slot) {
         return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot]
             && !collapsed[slot];
+    }
+
+    /** How the element arranges its children: {@link #kind(int, LayoutKind)}'s value (checks of a laid-out tree read it). */
+    public LayoutKind kind(int slot) {
+        return KIND_VALUES[kind[slot]];
     }
 
     /** The element's left edge in UI pixels (snapped). */
