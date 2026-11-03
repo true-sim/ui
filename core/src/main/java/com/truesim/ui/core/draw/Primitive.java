@@ -52,6 +52,13 @@ public final class Primitive {
     public static final int FLAG_GRADIENT = 1;
     /** Flag: a glyph's texels are coverage (a hinted raster glyph), not an MTSDF. */
     public static final int FLAG_RASTER = 2;
+    /**
+     * Flag: a glyph's texels are colour (an emoji bitmap on an {@code RGBA8_SRGB} page, straight alpha, colours bled
+     * into transparent texels so filtering shows no dark fringes): the shader samples the page (hardware sRGB decode)
+     * and multiplies it by colour A, {@code rgb * a.rgb, alpha * a.a}: white with the text's opacity keeps the emoji's
+     * own colours. Pixel range, outline and weight are 0.
+     */
+    public static final int FLAG_COLOR = 4;
 
     /** Word offsets. */
     public static final int HEADER = 0;

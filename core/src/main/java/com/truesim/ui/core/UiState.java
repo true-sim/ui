@@ -23,9 +23,13 @@ public final class UiState {
     public static final int DROP_TARGET = 1 << 9;
     /** The source of a drag session in progress ({@code :dragging}). */
     public static final int DRAGGING = 1 << 10;
+    /** A value that fails its control's validation: a text field's filter or range ({@code :invalid}). */
+    public static final int INVALID = 1 << 11;
+    /** An editable control that shows its value but does not take changes ({@code :read-only}). */
+    public static final int READ_ONLY = 1 << 12;
 
     private static final String[] NAMES = {"hover", "pressed", "focused", "disabled", "selected", "checked",
-        "expanded", "editing", "focus-visible", "drop-target", "dragging"};
+        "expanded", "editing", "focus-visible", "drop-target", "dragging", "invalid", "read-only"};
 
     private UiState() {
     }
