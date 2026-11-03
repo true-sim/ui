@@ -1667,6 +1667,48 @@ PRs:
 - Done: tools written with the façade render through the same pipeline, and the gallery is readable by Windows
   Narrator.
 
+### Plan additions from the user (2026-11-03)
+
+The order of the areas below does not matter to the user; independent areas may be built in parallel on their own
+branches once the A2 groundwork (picking, events, focus, layers) is in, which they all share. Every area keeps the
+rules: everything stylable from `.tss`, tunables as settings, nothing allocated per frame, tests, screenshots; still
+one PR per repository per group, CI and release once per group.
+
+- **Text editing** (A2 pulled forward: focus, keyboard routing through `UiCommand`s, the IME rectangle in
+  `engine-platform`, the clipboard through the engine's `Clipboard`): single-line text fields (caret, selection by
+  pointer and keys incl. word and line, copy/cut/paste, undo/redo, IME preedit inline and the candidate window placed
+  by the IME rectangle, BiDi caret movement, scrolling within the field, placeholder, maximum length, filters and
+  validation, read-only) and password fields (masking, reveal toggle, no copy, no IME); multi-line text areas (word
+  wrap, virtualized scrolling for 1 MB of text, tabs, optional line numbers, soft and hard breaks); rich text (spans
+  with colour, weight, italic, size, underline/strike, highlight, links that can run console commands, inline images
+  and icons, all by `.tss` span classes; an inline markup to author it; editable in text areas); colour emoji
+  (bundled Noto Color Emoji, OFL; ZWJ sequences, skin tones, flags, variation selectors; emoticon and shortcode
+  replacement as an optional input filter behind a setting).
+- **Overlays, hovers, windows, docking**: a layer stack per view (HUD, overlays, pop-ups, tooltips, modal, debug)
+  with z-order, input blocking or passthrough and dimming backdrops; overlays anchored to elements, 3D points or scene
+  nodes, kept on screen and flipped; hover, pressed, focus and disabled states everywhere; tooltips (delay, follow or
+  anchored, rich content, long-press and focus equivalents), hover cards and popovers with hover intent; floating
+  windows (move, resize by edges and corners, minimise, maximise, close, title bar, modal and modeless, z-order and
+  focus on click, snapping, remembered positions, keyboard and gamepad move/resize, also in 3D/VR panels); docking
+  (left/right/top/bottom/centre, tab groups with drag between and reorder, split panes with splitters, drop previews,
+  undocking to floating windows, nesting, a serialisable stylable layout description, optionally separate OS
+  windows).
+- **Container controls** (emphasised): tabbed panes (strips on any side, scrolling or wrapping, closable and
+  reorderable tabs, overflow menu), collapsibles (headers, accordions single or multi open, animated by style
+  transitions), group boxes and fieldsets, expanders, split panes outside docking, cards, carousels and pagers,
+  steppers and wizards, sidebars and drawers, scroll views with sticky headers.
+- **Basic controls**: buttons (plain, icon, toggle), checkboxes, radio groups, switches, segmented controls, labels
+  with icons, images, separators, progress bars, spinners, sliders (range, vertical), number fields with steppers and
+  drag-to-change, colour picker, date and time pickers, search box, tag and chip input, key-binding capture (for the
+  input system's rebinding), drop-downs with search, message and confirm dialogs, toasts, badges, menu bars, context
+  and pop-up menus with submenus, toolbars, status bars, breadcrumbs, scroll panes with stylable scrollbars (touch
+  momentum, gamepad).
+- **Data controls**: virtualized list boxes (single and multi select), tree views (lazy, drag and drop), tables and
+  data grids (sort, filter, resizable, reorderable and frozen columns, inline editing, virtualized).
+- **Also added**: a file browser with open and save dialogs (an engine-agnostic file model; native OS dialogs maybe
+  later); a minimap or picture-in-picture camera view control (a second view rendered into a UI image).
+- **Left out for now**: the node-graph editor.
+
 ## 14. Risks and open questions
 
 - The presenter's `UI` key and the composition in the output transform are planned (frame-graph-v2 §4.8) but not
