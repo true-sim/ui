@@ -1,0 +1,600 @@
+// The basic and container controls of ui-controls (com.truesim.ui.controls.basic) in the default theme. Their own keys
+// (spinner-period, spinner-dots, spinner-fade, progress-period, press-flash, tab-overflow) are declared by
+// BasicStyles. Icons are image elements of style name "icon" whose id names them; the theme maps the ids it knows to
+// "icons/<id>" images a game registers (none ship with the toolkit).
+
+@use "tokens";
+@use "mixins" as *;
+
+// ------------------------------------------------------------------ icons
+
+image.icon { size: 16px; image: none; }
+image.icon#previous { image: "icons/previous" var(--fg) contain; }
+image.icon#next { image: "icons/next" var(--fg) contain; }
+image.icon#more { image: "icons/more" var(--fg) contain; }
+image.icon#close { image: "icons/close" var(--fg) contain; }
+image.icon#dismiss { image: "icons/dismiss" var(--fg) contain; }
+image.icon#up { image: "icons/up" var(--fg) contain; }
+image.icon#down { image: "icons/down" var(--fg) contain; }
+image.icon#dropdown-arrow { image: "icons/dropdown-arrow" var(--fg) contain; }
+image.icon#menu-arrow { image: "icons/menu-arrow" var(--fg) contain; }
+image.icon#collapsible-arrow { image: "icons/collapsible-arrow" var(--fg) contain; }
+image.icon#crumb-separator { image: "icons/crumb-separator" var(--fg) contain; }
+
+// ------------------------------------------------------------------ buttons
+
+%button-base {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s tokens.$space-m;
+  radius: tokens.$radius-s;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  cursor: pointer;
+  press-flash: 100ms;
+  focus-ring-offset: 2px;
+  transition: background tokens.$fast ease-out, border tokens.$fast ease-out, scale tokens.$fast ease-out,
+    opacity tokens.$normal;
+
+  &:hover { background: box(lighten(var(--surface-raised), 6%)); }
+  &:pressed { background: box(darken(var(--surface-raised), 4%)); scale: 0.97; }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
+
+button { @extend %button-base; }
+button.default { background: box(var(--accent)); border: 1px var(--accent); }
+button.default:hover { background: box(lighten(var(--accent), 8%)); }
+button.default label { color: contrast(#3fa7ff); }
+
+toggle-button {
+  @extend %button-base;
+  &:checked { background: box(var(--accent)); border: 1px var(--accent); }
+}
+
+// ------------------------------------------------------------------ checkbox, radio, switch
+
+checkbox, radio, switch {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-m;
+  padding: tokens.$space-xs;
+  cursor: pointer;
+  press-flash: 100ms;
+  radius: tokens.$radius-s;
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
+
+check-box, radio-box {
+  layout: flex;
+  align-items: center;
+  justify-content: center;
+  size: 16px;
+  background: box(var(--track));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  transition: background tokens.$fast ease-out, border tokens.$fast ease-out;
+}
+radio-box { radius: 999px; }
+check-mark, radio-dot { size: 8px; opacity: 0; radius: 2px;
+  background: box(contrast(#3fa7ff)); transition: opacity tokens.$fast ease-out, scale tokens.$fast ease-out;
+  scale: 0.5; }
+radio-dot { radius: 999px; }
+// Controls copy their checked, indeterminate, selected and expanded states onto their parts, so no rule needs a
+// state on an ancestor (that would make every hover restyle the hovered element's subtree).
+checkbox:hover, radio:hover, switch:hover { background: box(rgba(#8b949e, 0.12)); }
+check-box:checked, radio-box:checked, check-box:indeterminate {
+  background: box(var(--accent)); border: 1px var(--accent);
+}
+check-mark:checked, radio-dot:checked { opacity: 1; scale: 1; }
+check-mark:indeterminate { opacity: 1; scale: 1; size: 10px 2px; }
+
+switch-track {
+  layout: anchors;
+  size: 34px 18px;
+  radius: 999px;
+  background: box(var(--track));
+  border: 1px var(--edge);
+  transition: background tokens.$normal ease-out;
+}
+switch-knob {
+  anchors: 0 0 0 0;
+  offsets: 2px 2px 14px 14px;
+  radius: 999px;
+  background: box(var(--fg));
+  transition: offsets tokens.$normal ease-out, background tokens.$normal ease-out;
+}
+switch-track:checked { background: box(var(--accent)); border: 1px var(--accent); }
+switch-knob:checked { offsets: 18px 2px 30px 14px; background: box(contrast(#3fa7ff)); }
+
+radio-group { layout: flex; direction: column; gap: tokens.$space-xs; }
+
+segmented {
+  layout: flex;
+  direction: row;
+  gap: 1px;
+  padding: 2px;
+  radius: tokens.$radius-m;
+  background: box(var(--track));
+}
+segment {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-xs tokens.$space-m;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  press-flash: 100ms;
+  transition: background tokens.$fast ease-out;
+  &:hover { background: box(rgba(#8b949e, 0.18)); }
+  &:checked { background: box(var(--surface-raised)); @include raised(1); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:disabled { opacity: 0.45; }
+}
+
+// ------------------------------------------------------------------ text, images, separators, badges
+
+icon-label { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; }
+separator { background: box(var(--edge)); align-self: stretch; }
+separator[orientation=horizontal] { height: 1px; margin: tokens.$space-s 0; }
+separator[orientation=vertical] { width: 1px; margin: 0 tokens.$space-s; }
+badge {
+  layout: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 tokens.$space-s;
+  radius: 999px;
+  background: box(var(--danger));
+}
+badge label { @include text(caption, bold); color: white; }
+
+// ------------------------------------------------------------------ progress and spinner
+
+progress {
+  layout: none;
+  width: 160px;
+  height: 6px;
+  radius: 999px;
+  background: box(var(--track));
+  clip: true;
+  progress-period: 1.4s;
+}
+progress-fill { height: 100%; radius: 999px; background: box(var(--accent)); }
+progress-fill:indeterminate { width: 35%; }
+
+spinner {
+  layout: none;
+  size: 24px;
+  spinner-dots: 8;
+  spinner-period: 900ms;
+  spinner-fade: 0.15;
+}
+spinner-dot { size: 4px; radius: 999px; background: box(var(--fg)); }
+
+// ------------------------------------------------------------------ slider
+
+slider {
+  layout: anchors;
+  cursor: pointer;
+  radius: tokens.$radius-s;
+  &:focus-visible { focus-ring: 2px var(--accent); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
+slider[orientation=horizontal] { width: 160px; height: 20px; padding: 0 8px; }
+slider[orientation=vertical] { width: 20px; height: 120px; padding: 8px 0; }
+slider-track { radius: 999px; background: box(var(--track)); }
+slider[orientation=horizontal] slider-track, slider[orientation=horizontal] slider-fill { height: 4px; }
+slider[orientation=vertical] slider-track, slider[orientation=vertical] slider-fill { width: 4px; }
+slider-fill { radius: 999px; background: box(var(--accent)); }
+slider-tick { size: 2px 8px; background: box(var(--fg-muted)); }
+slider[orientation=vertical] slider-tick { size: 8px 2px; }
+slider-thumb {
+  size: 14px;
+  radius: 999px;
+  background: box(var(--fg));
+  border: 2px var(--accent);
+  transition: scale tokens.$fast ease-out;
+  &:pressed { scale: 1.15; }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+
+// ------------------------------------------------------------------ colour picker
+
+color-picker { layout: flex; direction: column; gap: tokens.$space-s; width: 200px; }
+color-area { layout: anchors; height: 120px; radius: tokens.$radius-s; clip: true; cursor: crosshair;
+  background: box(red);
+  &:focus-visible { focus-ring: 2px var(--accent); } }
+color-area-white { background: linear-gradient(90deg, white, rgba(white, 0)); }
+color-area-black { background: linear-gradient(180deg, rgba(black, 0), black); }
+color-area-cursor { size: 10px; radius: 999px; border: 2px white; shadow: 0 0 2px rgba(black, 0.6); }
+color-hue, color-alpha { layout: anchors; height: 12px; radius: tokens.$radius-s; cursor: pointer;
+  &:focus-visible { focus-ring: 2px var(--accent); } }
+color-hue-strip { layout: flex; direction: row; radius: tokens.$radius-s; clip: true; }
+color-hue-segment { grow: 1; basis: 0px; background: linear-gradient(90deg, red, yellow); }
+color-alpha-checker { radius: tokens.$radius-s; background: box(#808080); }
+color-alpha-gradient { radius: tokens.$radius-s; background: linear-gradient(90deg, rgba(white, 0), white); }
+color-hue-cursor, color-alpha-cursor { size: 6px 16px; radius: 2px; border: 2px white;
+  shadow: 0 0 2px rgba(black, 0.6); }
+color-preview { height: 20px; radius: tokens.$radius-s; border: 1px var(--edge); background: box(black); }
+color-hex-slot { layout: flex; direction: row; }
+label.color-hex, color-hex-slot label { font-family: tokens.$font-numbers; @include text(caption); }
+color-swatches { layout: flex; direction: row; wrap: wrap; gap: tokens.$space-xs; }
+color-swatch { size: 16px; radius: tokens.$radius-s; border: 1px var(--edge); background: box(black);
+  cursor: pointer; &:hover { border: 1px var(--fg); } &:focus-visible { focus-ring: 2px var(--accent); } }
+
+// ------------------------------------------------------------------ date and time
+
+date-picker { layout: flex; direction: column; gap: tokens.$space-s; padding: tokens.$space-s; }
+date-header { layout: flex; direction: row; align-items: center; justify-content: space-between; }
+date-header label { @include text(body, 600); }
+date-weekdays, date-grid { layout: grid; grid-template-columns: 32px 32px 32px 32px 32px 32px 32px; gap: 2px; }
+label.date-weekday { @include text(caption); color: var(--fg-muted); text-align: center; }
+date-day {
+  layout: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  transition: background tokens.$fast ease-out;
+  &:hover { background: box(rgba(#8b949e, 0.18)); }
+  &:selected { background: box(var(--accent)); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+date-day.today { border: 1px var(--accent); }
+date-day.outside label { color: var(--fg-muted); }
+date-day label:selected { color: contrast(#3fa7ff); }
+
+time-picker { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+time-field {
+  layout: flex;
+  direction: column;
+  align-items: center;
+  padding: tokens.$space-xs;
+  radius: tokens.$radius-s;
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+time-field label { font-family: tokens.$font-numbers; @include text(title, 600); }
+button.time-up, button.time-down { padding: 0 tokens.$space-s; background: box(rgba(white, 0)); border: 0 transparent; }
+label.time-separator { @include text(title, 600); }
+
+// ------------------------------------------------------------------ key binding
+
+key-binding {
+  @extend %button-base;
+  min-width: 96px;
+  font-family: tokens.$font-numbers;
+  &:editing { border: 1px var(--accent); background: box(rgba(#3fa7ff, 0.15)); }
+}
+
+// ------------------------------------------------------------------ drop-down
+
+dropdown {
+  @extend %button-base;
+  justify-content: space-between;
+  min-width: 120px;
+  &:expanded { border: 1px var(--accent); }
+}
+dropdown-list, menu {
+  layout: flex;
+  direction: column;
+  padding: tokens.$space-xs;
+  background: box(lighten(#161b22, 4%));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(3);
+  pointer-events: all;
+}
+dropdown-viewport, menu-viewport { layout: none; max-height: 260px; clip: true; }
+dropdown-items, menu-items { layout: flex; direction: column; min-width: 100%; }
+dropdown-item {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  padding: tokens.$space-xs tokens.$space-m;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  &:hover, &:focused { background: box(rgba(#8b949e, 0.18)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.28)); }
+}
+label.dropdown-filter { @include text(caption); color: var(--fg-muted); padding: tokens.$space-xs tokens.$space-m; }
+
+// ------------------------------------------------------------------ menus
+
+menu-item {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-m;
+  padding: tokens.$space-xs tokens.$space-m;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  &:hover, &:focused, &:expanded { background: box(rgba(#3fa7ff, 0.22)); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
+menu-item label { grow: 1; }
+label.menu-shortcut { grow: 0; color: var(--fg-muted); @include text(caption); }
+menu-check { size: 12px; radius: 2px; }
+menu-check:checked { background: box(var(--accent)); }
+menu-separator { height: 1px; margin: tokens.$space-xs tokens.$space-s; background: box(var(--edge)); }
+menu-bar {
+  layout: flex;
+  direction: row;
+  gap: tokens.$space-xs;
+  padding: tokens.$space-xs;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+}
+menu-title {
+  @extend %button-base;
+  background: box(rgba(white, 0));
+  border: 0 transparent;
+  &:expanded { background: box(rgba(#3fa7ff, 0.22)); }
+}
+
+// ------------------------------------------------------------------ dialogs and notifications
+
+dialog-backdrop {
+  layout: flex;
+  align-items: center;
+  justify-content: center;
+  background: box(rgba(black, 0));
+  pointer-events: all;
+  transition: background tokens.$normal ease-out;
+  &:expanded { background: box(rgba(black, 0.5)); }
+}
+dialog {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-m;
+  min-width: 280px;
+  max-width: 480px;
+  padding: tokens.$space-l tokens.$space-xl;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-l;
+  @include raised(4);
+  opacity: 0;
+  scale: 0.96;
+  transition: opacity tokens.$normal ease-out, scale tokens.$normal ease-out;
+  &:expanded { opacity: 1; scale: 1; }
+}
+label.dialog-title { @include text(title, 600); }
+label.dialog-message { color: var(--fg-muted); }
+dialog-buttons { layout: flex; direction: row; justify-content: end; gap: tokens.$space-s; }
+
+layer#notifications { layout: anchors; }
+toast-stack {
+  layout: flex;
+  direction: column;
+  justify-content: end;
+  gap: tokens.$space-s;
+  anchors: 1 0 1 1;
+  offsets: -336px 16px -16px -16px;
+}
+toast {
+  layout: grid;
+  grid-template-columns: 1fr auto;
+  gap: tokens.$space-xs;
+  padding: tokens.$space-m tokens.$space-l;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(3);
+  opacity: 0;
+  offsets: 24px 0 0 0;
+  transition: opacity tokens.$normal ease-out;
+  &:expanded { opacity: 1; }
+}
+label.toast-title { @include text(body, 600); grid-column: 1; }
+label.toast-message { color: var(--fg-muted); grid-column: 1; }
+toast button#dismiss { grid-column: 2; grid-row: 1; padding: 2px; background: box(rgba(white, 0)); border: 0 transparent; }
+
+// ------------------------------------------------------------------ toolbars, status bars, breadcrumbs
+
+toolbar {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-xs;
+  padding: tokens.$space-xs;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  clip: true;
+}
+toolbar-viewport { layout: none; grow: 1; shrink: 1; basis: 0px; clip: true; }
+toolbar-items { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+status-bar {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-l;
+  padding: tokens.$space-xs tokens.$space-m;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+}
+label.status-section { @include text(caption); color: var(--fg-muted); }
+breadcrumbs { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+crumb {
+  @extend %button-base;
+  padding: tokens.$space-xs;
+  background: box(rgba(white, 0));
+  border: 0 transparent;
+  &:hover { background: box(rgba(#8b949e, 0.18)); }
+}
+crumb label { color: var(--accent); }
+crumb label:selected { color: var(--fg); font-weight: 600; }
+image.icon#crumb-separator { size: 12px; }
+
+// ------------------------------------------------------------------ tabs
+
+tab-pane { layout: flex; tab-overflow: scroll; }
+tab-pane[side=top] { direction: column; }
+tab-pane[side=bottom] { direction: column-reverse; }
+tab-pane[side=left] { direction: row; }
+tab-pane[side=right] { direction: row-reverse; }
+tab-header { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+tab-pane[side=left] tab-header, tab-pane[side=right] tab-header { direction: column; }
+tab-strip { layout: none; grow: 1; shrink: 1; basis: 0px; clip: true; }
+tab-pane[side=left] tab-strip, tab-pane[side=right] tab-strip { min-height: 0px; }
+tab-row { layout: flex; direction: row; gap: 2px; }
+tab-pane[side=left] tab-row, tab-pane[side=right] tab-row { direction: column; }
+tab-pane[overflow=wrap] tab-row { wrap: wrap; width: 100%; }
+tab {
+  @extend %button-base;
+  radius: tokens.$radius-s tokens.$radius-s 0 0;
+  background: box(rgba(white, 0));
+  border: 0 transparent;
+  shrink: 0;
+  &:hover { background: box(rgba(#8b949e, 0.14)); }
+  &:selected { background: box(var(--surface-raised)); }
+  &:dragging { opacity: 0.6; }
+}
+button.tab-close { padding: 0; background: box(rgba(white, 0)); border: 0 transparent; }
+tab-content {
+  layout: stack;
+  grow: 1;
+  padding: tokens.$space-m;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: 0 tokens.$radius-s tokens.$radius-s tokens.$radius-s;
+}
+
+// ------------------------------------------------------------------ collapsibles, groups, cards
+
+collapsible, expander { layout: flex; direction: column; }
+collapsible-header {
+  @extend %button-base;
+  justify-content: start;
+  background: box(var(--surface));
+  &:expanded { radius: tokens.$radius-s tokens.$radius-s 0 0; }
+}
+expander collapsible-header { background: box(rgba(white, 0)); border: 0 transparent; }
+image.icon#collapsible-arrow { transition: scale tokens.$fast ease-out; }
+collapsible-body {
+  layout: none;
+  clip: true;
+  transition: height tokens.$normal ease-out;
+}
+collapsible-body > * { width: 100%; }
+accordion { layout: flex; direction: column; gap: 2px; }
+
+group-box {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  &:disabled { opacity: 0.5; }
+}
+label.group-title { @include text(caption, 600); color: var(--fg-muted); }
+group-content { layout: flex; direction: column; gap: tokens.$space-s; }
+
+card {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-m;
+  padding: tokens.$space-m tokens.$space-l;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(1);
+  transition: background tokens.$fast ease-out, scale tokens.$fast ease-out;
+  &:hover { background: box(lighten(#161b22, 8%)); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+card-header { layout: flex; direction: column; gap: 2px; }
+label.card-title { @include text(title, 600); }
+label.card-subtitle { @include text(caption); color: var(--fg-muted); }
+card-body { layout: flex; direction: column; gap: tokens.$space-s; }
+card-footer { layout: flex; direction: row; justify-content: end; gap: tokens.$space-s; }
+
+// ------------------------------------------------------------------ split panes
+
+split-pane { layout: flex; align-items: stretch; }
+split-pane[orientation=horizontal] { direction: row; }
+split-pane[orientation=vertical] { direction: column; }
+split-first { shrink: 1; min-width: 40px; }
+split-second { grow: 1; shrink: 1; basis: 0px; min-width: 40px; }
+split-pane[orientation=vertical] split-first, split-pane[orientation=vertical] split-second { min-width: auto;
+  min-height: 40px; }
+splitter {
+  shrink: 0;
+  background: box(var(--edge));
+  transition: background tokens.$fast ease-out;
+  &:hover, &:pressed { background: box(var(--accent)); }
+  &:focus-visible { focus-ring: 2px var(--accent); focus-ring-offset: 0px; }
+}
+split-pane[orientation=horizontal] splitter { width: 4px; cursor: resize-ew; }
+split-pane[orientation=vertical] splitter { height: 4px; cursor: resize-ns; }
+
+// ------------------------------------------------------------------ carousel, stepper, drawer
+
+carousel {
+  layout: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: tokens.$space-s;
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+carousel-viewport { layout: anchors; height: 140px; clip: true; radius: tokens.$radius-m; }
+carousel-track { layout: flex; direction: row; transition: offsets tokens.$normal ease-out; }
+carousel-page { grow: 1; basis: 0px; layout: flex; align-items: stretch; }
+carousel-dots { grid-column: 1 span 3; layout: flex; direction: row; justify-content: center; gap: tokens.$space-s; }
+button.carousel-dot {
+  size: 8px;
+  padding: 0;
+  radius: 999px;
+  background: box(var(--track));
+  border: 0 transparent;
+  &:selected { background: box(var(--accent)); }
+}
+
+stepper { layout: flex; direction: column; gap: tokens.$space-m; }
+stepper-steps { layout: flex; direction: row; gap: tokens.$space-s; }
+step {
+  @extend %button-base;
+  background: box(rgba(white, 0));
+  border: 0 transparent;
+}
+step label:selected { color: var(--accent); }
+step label.step-number:checked { background: box(var(--good)); }
+label.step-number {
+  size: 20px;
+  radius: 999px;
+  text-align: center;
+  background: box(var(--track));
+  @include text(caption, bold);
+}
+step label.step-number:selected { background: box(var(--accent)); color: contrast(#3fa7ff); }
+stepper-content { layout: stack; padding: tokens.$space-m; border: 1px var(--edge); radius: tokens.$radius-m; }
+stepper-buttons { layout: flex; direction: row; justify-content: space-between; }
+
+drawer {
+  layout: flex;
+  direction: column;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  clip: true;
+  transition: offsets tokens.$normal ease-out, width tokens.$normal ease-out, height tokens.$normal ease-out;
+}
+drawer[side=left], drawer[side=right] { width: 260px; }
+drawer[side=top], drawer[side=bottom] { height: 200px; }
+drawer[mode=modal] { @include raised(4); }
+drawer-content { layout: flex; direction: column; gap: tokens.$space-s; padding: tokens.$space-m; grow: 1; }
+drawer-backdrop {
+  layout: anchors;
+  background: box(rgba(black, 0));
+  transition: background tokens.$normal ease-out;
+  &:expanded { background: box(rgba(black, 0.45)); }
+}

@@ -54,7 +54,7 @@ class ThemesTest {
     void theShippedThemesCompile() {
         Compilation c = Tss.compileResource(Tss.THEMES + "/default-theme.tss");
         assertThat(c.sources()).containsExactly(Tss.THEMES + "/default-theme.tss", Tss.THEMES + "/_tokens.tss",
-            Tss.THEMES + "/_mixins.tss");
+            Tss.THEMES + "/_mixins.tss", Tss.THEMES + "/_basic.tss");
         assertThat(c.warnings()).isEmpty();
         StyleSheet theme = Tss.defaultTheme();
         assertThat(theme).isEqualTo(c.sheet());
