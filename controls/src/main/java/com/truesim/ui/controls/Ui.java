@@ -82,6 +82,34 @@ import java.util.List;
  */
 public final class Ui {
 
+    /** {@link #codeLayout} bit: code sets the element's layout kind; its style's {@code layout} is not applied. */
+    public static final int CODE_KIND = 1;
+    /** {@link #codeLayout} bit: code sets the element's anchors and offsets (a virtualized row's place). */
+    public static final int CODE_PLACEMENT = 2;
+    /** {@link #codeLayout} bit: code sets the element's width (a table column's, resized by the user). */
+    public static final int CODE_WIDTH = 4;
+    /** {@link #codeLayout} bit: code sets the element's height. */
+    public static final int CODE_HEIGHT = 8;
+
+    /**
+     * Code a control runs every frame inside {@link #update}: after input, before styles and layout, and again once
+     * layout is done. A virtualized list binds the rows its scroll position shows before layout, so input shows in the
+     * same frame, and after layout checks what layout found (its viewport's size, rows' measured heights).
+     */
+    public interface Updater {
+
+        /** After input was processed, before styles and layout; {@code nanos} is the frame's time (0 without input). */
+        void beforeLayout(long nanos);
+
+        /**
+         * After layout: returns true if it changed elements so that styles and layout must run again in this frame,
+         * which they do once (whatever later updaters return).
+         */
+        default boolean afterLayout() {
+            return false;
+        }
+    }
+
     private static final int NONE = 0;
     private static final int TEXT = 1;
     private static final int IMAGE = 2;
@@ -125,6 +153,9 @@ public final class Ui {
     private int clipPass;
     private boolean clipsMoved;
     private final Element[] previews = new Element[UiInput.MAX_POINTERS];
+    private int[] codeLayout = new int[0];
+    private Updater[] updaters = new Updater[4];
+    private int updaterCount;
 
     private boolean[] rebuild = new boolean[8];
     private boolean[] rebuilt = new boolean[8];
@@ -211,6 +242,7 @@ public final class Ui {
         }
         ensure();
         content[e.slot()] = NONE;
+        codeLayout[e.slot()] = 0;
         applied[e.slot()] = null; // a reused slot applies its style again
         return e;
     }
@@ -237,7 +269,7 @@ public final class Ui {
             textSlots = Arrays.copyOf(textSlots, textSlotCount * 2);
         }
         textSlots[textSlotCount++] = slot;
-        e.semantics(Role.TEXT, initial.toString());
+        e.semantics(Role.TEXT, strings[slot]); // the live text: the name follows text()
         return e;
     }
 
@@ -321,6 +353,41 @@ public final class Ui {
         return worldSpace;
     }
 
+    /**
+     * Makes code own some of {@code element}'s layout inputs ({@link #CODE_KIND}, {@link #CODE_PLACEMENT},
+     * {@link #CODE_WIDTH}, {@link #CODE_HEIGHT} or'ed): the style's values for them are no longer applied, so what a
+     * control sets on the {@link #layout()} stays when the element's style resolves again (a state changed). The rest
+     * still comes from the style.
+     */
+    public void codeLayout(Element element, int bits) {
+        codeLayout[element.slot()] = bits;
+    }
+
+    /** The layout inputs code owns for {@code element} ({@link #codeLayout}). */
+    public int codeLayout(Element element) {
+        return codeLayout[element.slot()];
+    }
+
+    /** Runs {@code updater} in every {@link #update}, after those added before. */
+    @AllowAllocation("controls are made when a UI is built")
+    public void addUpdater(Updater updater) {
+        if (updaterCount == updaters.length) {
+            updaters = Arrays.copyOf(updaters, updaterCount * 2);
+        }
+        updaters[updaterCount++] = updater;
+    }
+
+    /** Stops running {@code updater}. */
+    public void removeUpdater(Updater updater) {
+        for (int i = 0; i < updaterCount; i++) {
+            if (updaters[i] == updater) {
+                System.arraycopy(updaters, i + 1, updaters, i, updaterCount - i - 1);
+                updaters[--updaterCount] = null;
+                return;
+            }
+        }
+    }
+
     /** Follows a development file watch: each update applies its last good sheet. */
     public void watch(StyleWatcher sheets) {
         this.watcher = sheets;
@@ -331,6 +398,7 @@ public final class Ui {
         int n = store.capacity();
         if (content.length < n) {
             content = Arrays.copyOf(content, n);
+            codeLayout = Arrays.copyOf(codeLayout, n);
             blocks = Arrays.copyOf(blocks, n);
             strings = Arrays.copyOf(strings, n);
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
@@ -377,6 +445,10 @@ public final class Ui {
             interaction.process(input, nanos);
             ensure();
         }
+        for (int i = 0; i < updaterCount; i++) {
+            updaters[i].beforeLayout(nanos);
+        }
+        ensure();
         attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
@@ -398,7 +470,20 @@ public final class Ui {
         }
         resolver.update();
         ensure();
+        stylesAndLayout(width, height);
+        boolean again = false;
+        for (int i = 0; i < updaterCount; i++) {
+            again |= updaters[i].afterLayout();
+        }
+        if (again) {
+            ensure();
+            stylesAndLayout(width, height);
+        }
+        recordChanges();
+    }
 
+    /** Resolves the styles of queued elements, applies them, and lays out: once a frame, or twice for updaters. */
+    private void stylesAndLayout(float width, float height) {
         // styles and text: the queue grows while resolving (children of changed contexts)
         for (int i = 0; i < store.dirtyCount(); i++) {
             int slot = store.dirtySlots()[i];
@@ -439,7 +524,10 @@ public final class Ui {
                 clipsMoved = true;
             }
         }
+    }
 
+    /** Records what changed into the layers' draw lists and ends the frame. */
+    private void recordChanges() {
         for (int li = 0; li < layerStack.count(); li++) {
             rebuilt[li] = rebuild[li];
             if (rebuild[li]) {
@@ -533,8 +621,11 @@ public final class Ui {
         Insets padding = s.get(Styles.PADDING);
         Insets margin = s.get(Styles.MARGIN);
         float bw = border.width();
-        layout.kind(slot, KINDS[s.get(Styles.LAYOUT).ordinal()])
-            .direction(slot, DIRECTIONS[s.get(Styles.DIRECTION).ordinal()])
+        int code = codeLayout[slot];
+        if ((code & CODE_KIND) == 0) {
+            layout.kind(slot, KINDS[s.get(Styles.LAYOUT).ordinal()]);
+        }
+        layout.direction(slot, DIRECTIONS[s.get(Styles.DIRECTION).ordinal()])
             .wrap(slot, WRAPS[s.get(Styles.WRAP).ordinal()])
             .justifyContent(slot, JUSTIFIES[s.get(Styles.JUSTIFY_CONTENT).ordinal()])
             .alignItems(slot, ALIGNS[s.get(Styles.ALIGN_ITEMS).ordinal()])
@@ -550,9 +641,13 @@ public final class Ui {
         Length basis = s.get(Styles.BASIS);
         layout.basis(slot, basis.value(), UNITS[basis.unit().ordinal()]);
         Length v = s.get(Styles.WIDTH);
-        layout.width(slot, v.value(), UNITS[v.unit().ordinal()]);
+        if ((code & CODE_WIDTH) == 0) {
+            layout.width(slot, v.value(), UNITS[v.unit().ordinal()]);
+        }
         v = s.get(Styles.HEIGHT);
-        layout.height(slot, v.value(), UNITS[v.unit().ordinal()]);
+        if ((code & CODE_HEIGHT) == 0) {
+            layout.height(slot, v.value(), UNITS[v.unit().ordinal()]);
+        }
         v = s.get(Styles.MIN_WIDTH);
         layout.minWidth(slot, v.value(), UNITS[v.unit().ordinal()]);
         v = s.get(Styles.MIN_HEIGHT);
@@ -561,10 +656,12 @@ public final class Ui {
         layout.maxWidth(slot, v.value(), UNITS[v.unit().ordinal()]);
         v = s.get(Styles.MAX_HEIGHT);
         layout.maxHeight(slot, v.value(), UNITS[v.unit().ordinal()]);
-        Anchors anchors = s.get(Styles.ANCHORS);
-        layout.anchors(slot, anchors.left(), anchors.top(), anchors.right(), anchors.bottom());
-        Insets offsets = s.get(Styles.OFFSETS);
-        layout.offsets(slot, offsets.left(), offsets.top(), offsets.right(), offsets.bottom());
+        if ((code & CODE_PLACEMENT) == 0) {
+            Anchors anchors = s.get(Styles.ANCHORS);
+            layout.anchors(slot, anchors.left(), anchors.top(), anchors.right(), anchors.bottom());
+            Insets offsets = s.get(Styles.OFFSETS);
+            layout.offsets(slot, offsets.left(), offsets.top(), offsets.right(), offsets.bottom());
+        }
         GridPlacement column = s.get(Styles.GRID_COLUMN);
         layout.gridColumnPlacement(slot, column.start(), column.span());
         GridPlacement row = s.get(Styles.GRID_ROW);
