@@ -67,6 +67,9 @@ label.window-title { color: $sun; font-size: 21px; }
 
 window-button {
   size: 22px;
+  layout: flex;
+  align-items: center;
+  justify-content: center;
   radius: 0;
   background: box($sun);
   border: 3px $hot;
@@ -76,6 +79,8 @@ window-button {
   &#close:hover { background: box(#0000ff); }
   &:checked { background: box(#ff6600); }
 }
+
+window-button image.icon { size: 12px; border: 0px $hot; image: "icons/plus" $hot contain; }
 
 window-content { layout: flex; direction: column-reverse; grow: 1; padding: 19px; background: box(rgba($sun, 0.3)); clip: true; }
 

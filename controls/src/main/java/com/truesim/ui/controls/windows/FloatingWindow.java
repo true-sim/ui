@@ -30,7 +30,7 @@ import com.truesim.ui.style.value.Length;
  * {@code maximised}; {@code :selected} while it is the active window), {@code window-frame} (the visible frame:
  * background, border, radius, shadow), {@code window-title-bar}, a {@code label} with style name
  * {@code window-title}, an optional {@code image} icon, {@code window-button} with ids {@code minimise},
- * {@code maximise}, {@code close}, {@code window-content}, and eight {@code window-resize} edges with ids {@code n},
+ * {@code maximise}, {@code close} (each holding an {@code image.icon} of the same id), {@code window-content}, and eight {@code window-resize} edges with ids {@code n},
  * {@code s}, {@code e}, {@code w}, {@code ne}, {@code nw}, {@code se}, {@code sw} (their {@code cursor}s; their
  * thickness is the window's {@code resize-handle}). The smallest size is the window's {@code min-width} and
  * {@code min-height}.
@@ -144,6 +144,7 @@ public final class FloatingWindow {
         for (int i = 0; i < 3; i++) {
             Element b = ui.element("window-button", null).id(buttonIds[i]);
             b.semantics(Role.BUTTON, manager.buttonName(i));
+            b.add(ui.image("icon").id(buttonIds[i])); // the theme's picture: a built-in icon by default
             interaction.on(b, EventType.CLICK, buttonListener);
             buttons[i] = b;
             titleBar.add(b);

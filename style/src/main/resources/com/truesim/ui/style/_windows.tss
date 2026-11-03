@@ -95,17 +95,27 @@ label.window-title {
 }
 
 window-button {
-  size: 14px;
+  size: 16px;
+  layout: flex;
+  align-items: center;
+  justify-content: center;
   radius: 999px;
   background: box(var(--track));
   cursor: pointer;
   @include reactive;
 
-  &:hover { background: box(var(--fg-muted)); }
+  &:hover { background: box(lighten(var(--track), 18%)); }
   &:pressed { scale: 0.9; }
   &#close:hover { background: box(var(--danger)); }
   &:checked { background: box(var(--accent)); }
 }
+
+// the buttons' pictures: built-in icons (a game registering its own under these names replaces them)
+window-button image.icon { size: 10px; }
+window-button image.icon#minimise { image: "icons/minimise" var(--fg) contain; }
+window-button image.icon#maximise { image: "icons/maximise" var(--fg) contain; }
+window[mode=maximised] window-button image.icon#maximise { image: "icons/restore" var(--fg) contain; }
+window-button image.icon#close { image: "icons/close" var(--fg) contain; }
 
 window-content {
   layout: flex;
