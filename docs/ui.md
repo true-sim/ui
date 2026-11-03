@@ -1047,8 +1047,14 @@ shaping goldens would move to the engine's CI and tools would need the engine.
   - pages are bindless textures (engine);
   - about 32 to 48 px per glyph with a pixel range of 4 to 8 (settings);
   - a placeholder for one frame while a glyph is generated, with a generation budget per frame (setting).
-- **Small text** (UI16): FreeType hinted raster glyphs per pixel size below a threshold (a setting), if the stage 1
-  visual check shows MTSDF too soft there.
+- **Small text** (UI16, decided): both techniques behind the setting `ui.text.smallText` (`HINTED`, the default, or
+  `MTSDF`) with `ui.text.hintedBelow` (13 px). `HINTED` draws screen-space glyphs below that size as FreeType's
+  light-hinted coverage at the exact size (1/64 px), rendered at four horizontal phases per pixel so pens stay where
+  shaping put them (to a quarter pixel) while quads sit on whole pixels; text at or above it, world-space panels and
+  text with an outline or weight offset (effects only the distance field has) draw MTSDF. Raster glyphs live in the
+  same atlas pages, keyed by face, glyph, size and phase, generated on the same lane under the same budget and
+  placeholder rule; the GLYPH header flag `FLAG_RASTER` makes the shader take texture alpha times colour alpha.
+  Layout never depends on the choice: switching re-records without reflowing.
 - **Icons**: SVG through NanoSVG (`lwjgl-nanovg`) parsed into paths at load, converted into msdfgen shapes, and put
   in the same MTSDF atlas, so icons scale crisply and tint like text. NanoVG's renderer itself is OpenGL and is not
   used.
@@ -1693,7 +1699,8 @@ PRs:
 - **UI29:** gamepad accept/cancel is a setting following the platform.
 - **The technical decisions** (UI9–UI24 except UI16, UI30, UI31) follow the recommendations; where they name a
   benchmark, the standing rule applies (one clear winner stays; a trade-off keeps both behind a setting).
-- **Open:** UI16 small text (MTSDF only vs hinted raster below a size), after stage 1's visual check.
+- **UI16 small text (2026-11-03):** both techniques behind a setting, hinted raster below 13 px the default
+  (section 6.3).
 - **Rules that apply throughout:** no external libraries beyond the JDK, true-sim's repositories and LWJGL's bindings;
   tunables are settings; only correct techniques are kept; never add latency; nothing allocated per frame.
 
@@ -1701,15 +1708,17 @@ PRs:
 
 ### Group A1 (2026-11-03): built, local branches, not yet in CI
 
-Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text-native`, `ui-controls`,
-`ui-testkit`) and the engine branch `ui-a1` (`engine-ui`, the composition hook in `engine-render`). `ui-controls` was
-started in A1 because the frame that resolves styles, lays out, shapes and records needs all four modules below it.
+Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text-native`, `ui-fonts`,
+`ui-fonts-cjk`, `ui-controls`, `ui-testkit`) and the engine branch `ui-a1` (`engine-ui`, the composition hook in
+`engine-render`). `ui-controls` was started in A1 because the frame that resolves styles, lays out, shapes and records needs all four modules below it.
 
 | Stage | Status | Where |
 |---|---|---|
 | 0 input actions | Built: the action system (engine PR 386); `UiActions` with keyboard/mouse and gamepad defaults (section 10), `UiCommands` (edges and repeats as `UiCommand`s, `ui.confirmButton` per UI29, text capture), `MousePointer` | engine `input`, `ui` |
 | 1 rendering core and text | Built: draw list (`DrawList`, `Primitive`: box, shadow, glyph, image, nine-slice, line), dirty-word tracking, `GpuUiRenderer` (vertex pulling, bindless textures, clip table, dirty-range uploads), `Keys.UI` composited after the tone curve at paper white; FreeType, HarfBuzz, BiDi, itemisation, line breaking, msdfgen MTSDF atlases on job threads and the build-time baker (byte-identical) | `ui-core`, `ui-text`, `ui-text-native`, engine `ui`, `render` |
 | 2 elements, layout, Java styles | Built: `UiStore`/`Element`, layouts (stack, flex, grid, border, anchors, overlay; Yoga as the oracle), `StyleKey`/`StyleSheet` Java builders, selectors with states and facts, the resolution cache, the semantics tree, the frame (`Ui`). Not built: binding, lenses, converters, validators, the `ValueRenderer` registry, tweens, effect channels and transitions (parsed and resolved, not animated) | `ui-core`, `ui-layout`, `ui-style`, `ui-controls` |
+| UI16 small text | Built: `ui.text.smallText` (`HINTED` default, `MTSDF`) and `ui.text.hintedBelow` (13 px); light-hinted FreeType raster at four subpixel phases in the MTSDF atlas pages, `Primitive.FLAG_RASTER`, `Ui.worldSpace`/`TextBlock.worldSpace` for 3D and VR panels (always MTSDF); the engine's shader and `UiTunables` (a choice setting) | `ui-core`, `ui-text`, `ui-text-native`, `ui-controls`, engine `ui` |
+| Bundled fonts | Built: Inter, Noto Sans Arabic, Devanagari, SC and JP (SIL OFL 1.1, `ui-fonts`, `ui-fonts-cjk`); every shaping golden, screenshot and text test (JDK and native backends, controls, the engine's demo) uses them, so the build is the same on Windows and Linux; `TRUESIM_SYSTEM_FONTS=false` (no installed fonts) passes | `ui-fonts`, `ui-fonts-cjk`, tests |
 | 3 `.tss` and the default theme | Built: the language (variables, maps, nesting, mixins, `@use` partials, extend, `@if`/`@each`, functions, unit maths, colour functions), errors with file/line/column/rule/trace, live tokens and token sets, hot reload through a file watch, `default-theme.tss` and `test-theme.tss` | `ui-style` |
 
 **Decisions settled by benchmark** (standing rule: one clear winner stays):
@@ -1742,9 +1751,6 @@ started in A1 because the frame that resolves styles, lays out, shapes and recor
 - The IME rectangle in `engine-platform`; touch, pen and XR pointer sources.
 - 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
 - A multi-range dirty list: one range per list spans all changed elements of a frame.
-- Shaping goldens are pinned to Windows 11 fonts and skip elsewhere; Linux CI needs goldens of its own fonts. No font
-  ships with the toolkit (a font to ship is the user's choice).
-- **UI16 (open):** at 10 to 12 px MTSDF text is softer and lighter than FreeType's hinted raster; at 14 px acceptable;
-  32 px and up crisp. Screenshots: `ui16-small-mtsdf-vs-hinted.png` (ui-text-native's screenshot test). A hinted
-  raster path below about 13 px looks worthwhile; the user decides.
+- Colour emoji: no emoji font is bundled; with bundled fonts only, emoji draws as `.notdef` (a test pins that), and an
+  installed emoji font is used when the registry includes installed fonts.
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
