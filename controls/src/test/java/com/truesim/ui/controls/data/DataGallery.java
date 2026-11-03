@@ -31,6 +31,10 @@ public final class DataGallery {
         Unit withHp(int value) {
             return new Unit(name, value, speed, alive, kind, squad);
         }
+
+        Unit withName(String value) {
+            return new Unit(value, hp, speed, alive, kind, squad);
+        }
     }
 
     public final ScrollPane pane;
@@ -126,7 +130,10 @@ public final class DataGallery {
         }
         TableView<Unit> table = new TableView<>(ui, "Units", new DataView<>(clock, units),
             TableView.SelectionMode.MULTI_ROW);
-        table.add(Column.<Unit>ofText("Name", Unit::name).width(110));
+        Column<Unit> name = Column.<Unit>ofText("Name", Unit::name).width(110)
+            .editor(com.truesim.ui.controls.text.TextCellEditor.create("Name"), Unit::name, Unit::withName);
+        table.add(name);
+        com.truesim.ui.controls.text.TextColumnFilter.attach(ui, name, Unit::name, "Filter names");
         table.add(Column.<Unit>ofInt("HP", Unit::hp).width(70)
             .editor(Editors.integer(0, 100, 5), Unit::hp, Unit::withHp));
         table.add(Column.<Unit>ofDouble("Speed", Unit::speed, 2).width(80));

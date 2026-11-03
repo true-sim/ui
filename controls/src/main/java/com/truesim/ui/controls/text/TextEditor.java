@@ -130,6 +130,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private boolean editable = true; // false: a rich label (selectable, not editable)
     private boolean rich;
     private boolean submitOnEnter;
+    private boolean passSubmit;
     private boolean lineNumbers;
     private char mask;
     private boolean revealed;
@@ -382,6 +383,15 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     /** Whether Enter submits ({@link Listener#submitted}) in an area too; Shift+Enter then makes the line break. */
     public TextEditor submitOnEnter(boolean on) {
         submitOnEnter = on;
+        return this;
+    }
+
+    /**
+     * Whether Enter, after {@link Listener#submitted}, passes on to the containers (a table cell's editor commits, a
+     * dialog's default button), instead of ending at the editor.
+     */
+    public TextEditor passSubmit(boolean on) {
+        passSubmit = on;
         return this;
     }
 
@@ -1509,8 +1519,11 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             case SUBMIT -> {
                 if (multiLine && !submitOnEnter) {
                     edit = !readOnly() && text.type("\n");
-                } else if (listener != null) {
-                    listener.submitted(this);
+                } else {
+                    if (listener != null) {
+                        listener.submitted(this);
+                    }
+                    handled = !passSubmit;
                 }
             }
             case NEWLINE -> {

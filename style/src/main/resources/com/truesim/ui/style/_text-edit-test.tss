@@ -46,3 +46,7 @@ button.step-down, button.step-up { width: 41px; background: box(#39ff14); }
 taginput { layout: flex; direction: row-reverse; wrap: wrap; gap: 21px; border: 5px #ff1493; }
 chip { padding: 8px; background: box(#00ffff); radius: 0; }
 button.chip-remove { size: 25px; background: box(#ff0000); }
+
+textfield.cell { background: box(#00ffff); border: 5px #ff1493; radius: 10px 0 10px 0; }
+textfield.column-filter { background: box(#ffef00); color: #0000ff; font-size: 23px; }
+textfield.hex { background: box(#39ff14); color: #ff00ff; width: 150px; }

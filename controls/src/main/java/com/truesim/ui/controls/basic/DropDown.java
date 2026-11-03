@@ -39,10 +39,18 @@ public final class DropDown<T> extends Button implements Popup.Owner {
         CharSequence text(T item);
     }
 
-    /** A filter text from elsewhere (a search field): its element shows at the top of the list. */
+    /**
+     * A filter text from elsewhere (the text-editing controls' {@code SearchField}): its element shows at the top of the
+     * list and takes the focus when the list opens.
+     */
     public interface FilterSource extends Versioned {
         /** The element to show above the items (a text field). */
         Element element();
+
+        /** The element focused when the list opens (by default {@link #element()}). */
+        default Element focusTarget() {
+            return element();
+        }
 
         /** The filter text now. */
         CharSequence text();
@@ -244,7 +252,7 @@ public final class DropDown<T> extends Button implements Popup.Owner {
         float w = ui.layout().width(root.slot());
         ui.visuals().minWidth(list.slot(), controls.units(w));
         int chosen = model.get();
-        Element target = filterSource != null ? filterSource.element()
+        Element target = filterSource != null ? filterSource.focusTarget()
             : chosen >= 0 && chosen < itemElements.length && shown[chosen] ? itemElements[chosen] : firstShown();
         if (target != null) {
             controls.focusSoon(target, player);

@@ -70,6 +70,10 @@ public final class ControlsGallery {
         public TimePicker time;
         public KeyBindingField<String> binding;
         public DropDown<String> dropDown;
+        /** A drop-down filtered by a search field of the text controls. */
+        public DropDown<String> searchDropDown;
+        public com.truesim.ui.controls.text.SearchField search;
+        public com.truesim.ui.controls.text.HexField hex;
         public MenuBar menuBar;
         public Menu contextMenu;
         public Toolbar toolbar;
@@ -234,6 +238,7 @@ public final class ControlsGallery {
         s = section(c, root, "Colour");
         g.color = c.colorPicker("Tint", clock.longValue(Rgba.srgb(64, 160, 255, 1)));
         g.color.swatches(Rgba.srgb(255, 64, 64, 1), Rgba.srgb(64, 200, 64, 1), Rgba.srgb(255, 200, 0, 1));
+        g.hex = com.truesim.ui.controls.text.HexField.attach(c.ui(), g.color, "Hex value");
         s.add(g.color.element());
 
         s = section(c, root, "Date and time");
@@ -247,7 +252,10 @@ public final class ControlsGallery {
         g.binding = c.keyBinding("Jump", "Press a key", clock.value("Space"));
         g.dropDown = c.dropDown("Quality", List.of("Low", "Medium", "High", "Ultra", "Custom"), String::toString,
             clock.intValue(2));
-        s.add(g.binding.element()).add(g.dropDown.element());
+        g.search = com.truesim.ui.controls.text.SearchField.create(c.ui(), null, "Filter countries", "Clear");
+        g.searchDropDown = c.dropDown("Country", List.of("Austria", "Australia", "Belgium", "Brazil", "Canada",
+            "Chile", "Denmark", "Estonia"), String::toString, clock.intValue(0)).filter(g.search);
+        s.add(g.binding.element()).add(g.dropDown.element()).add(g.searchDropDown.element());
 
         s = section(c, root, "Menus and bars");
         g.menuBar = c.menuBar("Main menu");
