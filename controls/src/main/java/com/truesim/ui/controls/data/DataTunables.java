@@ -32,7 +32,7 @@ public final class DataTunables {
     /** Rows bound beyond the viewport on each side, so short scrolls show bound rows at once. */
     public static final Tunable OVERSCAN = Tunable.of("ui.list.overscan", 2, 0, 64,
         "Rows prepared beyond the visible ones on each side of a list");
-    /** Seconds after the last typed character before type-ahead starts a new search. */
+    /** Seconds after the last typed character before type-ahead starts a new search (lists, drop-downs, menus). */
     public static final Tunable TYPE_AHEAD_TIMEOUT = Tunable.of("ui.list.typeAheadTimeout", 1, 0.1f, 10,
         "Seconds after which typing in a list starts a new search");
 

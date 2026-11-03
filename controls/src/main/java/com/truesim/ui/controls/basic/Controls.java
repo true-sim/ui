@@ -38,9 +38,11 @@ public final class Controls implements Ui.FrameListener {
     /** Seconds the pointer rests on a menu item before its submenu opens or another closes (hover intent). */
     public static final Tunable SUBMENU_DELAY = Tunable.of("ui.menu.submenuDelay", 0.25f, 0, 2,
         "Seconds the pointer rests on a menu item before its submenu opens");
-    /** Seconds between keys that still extend a drop-down's or menu's type-ahead search. */
-    public static final Tunable TYPE_AHEAD_TIMEOUT = Tunable.of("ui.dropdown.typeAheadTimeout", 1, 0.1f, 5,
-        "Seconds between typed letters that still extend a list's type-ahead search");
+    /**
+     * Seconds between keys that still extend a drop-down's or menu's type-ahead search: the one type-ahead setting of
+     * every list ({@code ui.list.typeAheadTimeout}, the data controls').
+     */
+    public static final Tunable TYPE_AHEAD_TIMEOUT = com.truesim.ui.controls.data.DataTunables.TYPE_AHEAD_TIMEOUT;
     /** Seconds a notification shows before it goes. */
     public static final Tunable TOAST_DURATION = Tunable.of("ui.toast.duration", 4, 0.5f, 60,
         "Seconds a notification shows before it goes");
@@ -95,9 +97,9 @@ public final class Controls implements Ui.FrameListener {
         return ui.store().clock();
     }
 
-    /** The tunables of the controls, for an engine to register as settings. */
+    /** The tunables of the basic and container controls, for an engine to register as settings. */
     public static List<Tunable> tunables() {
-        return List.of(SUBMENU_DELAY, TYPE_AHEAD_TIMEOUT, TOAST_DURATION, TOAST_LIMIT, SWIPE_THRESHOLD, SPLIT_STEP,
+        return List.of(SUBMENU_DELAY, TOAST_DURATION, TOAST_LIMIT, SWIPE_THRESHOLD, SPLIT_STEP,
             WHEEL_STEP, SLIDER_PAGE);
     }
 

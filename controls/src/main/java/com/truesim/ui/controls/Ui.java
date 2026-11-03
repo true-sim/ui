@@ -1207,12 +1207,13 @@ public final class Ui {
         all.add(StyleWatcher.DELAY);
         all.add(Animator.SPEED);
         all.addAll(Interaction.tunables());
+        all.addAll(com.truesim.ui.controls.text.TextEditor.tunables());
+        all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);
+        all.addAll(com.truesim.ui.controls.basic.Controls.tunables());
+        all.addAll(com.truesim.ui.controls.data.DataTunables.all());
         all.addAll(com.truesim.ui.controls.windows.Tooltips.tunables());
         all.addAll(com.truesim.ui.controls.windows.Popovers.tunables());
         all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());
-        all.addAll(com.truesim.ui.controls.data.DataTunables.all());
-        all.addAll(com.truesim.ui.controls.text.TextEditor.tunables());
-        all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
         }
