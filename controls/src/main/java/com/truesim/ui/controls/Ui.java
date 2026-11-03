@@ -91,6 +91,8 @@ public final class Ui {
     private TextBlock[] blocks = new TextBlock[0];
     private StringBuilder[] strings = new StringBuilder[0];
     private long[] drawnTextVersion = new long[0];
+    private ResolvedStyle[] applied = new ResolvedStyle[0];
+    private long[] appliedVersion = new long[0];
     private int[] textSlots = new int[16];
     private int textSlotCount;
 
@@ -148,6 +150,7 @@ public final class Ui {
         }
         ensure();
         content[e.slot()] = NONE;
+        applied[e.slot()] = null; // a reused slot applies its style again
         return e;
     }
 
@@ -241,6 +244,8 @@ public final class Ui {
             blocks = Arrays.copyOf(blocks, n);
             strings = Arrays.copyOf(strings, n);
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
+            applied = Arrays.copyOf(applied, n);
+            appliedVersion = Arrays.copyOf(appliedVersion, n);
         }
     }
 
@@ -281,7 +286,13 @@ public final class Ui {
             int bits = store.dirty(slot);
             if ((bits & UiStore.DIRTY_STYLE) != 0) {
                 resolver.resolve(slot);
-                apply(slot, resolver.styleOf(slot));
+            }
+            // compared, not taken from the bit: resolving a child resolves its parents first and clears their bits
+            ResolvedStyle style = resolver.styleOf(slot);
+            if (style != applied[slot] || style.version() != appliedVersion[slot]) {
+                applied[slot] = style;
+                appliedVersion[slot] = style.version();
+                apply(slot, style);
                 store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
             }
             if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
