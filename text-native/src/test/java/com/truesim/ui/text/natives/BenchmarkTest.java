@@ -79,7 +79,7 @@ class BenchmarkTest {
 
     @Test
     void reshapeOf200CharacterLabel() {
-        List<String> latin = NativeFonts.latin();
+        List<String> latin = NativeFonts.LATIN;
         Random random = new Random(1);
         String text = label("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do", 200, random);
         String other = text.substring(0, 199) + "!";
@@ -103,7 +103,7 @@ class BenchmarkTest {
 
     @Test
     void mtsdfGenerationPerGlyph() {
-        NativeFontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        NativeFontFace face = NativeFonts.face("Inter");
         List<GlyphOutline> outlines = new ArrayList<>();
         List<MsdfGeometry> geometries = new ArrayList<>();
         float[] bounds = new float[4];
@@ -213,7 +213,7 @@ class BenchmarkTest {
 
     @Test
     void faceLookupsStayCheap() {
-        FontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        FontFace face = NativeFonts.face("Inter");
         int n = 1_000_000;
         int covered = 0;
         for (int i = 0; i < n; i++) {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.truesim.ui.text.FontFace;
 import com.truesim.ui.text.FontSource;
+import com.truesim.ui.text.GlyphAtlas;
 import com.truesim.ui.text.GlyphOutline;
 import com.truesim.ui.text.GlyphRasterizer;
 import java.io.IOException;
@@ -19,7 +20,7 @@ class NativeFaceTest {
 
     @Test
     void facesReadMetricsCoverageAndOutlines() {
-        NativeFontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        NativeFontFace face = NativeFonts.face("Inter");
         assertThat(face.unitsPerEm()).isPositive();
         assertThat(face.ascender()).isBetween(0.6f, 1.3f);
         assertThat(face.descender()).isBetween(0.1f, 0.6f);
@@ -45,20 +46,29 @@ class NativeFaceTest {
     }
 
     @Test
-    void collectionsOpenByIndex() {
-        NativeFontFace regular = NativeFonts.face("Nirmala UI");
-        FontFace bold = NativeFonts.REGISTRY.match("Nirmala UI", 700, false);
+    void weightsAreFacesOfTheirOwnAndCffOutlinesAreCubic() {
+        NativeFontFace regular = NativeFonts.face("Inter");
+        FontFace bold = NativeFonts.REGISTRY.match("Inter", 700, false);
         assertThat(bold).isNotSameAs(regular);
-        assertThat(bold.source().index()).isEqualTo(1);
+        assertThat(bold.source().index()).isZero();
         GlyphOutline a = new GlyphOutline();
         GlyphOutline b = new GlyphOutline();
-        regular.outline(regular.glyph(0x915), a);
-        bold.outline(((NativeFontFace) bold).glyph(0x915), b);
+        regular.outline(regular.glyph('m'), a);
+        bold.outline(((NativeFontFace) bold).glyph('m'), b);
         float[] ra = new float[4];
         float[] rb = new float[4];
         a.bounds(ra);
         b.bounds(rb);
         assertThat(rb[2] - rb[0]).isGreaterThan(ra[2] - ra[0]); // bold is wider
+
+        NativeFontFace sc = NativeFonts.face("Noto Sans SC"); // OpenType with CFF outlines: cubic curves
+        GlyphOutline han = new GlyphOutline();
+        assertThat(sc.outline(sc.glyph(0x597D), han)).isTrue();
+        boolean cubic = false;
+        for (int i = 0; i < han.verbCount(); i++) {
+            cubic |= han.verbs()[i] == GlyphOutline.CUBIC;
+        }
+        assertThat(cubic).isTrue();
     }
 
     @Test
@@ -68,7 +78,7 @@ class NativeFaceTest {
         try (NativeTextBackend backend = new NativeTextBackend()) {
             assertThatThrownBy(() -> backend.open(FontSource.of(junk, 0, "J", 400, false), 0))
                 .isInstanceOf(IOException.class);
-            Path real = NativeFonts.face(NativeFonts.latin().get(0)).source().path();
+            Path real = NativeFonts.face("Inter").source().path();
             assertThatThrownBy(() -> backend.open(FontSource.of(real, 7, "J", 400, false), 0))
                 .isInstanceOf(IOException.class);
             NativeFontFace face = (NativeFontFace) backend.open(FontSource.of(real, 0, "R", 400, false), 0);
@@ -88,7 +98,7 @@ class NativeFaceTest {
 
     @Test
     void theHintedRasterHasInk() {
-        NativeFontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        NativeFontFace face = NativeFonts.face("Inter");
         GlyphRasterizer raster = NativeFonts.BACKEND.newRasterizer();
         GlyphRasterizer.Coverage a = raster.rasterize(face, face.glyph('A'), 12);
         assertThat(a.width()).isBetween(5, 12);
@@ -100,6 +110,61 @@ class NativeFaceTest {
         assertThat(ink).isPositive();
         assertThat(raster.rasterize(face, face.glyph(' '), 12)).isNull();
         assertThat(raster.rasterize(face, 999_999, 12)).isNull();
+        assertThat(raster.rasterize(face, face.glyph('A'), 0)).isNull();
+        GlyphRasterizer.Coverage larger = raster.rasterize(face, face.glyph('A'), 12.5f);
+        assertThat(larger.width() * larger.height()).as("a fractional size is its own")
+            .isGreaterThanOrEqualTo(a.width() * a.height());
+        GlyphRasterizer.Coverage i = raster.rasterize(face, face.glyph('l'), 12);
+        GlyphRasterizer.Coverage moved = raster.rasterize(face, face.glyph('l'), 12, 0.5f);
+        assertThat(moved.pixels()).as("half a pixel right: other coverage").isNotEqualTo(i.pixels());
+        assertThat(raster.rasterize(face, face.glyph('l'), 12)).as("the move is undone").usingRecursiveComparison()
+            .isEqualTo(i);
+    }
+
+    /**
+     * The atlas reserves a raster glyph's box from the unhinted outline's bounds plus {@link GlyphAtlas#RASTER_PAD}
+     * pixels: FreeType's hinted bitmaps of the bundled fonts' glyphs stay within it at small sizes.
+     */
+    @Test
+    void hintedBitmapsStayWithinTheOutlineBoundsPlusThePad() {
+        GlyphRasterizer raster = NativeFonts.BACKEND.newRasterizer();
+        GlyphOutline o = new GlyphOutline();
+        float[] b = new float[4];
+        int pad = GlyphAtlas.RASTER_PAD;
+        int checked = 0;
+        String[][] samples = {
+            {"Inter", "AVWMgjpqy@%&ÅÉçßfi0123456789.,;!?()[]{}"},
+            {"Noto Sans Arabic", "مرحبابالعالم"},
+            {"Noto Sans Devanagari", "नमस्तेदुनियाकि"},
+            {"Noto Sans SC", "你好世界"},
+            {"Noto Sans JP", "こんにちは"},
+        };
+        for (String[] sample : samples) {
+            NativeFontFace face = NativeFonts.face(sample[0]);
+            for (int i = 0; i < sample[1].length(); i++) {
+                int glyph = face.glyph(sample[1].charAt(i));
+                if (!face.outline(glyph, o)) {
+                    continue;
+                }
+                o.bounds(b);
+                for (float size : new float[] {7, 8, 9, 9.5f, 10, 11, 11.25f, 12, 12.75f}) {
+                    float shift = (checked & 3) / (float) GlyphAtlas.RASTER_PHASES; // each phase in turn
+                    GlyphRasterizer.Coverage c = raster.rasterize(face, glyph, size, shift);
+                    if (c == null) {
+                        continue;
+                    }
+                    String what = sample[0] + " " + sample[1].charAt(i) + " at " + size + " moved " + shift;
+                    assertThat(c.left()).as(what).isGreaterThanOrEqualTo((int) Math.floor(b[0] * size + shift) - pad);
+                    assertThat(c.left() + c.width()).as(what)
+                        .isLessThanOrEqualTo((int) Math.ceil(b[2] * size + shift) + pad);
+                    assertThat(c.top()).as(what).isLessThanOrEqualTo((int) Math.ceil(b[3] * size) + pad);
+                    assertThat(c.top() - c.height()).as(what)
+                        .isGreaterThanOrEqualTo((int) Math.floor(b[1] * size) - pad);
+                    checked++;
+                }
+            }
+        }
+        assertThat(checked).isGreaterThan(400);
     }
 
     /** Points, tags and contour ends written into native memory as FreeType lays them out. */

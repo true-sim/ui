@@ -5,7 +5,7 @@ panel.hud { layout: flex; direction: row; wrap: wrap; gap: 8px; padding: 16px; }
 panel.card { background: box(var(--surface)); border: 1px var(--edge); radius: 6px; padding: 8px 12px; width: 240px;
   shadow: 0 2px 6px rgba(black, 0.45); }
 panel.row { layout: flex; direction: row; justify-content: space-between; }
-label { color: var(--fg); font-family: "Segoe UI", "DejaVu Sans", sans-serif; font-size: 14px; }
+label { color: var(--fg); font-family: "Inter", sans-serif; font-size: 14px; }
 label.title { font-size: 16px; font-weight: 600; }
 label.caption { color: var(--muted); font-size: 11px; }
 label.value { font-size: 14px; font-weight: bold; text-outline: 1px rgba(black, 0.5); }

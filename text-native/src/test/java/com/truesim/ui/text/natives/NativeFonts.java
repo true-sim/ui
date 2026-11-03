@@ -1,49 +1,38 @@
 package com.truesim.ui.text.natives;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import com.truesim.ui.fonts.cjk.BundledCjkFonts;
 import com.truesim.ui.text.FontRegistry;
 import java.util.List;
 
 /**
- * The native backend over the system's fonts, shared by the tests (opening faces costs). Nothing is bundled: a test
- * that needs a family skips where it is not installed, and a golden pinned to a font file skips where that file is
- * another version (its {@code FontSource.key()}: name, index, size).
+ * The native backend over the bundled fonts (Inter, Noto Sans Arabic, Devanagari, SC and JP), shared by the tests
+ * (opening faces costs). Bundled fonts make the goldens the same on every machine; installed fonts are never used.
  */
 final class NativeFonts {
 
     static final NativeTextBackend BACKEND = new NativeTextBackend();
-    static final FontRegistry REGISTRY = FontRegistry.system(BACKEND);
+    static final FontRegistry REGISTRY = BundledCjkFonts.registry(BACKEND);
+
+    /** The Latin family. */
+    static final List<String> LATIN = List.of("Inter");
 
     private NativeFonts() {
     }
 
-    /** The regular face of {@code family}, or the test is skipped. */
+    /** The regular face of the bundled {@code family}. */
     static NativeFontFace face(String family) {
         NativeFontFace face = (NativeFontFace) REGISTRY.match(family, 400, false);
-        assumeTrue(face != null, family + " is not installed");
+        assertThat(face).as(family + " is bundled").isNotNull();
         return face;
     }
 
-    /** The regular face of {@code family} if it is the very file a golden was made with; else skipped. */
+    /** The regular face of {@code family}, checked to be the very file a golden was made with. */
     static NativeFontFace golden(String family, String key) {
         NativeFontFace face = face(family);
-        assumeTrue(face.source().key().equals(key), family + " is another version: " + face.source().key());
+        assertThat(face.source().key()).as("the bundled " + family + " changed: make the goldens again")
+            .isEqualTo(key);
         return face;
-    }
-
-    /** The first installed of {@code families}, or the test is skipped. */
-    static List<String> family(String... families) {
-        for (String family : families) {
-            if (REGISTRY.match(family, 400, false) != null) {
-                return List.of(family);
-            }
-        }
-        assumeTrue(false, "none of " + List.of(families) + " is installed");
-        return null;
-    }
-
-    static List<String> latin() {
-        return family("Segoe UI", "Arial", "DejaVu Sans", "Noto Sans", "Liberation Sans");
     }
 }

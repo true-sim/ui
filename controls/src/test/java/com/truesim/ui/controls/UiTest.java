@@ -2,7 +2,6 @@ package com.truesim.ui.controls;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.truesim.testing.AllocationAssertions;
 import com.truesim.ui.core.Element;
@@ -18,6 +17,7 @@ import com.truesim.ui.style.tss.Tss;
 import com.truesim.ui.style.value.Color;
 import com.truesim.ui.testkit.DrawListDump;
 import com.truesim.ui.text.AtlasSettings;
+import com.truesim.ui.fonts.cjk.BundledCjkFonts;
 import com.truesim.ui.text.FontRegistry;
 import com.truesim.ui.text.GlyphAtlas;
 import com.truesim.ui.text.TextSystem;
@@ -36,21 +36,85 @@ class UiTest {
     @TempDir
     Path dir;
 
+    /** The JDK fallback over the bundled fonts (the same on every machine), small text as hinted raster. */
     static TextSystem jdkText() {
         JdkTextBackend backend = new JdkTextBackend();
-        FontRegistry fonts = FontRegistry.system(backend);
-        assumeTrue(fonts.match("sans-serif", 400, false) != null, "no system font");
-        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), backend.msdfGenerator(), null, null, new AtlasSettings());
+        FontRegistry fonts = BundledCjkFonts.registry(backend);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), backend.msdfGenerator(), backend.newRasterizer(), null,
+            null, new AtlasSettings());
         return new TextSystem(fonts, backend.newShaper(), atlas);
     }
 
-    /** The real text path: FreeType, HarfBuzz, msdfgen (the JDK fallback allocates while shaping). */
+    /**
+     * The real text path over the bundled fonts: FreeType, HarfBuzz, msdfgen, FreeType's hinted raster for small text
+     * (the JDK fallback allocates while shaping).
+     */
     static TextSystem nativeText() {
         com.truesim.ui.text.natives.NativeTextBackend backend = new com.truesim.ui.text.natives.NativeTextBackend();
-        FontRegistry fonts = FontRegistry.system(backend);
-        assumeTrue(fonts.match("sans-serif", 400, false) != null, "no system font");
-        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), backend.msdfGenerator(), null, null, new AtlasSettings());
+        FontRegistry fonts = BundledCjkFonts.registry(backend);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), backend.msdfGenerator(), backend.newRasterizer(), null,
+            null, new AtlasSettings());
         return new TextSystem(fonts, backend.newShaper(), atlas);
+    }
+
+    private static int rasterGlyphs(Ui ui) {
+        DrawList list = ui.layers()[0];
+        int raster = 0;
+        for (int i = 0; i < list.size(); i++) {
+            int header = list.header(i);
+            raster += Primitive.kind(header) == Primitive.GLYPH && (Primitive.flags(header) & Primitive.FLAG_RASTER) != 0
+                && list.floatAt(i, Primitive.X1) > list.floatAt(i, Primitive.X0) ? 1 : 0;
+        }
+        return raster;
+    }
+
+    /**
+     * UI16: small labels draw hinted raster glyphs by default, MTSDF when the setting says so or the UI is a
+     * world-space panel; switching re-records without a new layout.
+     */
+    @Test
+    void smallLabelsDrawHintedRasterUnlessSwitchedOrInWorldSpace() {
+        TextSystem text = nativeText();
+        Ui ui = new Ui(Tss.compileString("small.tss", """
+            panel { layout: stack; direction: column; }
+            label { font-family: "Inter"; color: white; }
+            label.small { font-size: 11px; }
+            label.big { font-size: 20px; }
+            """), text);
+        Element small = ui.label("small", "Ammo 30");
+        Element big = ui.label("big", "Ammo 30");
+        Element hud = ui.panel(null);
+        ui.root().add(hud);
+        hud.add(small).add(big);
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).as("the small label's six glyphs").isEqualTo(6);
+        float width = ui.layout().width(small.slot());
+        float bigY = ui.layout().y(big.slot());
+
+        AtlasSettings settings = text.atlas().settings();
+        assertThat(ui.tunables()).contains(settings.smallText(), settings.hintedBelow());
+        settings.smallText().select("MTSDF");
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).isZero();
+        assertThat(ui.layout().width(small.slot())).isEqualTo(width);
+        assertThat(ui.layout().y(big.slot())).isEqualTo(bigY);
+        settings.smallText().select("HINTED");
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).isEqualTo(6);
+
+        assertThat(ui.worldSpace()).isFalse();
+        ui.worldSpace(true);
+        ui.worldSpace(true);
+        assertThat(ui.worldSpace()).isTrue();
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).as("world space: MTSDF").isZero();
+        hud.add(ui.label("small", "new"));
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).as("a label made later is in world space too").isZero();
+        ui.worldSpace(false);
+        settle(ui, 400, 300);
+        assertThat(rasterGlyphs(ui)).isEqualTo(9);
+        assertThat(ui.layout().width(small.slot())).isEqualTo(width);
     }
 
     /** Frames until every glyph is in the atlas. */

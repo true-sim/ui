@@ -12,6 +12,7 @@ dependencies {
     api(project(":ui-text"))
     testImplementation(project(":ui-testkit"))
     testImplementation(project(":ui-text-native")) // the real text path in allocation tests and benchmarks
+    testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the same layout on every machine
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.

@@ -8,7 +8,6 @@ import com.truesim.ui.core.draw.UiTexture;
 import com.truesim.ui.core.draw.UiTextures;
 import com.truesim.ui.text.AtlasSettings;
 import com.truesim.ui.text.GlyphAtlas;
-import com.truesim.ui.text.GlyphRasterizer;
 import com.truesim.ui.text.SoftwareGlyphRenderer;
 import com.truesim.ui.text.TextAlign;
 import com.truesim.ui.text.TextBlock;
@@ -22,16 +21,16 @@ import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 /**
- * CPU previews of text through the real MTSDF atlas and the shader's formula ({@link SoftwareGlyphRenderer}), and,
- * for open decision UI16, FreeType's hinted raster beside it at small sizes. Black on white, blended in linear light as
- * the engine's UI pass does. Runs with {@code TRUESIM_SCREENSHOTS=true}; writes PNGs to {@code TRUESIM_SCREENSHOT_DIR}
- * (default {@code build/screenshots}).
+ * CPU previews of text through the real atlas and the shader's formula ({@link SoftwareGlyphRenderer}) over the bundled
+ * fonts, and for UI16 the two small-text techniques ({@code ui.text.smallText} MTSDF and HINTED) one above the other.
+ * Black on white, blended in linear light as the engine's UI pass does. Runs with {@code TRUESIM_SCREENSHOTS=true};
+ * writes PNGs to {@code TRUESIM_SCREENSHOT_DIR} (default {@code build/screenshots}).
  */
 class ScreenshotTest {
 
     private static final float INF = Float.POSITIVE_INFINITY;
     private static final String LATIN = "The quick brown fox jumps over the lazy dog. AV To Wa 0123456789";
-    private static final String LIGATURES = "office affine fjord — AV To Wa";
+    private static final String LIGATURES = "office affine fjord — a->b --> AV To Wa";
     private static final String ARABIC = "مرحبا بالعالم";
     private static final String DEVANAGARI = "नमस्ते दुनिया";
     private static final String CJK = "你好，世界 こんにちは";
@@ -67,10 +66,10 @@ class ScreenshotTest {
     }
 
     private final UiTextures textures = new UiTextures();
-    private final GlyphAtlas atlas = new GlyphAtlas(textures, NativeFonts.BACKEND.msdfGenerator(), null, null,
-        new AtlasSettings());
+    private final AtlasSettings settings = new AtlasSettings();
+    private final GlyphAtlas atlas = new GlyphAtlas(textures, NativeFonts.BACKEND.msdfGenerator(),
+        NativeFonts.BACKEND.newRasterizer(), null, null, settings);
     private final TextSystem system = new TextSystem(NativeFonts.REGISTRY, new HarfBuzzShaper(), atlas);
-    private final GlyphRasterizer hinted = NativeFonts.BACKEND.newRasterizer();
 
     private TextBlock block(String text, List<String> families, float size) {
         TextBlock b = new TextBlock(system);
@@ -83,41 +82,23 @@ class ScreenshotTest {
         return b;
     }
 
-    private void mtsdf(Canvas canvas, TextBlock b, float x, float y, long color, float outline, long outlineColor,
+    /** Draws {@code b} as the frame would with the current settings (MTSDF, or raster where they say so). */
+    private void draw(Canvas canvas, TextBlock b, float x, float y, long color, float outline, long outlineColor,
         float weight) {
         DrawList list = new DrawList();
         int start = list.allocate(b.glyphCount());
         list.begin(start, b.glyphCount());
+        b.record(list, x, y, color, outline, outlineColor, weight); // looks the glyphs up: queued if new
+        list.end();
+        try {
+            atlas.finishAll();
+        } catch (InterruptedException e) {
+            throw new IllegalStateException(e);
+        }
+        list.begin(start, b.glyphCount());
         b.record(list, x, y, color, outline, outlineColor, weight);
         list.end();
         SoftwareGlyphRenderer.render(list, textures, canvas.rgb, canvas.w, canvas.h);
-    }
-
-    /** The same layout drawn with FreeType's hinted coverage, pens on whole pixels. */
-    private void raster(Canvas canvas, TextBlock b, float x, float y) {
-        int size = Math.round(b.size());
-        for (int g = 0; g < b.glyphCount(); g++) {
-            GlyphRasterizer.Coverage c = hinted.rasterize(b.glyphFace(g), b.glyphId(g), size);
-            if (c == null) {
-                continue;
-            }
-            int left = Math.round(x + b.glyphX(g)) + c.left();
-            int top = Math.round(y + b.glyphY(g)) - c.top();
-            for (int j = 0; j < c.height(); j++) {
-                for (int i = 0; i < c.width(); i++) {
-                    int px = left + i;
-                    int py = top + j;
-                    if (px < 0 || py < 0 || px >= canvas.w || py >= canvas.h) {
-                        continue;
-                    }
-                    float a = (c.pixels()[j * c.width() + i] & 0xFF) / 255f;
-                    int o = (py * canvas.w + px) * 3;
-                    for (int k = 0; k < 3; k++) {
-                        canvas.rgb[o + k] *= 1 - a; // black over the target
-                    }
-                }
-            }
-        }
     }
 
     @Test
@@ -126,18 +107,18 @@ class ScreenshotTest {
         String dirName = System.getenv("TRUESIM_SCREENSHOT_DIR");
         Path dir = Files.createDirectories(Path.of(dirName == null || dirName.isEmpty() ? "build/screenshots"
             : dirName));
-        List<String> latin = NativeFonts.latin();
-        List<String> calibri = NativeFonts.family("Calibri", latin.get(0));
+        List<String> latin = NativeFonts.LATIN;
         String[] texts = {LATIN, LIGATURES, ARABIC, DEVANAGARI, CJK};
         long black = Rgba.BLACK;
 
         // small sizes, MTSDF
+        settings.smallText().select("MTSDF");
         Canvas small = new Canvas(560, 300);
         float y = 4;
         for (int size : new int[] {10, 12, 14}) {
             for (String text : texts) {
-                TextBlock b = block(text, text == LIGATURES ? calibri : latin, size);
-                mtsdf(small, b, 6, y, black, 0, 0, 0);
+                TextBlock b = block(text, latin, size);
+                draw(small, b, 6, y, black, 0, 0, 0);
                 y += b.height();
             }
             y += 6;
@@ -152,26 +133,29 @@ class ScreenshotTest {
             TextBlock b = block(size == 128 ? "Ag office مرحبا 你"
                 : "AV To Wa office مرحبا नमस्ते 你好",
                 latin, size);
-            mtsdf(large, b, 8, y, black, 0, 0, 0);
+            draw(large, b, 8, y, black, 0, 0, 0);
             y += b.height();
         }
         TextBlock effects = block("Outline  Bold  Thin", latin, 40);
-        mtsdf(large, effects, 8, 420, Rgba.pack(1, 0.8f, 0.1f, 1), 2.5f, black, 0);
+        draw(large, effects, 8, 420, Rgba.pack(1, 0.8f, 0.1f, 1), 2.5f, black, 0);
         TextBlock bold = block("weight +0.6 px", latin, 24);
-        mtsdf(large, bold, 480, 430, black, 0, 0, 0.6f);
+        draw(large, bold, 480, 430, black, 0, 0, 0.6f);
         TextBlock thin = block("weight -0.3 px", latin, 24);
-        mtsdf(large, thin, 480, 470, black, 0, 0, -0.3f);
+        draw(large, thin, 480, 470, black, 0, 0, -0.3f);
         large.save(dir.resolve("mtsdf-large.png"), 1);
 
-        // UI16: MTSDF (upper row) and FreeType hinted raster (lower row) at the small sizes
+        // UI16: the same layout drawn with ui.text.smallText MTSDF (upper row) and HINTED (lower row, the default:
+        // hinted raster below ui.text.hintedBelow, 13 px; 14 px is MTSDF in both), both through the atlas
         Canvas compare = new Canvas(470, 250);
         y = 4;
         for (int size : new int[] {10, 12, 14}) {
             for (String text : new String[] {LATIN, ARABIC + "   " + DEVANAGARI + "   " + CJK}) {
                 TextBlock b = block(text, latin, size);
-                mtsdf(compare, b, 6, y, black, 0, 0, 0);
+                settings.smallText().select("MTSDF");
+                draw(compare, b, 6, y, black, 0, 0, 0);
                 y += b.height();
-                raster(compare, b, 6, y);
+                settings.smallText().select("HINTED");
+                draw(compare, b, 6, y, black, 0, 0, 0);
                 y += b.height() + 3;
             }
             y += 6;

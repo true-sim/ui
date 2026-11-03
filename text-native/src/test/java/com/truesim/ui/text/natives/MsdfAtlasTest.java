@@ -7,6 +7,7 @@ import com.truesim.common.jobs.LaneSpec;
 import com.truesim.common.jobs.TaskScheduler;
 import com.truesim.testing.AllocationAssertions;
 import com.truesim.ui.core.draw.DrawList;
+import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.draw.UiTextures;
 import com.truesim.ui.text.AtlasBaker;
@@ -16,6 +17,7 @@ import com.truesim.ui.text.GlyphCache;
 import com.truesim.ui.text.GlyphOutline;
 import com.truesim.ui.text.MsdfGenerator;
 import com.truesim.ui.text.MsdfGeometry;
+import com.truesim.ui.text.SoftwareGlyphRenderer;
 import com.truesim.ui.text.TextAlign;
 import com.truesim.ui.text.TextBlock;
 import com.truesim.ui.text.TextSystem;
@@ -80,7 +82,7 @@ class MsdfAtlasTest {
 
     @Test
     void cornersStaySharpInTheColourChannels() {
-        NativeFontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        NativeFontFace face = NativeFonts.face("Inter");
         GlyphOutline o = new GlyphOutline();
         face.outline(face.glyph('A'), o);
         float[] bounds = new float[4];
@@ -109,7 +111,7 @@ class MsdfAtlasTest {
 
     @Test
     void generationIsDeterministicAcrossThreads() throws Exception {
-        NativeFontFace face = NativeFonts.face(NativeFonts.latin().get(0));
+        NativeFontFace face = NativeFonts.face("Inter");
         GlyphOutline o = new GlyphOutline();
         face.outline(face.glyph('g'), o);
         float[] bounds = new float[4];
@@ -140,7 +142,7 @@ class MsdfAtlasTest {
      */
     @Test
     void buildTimeAndRunTimeAtlasesAreByteIdentical(@TempDir Path dir) throws Exception {
-        List<String> latin = NativeFonts.latin();
+        List<String> latin = NativeFonts.LATIN;
         String extra = "مرحبا नमस्ते 你好";
         Path file = dir.resolve("atlas.tsgc");
         BakeAtlas.main(new String[] {"--out", file.toString(), "--families", latin.get(0), "--text", extra,
@@ -203,23 +205,102 @@ class MsdfAtlasTest {
     @Test
     void anUnchangedNativeTextAllocatesNothing() {
         UiTextures textures = new UiTextures();
-        GlyphAtlas atlas = new GlyphAtlas(textures, MSDF, null, null, new AtlasSettings());
+        GlyphAtlas atlas = new GlyphAtlas(textures, MSDF, NativeFonts.BACKEND.newRasterizer(), null, null,
+            new AtlasSettings());
         TextSystem system = new TextSystem(NativeFonts.REGISTRY, new HarfBuzzShaper(), atlas);
-        TextBlock b = new TextBlock(system);
-        List<String> latin = NativeFonts.latin();
-        String text = "Score: 12,345 — office AV שלום";
-        b.set(text, latin, 14, 400, false, TextAlign.START, 200, 0);
+        TextBlock small = new TextBlock(system); // hinted raster
+        TextBlock large = new TextBlock(system); // MTSDF
+        List<String> latin = NativeFonts.LATIN;
+        String text = "Score: 12,345 — office AV مرحبا 你好";
+        small.set(text, latin, 11, 400, false, TextAlign.START, 200, 0);
+        large.set(text, latin, 14, 400, false, TextAlign.START, 200, 0);
+        DrawList list = new DrawList();
+        int a = list.allocate(small.glyphCount());
+        int b = list.allocate(large.glyphCount());
         for (int i = 0; i < 10; i++) {
             atlas.beginFrame();
+            list.begin(a, small.glyphCount());
+            small.record(list, 3, 4, Rgba.WHITE, 0, 0, 0);
+            list.end();
         }
-        DrawList list = new DrawList();
-        int start = list.allocate(b.glyphCount());
+        assertThat(small.drewRaster()).isTrue();
         AllocationAssertions.assertAllocationFree(() -> {
             atlas.beginFrame();
-            b.set(text, latin, 14, 400, false, TextAlign.START, 200, 0);
-            list.begin(start, b.glyphCount());
-            b.record(list, 3, 4, Rgba.WHITE, 0, 0, 0);
+            small.set(text, latin, 11, 400, false, TextAlign.START, 200, 0);
+            large.set(text, latin, 14, 400, false, TextAlign.START, 200, 0);
+            list.begin(a, small.glyphCount());
+            small.record(list, 3, 4, Rgba.WHITE, 0, 0, 0);
+            list.end();
+            list.begin(b, large.glyphCount());
+            large.record(list, 3, 24, Rgba.WHITE, 0, 0, 0);
             list.end();
         });
+        assertThat(large.drewRaster()).isFalse();
+    }
+
+    /** Draws {@code b} at (3.4, 2) on a white canvas, black, as a frame would (glyphs generated first). */
+    private static float[] drawn(GlyphAtlas atlas, UiTextures textures, TextBlock b, int w, int h) throws Exception {
+        DrawList list = new DrawList();
+        int start = list.allocate(b.glyphCount());
+        list.begin(start, b.glyphCount());
+        b.record(list, 3.4f, 2, Rgba.BLACK, 0, 0, 0);
+        list.end();
+        atlas.finishAll();
+        list.begin(start, b.glyphCount());
+        b.record(list, 3.4f, 2, Rgba.BLACK, 0, 0, 0);
+        list.end();
+        for (int i = 0; i < b.glyphCount(); i++) {
+            if (list.floatAt(start + i, Primitive.X1) > list.floatAt(start + i, Primitive.X0)) {
+                boolean raster = (Primitive.flags(list.header(start + i)) & Primitive.FLAG_RASTER) != 0;
+                assertThat(raster).isEqualTo(b.drewRaster());
+                if (raster) {
+                    assertThat(list.floatAt(start + i, Primitive.X0) % 1).as("on whole pixels").isZero();
+                    assertThat(list.floatAt(start + i, Primitive.Y1) % 1).isZero();
+                }
+            }
+        }
+        float[] rgb = new float[w * h * 3];
+        java.util.Arrays.fill(rgb, 1);
+        SoftwareGlyphRenderer.render(list, textures, rgb, w, h);
+        return rgb;
+    }
+
+    /**
+     * UI16 on the real path: at 10 px the default (HINTED) draws FreeType's hinted coverage, crisper than MTSDF (more
+     * nearly solid pixels, fewer grey ones), with the very same layout; the choice switches without reflowing.
+     */
+    @Test
+    void smallTextDrawsHintedRasterWithTheSameLayout() throws Exception {
+        UiTextures textures = new UiTextures();
+        AtlasSettings settings = new AtlasSettings();
+        GlyphAtlas atlas = new GlyphAtlas(textures, MSDF, NativeFonts.BACKEND.newRasterizer(), null, null, settings);
+        TextBlock b = new TextBlock(new TextSystem(NativeFonts.REGISTRY, new HarfBuzzShaper(), atlas));
+        String text = "The quick brown fox, 0123";
+        b.set(text, NativeFonts.LATIN, 10, 400, false, TextAlign.START, INF, 0);
+        float[] positions = new float[b.glyphCount()];
+        for (int i = 0; i < positions.length; i++) {
+            positions[i] = b.glyphX(i);
+        }
+        int w = 160;
+        int h = 16;
+        float[] hinted = drawn(atlas, textures, b, w, h);
+        assertThat(b.drewRaster()).isTrue();
+        settings.smallText().select("MTSDF");
+        assertThat(b.set(text, NativeFonts.LATIN, 10, 400, false, TextAlign.START, INF, 0)).isFalse();
+        float[] mtsdf = drawn(atlas, textures, b, w, h);
+        assertThat(b.drewRaster()).isFalse();
+        for (int i = 0; i < positions.length; i++) {
+            assertThat(b.glyphX(i)).isEqualTo(positions[i]);
+        }
+        int[] solidAndGrey = new int[4];
+        for (int i = 0; i < w * h * 3; i += 3) {
+            solidAndGrey[0] += hinted[i] < 0.1f ? 1 : 0;
+            solidAndGrey[1] += hinted[i] >= 0.1f && hinted[i] < 0.9f ? 1 : 0;
+            solidAndGrey[2] += mtsdf[i] < 0.1f ? 1 : 0;
+            solidAndGrey[3] += mtsdf[i] >= 0.1f && mtsdf[i] < 0.9f ? 1 : 0;
+        }
+        assertThat(solidAndGrey[0]).as("hinted: nearly solid pixels").isGreaterThan(solidAndGrey[2]);
+        assertThat(solidAndGrey[0] + solidAndGrey[1]).as("both draw the text").isGreaterThan(150);
+        assertThat(solidAndGrey[2] + solidAndGrey[3]).isGreaterThan(150);
     }
 }

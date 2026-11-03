@@ -1,6 +1,8 @@
 package com.truesim.ui.text.natives.tools;
 
 import com.truesim.ui.core.draw.UiTextures;
+import com.truesim.ui.fonts.BundledFonts;
+import com.truesim.ui.fonts.cjk.BundledCjkFonts;
 import com.truesim.ui.text.AtlasBaker;
 import com.truesim.ui.text.AtlasSettings;
 import com.truesim.ui.text.FontRegistry;
@@ -16,7 +18,7 @@ import java.util.List;
 
 /**
  * The build-time atlas baker's command line (Gradle task {@code bakeAtlas}): shapes Latin plus a game's text with the
- * system fonts through the run-time code ({@link AtlasBaker}, {@link GlyphAtlas}, msdfgen) and writes the
+ * bundled fonts (ui-fonts, ui-fonts-cjk) first and the installed ones after, through the run-time code ({@link AtlasBaker}, {@link GlyphAtlas}, msdfgen) and writes the
  * {@link GlyphCache} the run time loads.
  *
  * <pre>
@@ -69,7 +71,10 @@ public final class BakeAtlas {
             settings.pixelRange().set(pixelRange);
             GlyphCache cache = new GlyphCache(settings.emSize().get(), settings.pixelRange().get());
             GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), backend.msdfGenerator(), null, cache, settings);
-            TextSystem system = new TextSystem(FontRegistry.system(backend), backend.newShaper(), atlas);
+            FontRegistry fonts = FontRegistry.system(backend);
+            BundledFonts.register(fonts);
+            BundledCjkFonts.register(fonts);
+            TextSystem system = new TextSystem(fonts, backend.newShaper(), atlas);
             int glyphs = AtlasBaker.bakeTo(out, system, text, chains, weight, italic);
             System.out.println("baked " + glyphs + " glyphs on " + atlas.pageCount() + " page(s) into " + out);
         }

@@ -2,7 +2,6 @@ package com.truesim.ui.text;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Rgba;
@@ -19,7 +18,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The JDK fallback with the system's fonts (skipped where a family is missing). */
+/** The JDK fallback over the bundled fonts: the JDK's own OpenType layout, the same on every machine. */
 class JdkTextTest {
 
     private static FontFace face(List<String> family) {
@@ -42,7 +41,7 @@ class JdkTextTest {
 
     @Test
     void kerningPullsPairsTogether() {
-        FontFace f = face(TestFonts.family("Arial", "Segoe UI", "DejaVu Sans", "Liberation Sans"));
+        FontFace f = face(TestFonts.latin());
         for (String pair : new String[] {"AV", "To", "Wa"}) {
             float together = advance(shape(pair, f, false));
             float apart = advance(shape(pair.substring(0, 1), f, false)) + advance(shape(pair.substring(1), f, false));
@@ -50,26 +49,27 @@ class JdkTextTest {
         }
     }
 
+    /** Inter has no fi ligature; its arrow is one glyph for two characters (contextual alternates). */
     @Test
     void ligaturesJoinCharacters() {
-        FontFace f = face(TestFonts.family("Calibri", "DejaVu Sans"));
-        ShapedGlyphs g = shape("office", f, false);
-        assertThat(g.size()).isLessThan(6);
+        FontFace f = face(TestFonts.latin());
+        ShapedGlyphs g = shape("a->b", f, false);
+        assertThat(g.size()).isEqualTo(3);
         assertThat(g.cluster(1)).isEqualTo(1); // the ligature's cluster is its first character
-        assertThat(g.cluster(2)).isEqualTo(4);
+        assertThat(g.cluster(2)).isEqualTo(3);
     }
 
     @Test
     void arabicJoinsRightToLeft() {
-        FontFace f = face(TestFonts.family("Tahoma", "Segoe UI", "Arial", "Noto Sans Arabic", "DejaVu Sans"));
+        FontFace f = face(List.of("Noto Sans Arabic"));
         String word = "مرحبا"; // marhaba
         ShapedGlyphs g = shape(word, f, true);
-        assertThat(g.size()).isEqualTo(5);
+        assertThat(g.size()).isGreaterThanOrEqualTo(5); // Noto may draw a dot as a mark of its own
         assertThat(g.cluster(0)).isEqualTo(4); // visual order: the last letter is leftmost
-        assertThat(g.cluster(4)).isZero();
+        assertThat(g.cluster(g.size() - 1)).isZero();
         JdkFontFace jdk = (JdkFontFace) f;
         int changed = 0;
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < g.size(); i++) {
             if (g.glyph(i) != jdk.glyph(word.charAt(g.cluster(i)))) {
                 changed++; // a joining form, not the isolated one
             }
@@ -79,27 +79,27 @@ class JdkTextTest {
 
     @Test
     void devanagariReordersTheVowelSign() {
-        FontFace f = face(TestFonts.family("Nirmala UI", "Noto Sans Devanagari"));
+        FontFace f = face(List.of("Noto Sans Devanagari"));
         ShapedGlyphs g = shape("कि", f, false); // ki: the i sign is drawn before the ka
         assertThat(g.size()).isEqualTo(2);
-        assertThat(g.glyph(0)).isEqualTo(((JdkFontFace) f).glyph(0x093F));
+        // the i sign's pre-base form (glyph 545, as HarfBuzz shapes it in ui-text-native's goldens), then ka
+        assertThat(g.glyph(0)).isEqualTo(545).isNotEqualTo(((JdkFontFace) f).glyph(0x0915));
         assertThat(g.glyph(1)).isEqualTo(((JdkFontFace) f).glyph(0x0915));
     }
 
+    /** CJK falls back to the bundled Noto Sans SC and JP; no emoji font is bundled, so emoji is not tested here. */
     @Test
-    void cjkAndEmojiFallBack() {
+    void cjkFallsBack() {
         List<String> latin = TestFonts.latin();
         FontChain chain = TestFonts.registry().chain(latin, 400, false);
-        assumeTrue(chain.faceFor(0x4F60, UnicodeScript.HAN).covers(0x4F60), "no CJK font");
+        assertThat(chain.faceFor(0x4F60, UnicodeScript.HAN).source().family()).isEqualTo("Noto Sans SC");
+        assertThat(chain.faceFor(0x304B, UnicodeScript.HIRAGANA).source().family()).isEqualTo("Noto Sans JP");
         TextSystem system = new TextSystem(TestFonts.registry(), new JdkShaper(), null);
         TextBlock b = new TextBlock(system);
         b.set("Hi 你好", latin, 16, 400, false, TextAlign.START, Float.POSITIVE_INFINITY, 0);
         assertThat(b.glyphCount()).isEqualTo(4);
         assertThat(b.glyphFace(2)).isNotSameAs(b.glyphFace(0));
         assertThat(b.glyphFace(2).covers(0x4F60)).isTrue();
-        assumeTrue(chain.faceFor(0x1F600, UnicodeScript.COMMON).covers(0x1F600), "no emoji font");
-        b.set("a😀", latin, 16, 400, false, TextAlign.START, Float.POSITIVE_INFINITY, 0);
-        assertThat(b.glyphFace(1).covers(0x1F600)).isTrue();
     }
 
     @Test

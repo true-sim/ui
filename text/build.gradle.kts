@@ -8,6 +8,7 @@ description = "UI text for true-sim: fonts, shaping and rasterizer interfaces, i
 dependencies {
     api(project(":ui-core"))
     api("com.truesim.common:common-jobs:0.3.2")
+    testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the JDK fallback tested the same everywhere
 }
 
 // Screenshots (TRUESIM_SCREENSHOTS=true) and benchmarks (TRUESIM_BENCHMARK=true) read these; normal runs skip them.
