@@ -146,6 +146,18 @@ public final class TextBlock {
             throw new IllegalArgumentException("size " + sizePx + ", max width " + maxWidth + ", line height "
                 + lineHeight);
         }
+        // Only the box width changed, and every paragraph was one line that still fits: the lines stay as they are and
+        // only move to their new alignment. The layout engine measures a label several times a frame at different
+        // widths; this keeps that from breaking lines again each time.
+        if (!reshape && align == this.align && lineHeight == this.lineHeight && lineCount == paraCount
+            && width <= maxWidth) {
+            this.maxWidth = maxWidth;
+            if (realign()) {
+                version++;
+                return true;
+            }
+            return false;
+        }
         this.align = Objects.requireNonNull(align, "align");
         this.maxWidth = maxWidth;
         this.lineHeight = lineHeight;
@@ -350,6 +362,29 @@ public final class TextBlock {
         lookUpGlyphs();
     }
 
+    /** Moves the lines to their alignment in the current box; true if any moved. */
+    private boolean realign() {
+        float box = maxWidth < Float.POSITIVE_INFINITY ? maxWidth : width;
+        boolean moved = false;
+        for (int l = 0; l < lineCount; l++) {
+            float shift = (box - lineWidth[l]) * align.leftShare(lineRtl[l]);
+            float delta = shift - lineLeft[l];
+            if (delta == 0) {
+                continue;
+            }
+            moved = true;
+            lineLeft[l] = shift;
+            for (int g = lineGlyphStart[l]; g < lineGlyphEnd[l]; g++) {
+                glyphX[g] += delta;
+            }
+            for (int i = lineStart[l]; i < lineEnd[l]; i++) {
+                charX0[i] += delta;
+                charX1[i] += delta;
+            }
+        }
+        return moved;
+    }
+
     private void lookUpGlyphs() {
         GlyphAtlas atlas = system.atlas();
         if (atlas == null) {
@@ -366,7 +401,10 @@ public final class TextBlock {
     private void breakLines(int p) {
         int start = paraStart[p];
         int end = paraEnd[p];
-        if (!(maxWidth < Float.POSITIVE_INFINITY) || start == end) {
+        // A paragraph that fits needs no break opportunities: greedy breaking would give this one line. It also spares
+        // BreakIterator.setText, which allocates, for the common one-line label whose text changes every frame.
+        if (!(maxWidth < Float.POSITIVE_INFINITY) || start == end
+            || advance(start, end) - trailingSpace(start, end) <= maxWidth) {
             line(start, end, p);
             return;
         }

@@ -167,6 +167,32 @@ class TextBlockTest {
     }
 
     @Test
+    void aWiderOrNarrowerBoxThatStillFitsOnlyRealigns() {
+        TextBlock b = new TextBlock(system);
+        b.set("aaa a\nbb", LATIN, 10, 400, false, TextAlign.CENTER, INF, 0);
+        long v = b.version();
+        assertThat(b.set("aaa a\nbb", LATIN, 10, 400, false, TextAlign.CENTER, 200, 0)).isTrue();
+        assertThat(b.version()).isGreaterThan(v);
+        TextBlock fresh = new TextBlock(system);
+        fresh.set("aaa a\nbb", LATIN, 10, 400, false, TextAlign.CENTER, 200, 0);
+        assertThat(b.lineCount()).isEqualTo(fresh.lineCount());
+        for (int g = 0; g < b.glyphCount(); g++) {
+            assertThat(b.glyphX(g)).isCloseTo(fresh.glyphX(g), offset(1e-4f));
+        }
+        for (int i = 0; i <= 8; i++) {
+            assertThat(b.caretX(i)).isCloseTo(fresh.caretX(i), offset(1e-4f));
+        }
+        // start-aligned left-to-right lines do not move: nothing changed
+        TextBlock start = new TextBlock(system);
+        start.set("aaa", LATIN, 10, 400, false, TextAlign.START, 100, 0);
+        assertThat(start.set("aaa", LATIN, 10, 400, false, TextAlign.START, 120, 0)).isFalse();
+        // too narrow now: lines break again
+        float narrow = b.lineWidth(0) - 1;
+        assertThat(b.set("aaa a\nbb", LATIN, 10, 400, false, TextAlign.CENTER, narrow, 0)).isTrue();
+        assertThat(b.lineCount()).isEqualTo(3);
+    }
+
+    @Test
     void mixedDirectionsAreReorderedVisually() {
         TextBlock b = block("ab אב cd", INF);
         assertThat(b.lineRightToLeft(0)).isFalse();

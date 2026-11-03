@@ -434,7 +434,17 @@ public final class GlyphAtlas {
         return pages.get(i);
     }
 
-    /** The cache it reads and fills, or null. */
+    /** The textures its pages are made in. */
+    public UiTextures textures() {
+        return textures;
+    }
+
+    /** The tunables the atlas reads. */
+    public AtlasSettings settings() {
+        return settings;
+    }
+
+    /** The disk cache, or null. */
     public GlyphCache cache() {
         return cache;
     }
