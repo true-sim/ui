@@ -134,6 +134,9 @@ public final class Ui {
     private long seenTechnique = -1;
     private int recorded; // elements recorded in the last update
     private long frames;
+    private UiFrameHook[] hooks = new UiFrameHook[0];
+    private int hookCount;
+    private static final int MAX_HOOK_PASSES = 4;
 
     /** A UI styled by {@code sheet}, its text set by {@code text} (null: no text, for tests of boxes). */
     @AllowAllocation("one per UI")
@@ -399,45 +402,28 @@ public final class Ui {
         resolver.update();
         ensure();
 
-        // styles and text: the queue grows while resolving (children of changed contexts)
-        for (int i = 0; i < store.dirtyCount(); i++) {
-            int slot = store.dirtySlots()[i];
-            if (!store.alive(slot)) {
-                continue;
-            }
-            int bits = store.dirty(slot);
-            if ((bits & UiStore.DIRTY_STYLE) != 0) {
-                resolver.resolve(slot);
-            }
-            // compared, not taken from the bit: resolving a child resolves its parents first and clears their bits
-            ResolvedStyle style = resolver.styleOf(slot);
-            if (style != applied[slot] || style.version() != appliedVersion[slot]) {
-                ResolvedStyle before = applied[slot];
-                applied[slot] = style;
-                appliedVersion[slot] = style.version();
-                apply(slot, style);
-                restyled(slot, before, style);
-                store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
-            }
-            if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
-                int li = layerStack.indexOf(slot);
-                if (li >= 0) {
-                    rebuild[li] = true;
-                }
-                interaction.picking().invalidate(slot);
-            }
-        }
-
+        resolveQueued();
         placePreviews(); // after styles: a restyled preview keeps the place set here
-        layout.update(measure, width, height);
-        int[] moved = layout.changedSlots();
-        for (int i = 0; i < layout.changedCount(); i++) {
-            int slot = moved[i];
-            store.markDirty(slot, UiStore.DIRTY_DRAW);
-            interaction.picking().moved(slot);
-            if (ownClip[slot] != DrawList.NO_CLIP) {
-                clipsMoved = true;
+        for (int h = 0; h < hookCount; h++) {
+            hooks[h].frame(this, input, nanos);
+        }
+        for (int h = 0; h < hookCount; h++) {
+            hooks[h].beforeLayout(this);
+        }
+        layOut(width, height);
+        for (int pass = 0; hookCount > 0 && pass < MAX_HOOK_PASSES; pass++) {
+            for (int h = 0; h < hookCount; h++) {
+                hooks[h].afterLayout(this);
             }
+            if (!pendingAfterHooks()) {
+                break;
+            }
+            ensure();
+            resolveQueued(); // what the hooks changed: facts, state, layout inputs
+            for (int h = 0; h < hookCount; h++) {
+                hooks[h].beforeLayout(this); // a restyle took the style's layout inputs: set them again
+            }
+            layOut(width, height);
         }
 
         for (int li = 0; li < layerStack.count(); li++) {
@@ -466,6 +452,85 @@ public final class Ui {
         }
         store.clearDirtyQueue();
         interaction.laidOut();
+    }
+
+    /** Resolves and applies the styles of the queued elements. */
+    private void resolveQueued() {
+        // styles and text: the queue grows while resolving (children of changed contexts)
+        for (int i = 0; i < store.dirtyCount(); i++) {
+            int slot = store.dirtySlots()[i];
+            if (!store.alive(slot)) {
+                continue;
+            }
+            int bits = store.dirty(slot);
+            if ((bits & UiStore.DIRTY_STYLE) != 0) {
+                resolver.resolve(slot);
+            }
+            // compared, not taken from the bit: resolving a child resolves its parents first and clears their bits
+            ResolvedStyle style = resolver.styleOf(slot);
+            if (style != applied[slot] || style.version() != appliedVersion[slot]) {
+                ResolvedStyle before = applied[slot];
+                applied[slot] = style;
+                appliedVersion[slot] = style.version();
+                apply(slot, style);
+                restyled(slot, before, style);
+                store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
+            }
+            if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
+                int li = layerStack.indexOf(slot);
+                if (li >= 0) {
+                    rebuild[li] = true;
+                }
+                interaction.picking().invalidate(slot);
+            }
+        }
+    }
+
+    /** Lays out what changed; what moved records again and tells picking. */
+    private void layOut(float width, float height) {
+        layout.update(measure, width, height);
+        int[] moved = layout.changedSlots();
+        for (int i = 0; i < layout.changedCount(); i++) {
+            int slot = moved[i];
+            store.markDirty(slot, UiStore.DIRTY_DRAW);
+            interaction.picking().moved(slot);
+            if (ownClip[slot] != DrawList.NO_CLIP) {
+                clipsMoved = true;
+            }
+        }
+    }
+
+    /** Whether a frame hook changed styles or layout inputs after layout: another pass resolves and lays them out. */
+    private boolean pendingAfterHooks() {
+        int[] queue = store.dirtySlots();
+        for (int i = 0; i < store.dirtyCount(); i++) {
+            int slot = queue[i];
+            if (store.alive(slot) && (store.dirty(slot) & (UiStore.DIRTY_STYLE | UiStore.DIRTY_LAYOUT)) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Adds a hook run in every {@link #update}: once a frame (timers), before each layout pass (positions and sizes set
+     * in code) and after it (what depends on layout); see {@link UiFrameHook}. Hooks run in the order they were added.
+     */
+    @AllowAllocation("hooks are added when a UI is built")
+    public void addFrameHook(UiFrameHook hook) {
+        hooks = Arrays.copyOf(hooks, hookCount + 1);
+        hooks[hookCount++] = hook;
+    }
+
+    /** Removes {@code hook}. */
+    public void removeFrameHook(UiFrameHook hook) {
+        for (int i = 0; i < hookCount; i++) {
+            if (hooks[i] == hook) {
+                System.arraycopy(hooks, i + 1, hooks, i, hookCount - i - 1);
+                hooks[--hookCount] = null;
+                return;
+            }
+        }
     }
 
     /** Tells picking about a new style: a changed shape, clip or pointer-events of an element it may hold. */
