@@ -1,0 +1,155 @@
+// Text editing (com.truesim.ui.controls.text): fields, areas, rich text and the small text controls. An editor draws
+// its text itself; its pieces are hidden parts styled here: caret, selection, placeholder, composition (the IME's
+// preedit underline), gutter (line numbers), and for rich text span.<class>, link, link:hover and img.
+
+@use "tokens";
+
+@mixin editor-box {
+  font-family: tokens.$font-ui;
+  font-size: map-get(tokens.$text-sizes, body);
+  line-height: 1.35;
+  color: var(--fg);
+  background: box(rgba(#0d1117, 0.72));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  padding: tokens.$space-s tokens.$space-m;
+  clip: true;
+  cursor: text;
+  focus-ring-offset: 1px;
+  transition: border tokens.$fast ease-out;
+
+  &:hover { border: 1px rgba(#8b949e, 0.5); }
+  &:focused { border: 1px var(--accent); }
+  &:focus-visible { focus-ring: 2px rgba(#3fa7ff, 0.5); }
+  &:invalid { border: 1px var(--danger); }
+  &:read-only { background: box(rgba(#0d1117, 0.35)); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  caret { width: 1.5px; background: box(var(--accent)); margin: 0 0 0 6px; }
+  selection { background: box(rgba(#3fa7ff, 0.35)); radius: 2px; }
+  placeholder { color: var(--fg-muted); font-style: italic; }
+  composition { border: 1px var(--fg); background: box(rgba(#3fa7ff, 0.12)); }
+}
+
+textfield { @include editor-box; width: 200px; min-width: 60px; }
+textarea {
+  @include editor-box;
+  min-width: 160px;
+  min-height: 60px;
+  gutter { background: box(rgba(#8b949e, 0.08)); color: var(--fg-muted); padding: 0 6px 0 4px; }
+}
+textfield:focused selection, textarea:focused selection { background: box(rgba(#3fa7ff, 0.45)); }
+
+// rich text to read: no box, the label's look
+richtext {
+  font-family: tokens.$font-ui;
+  font-size: map-get(tokens.$text-sizes, body);
+  line-height: 1.35;
+  color: var(--fg);
+  cursor: text;
+  selection { background: box(rgba(#3fa7ff, 0.35)); }
+  placeholder { color: var(--fg-muted); font-style: italic; }
+}
+
+// span classes and links of rich text, in editors and rich text alike
+span.warning { color: #e3b341; }
+span.error { color: var(--danger); font-weight: 600; }
+span.success { color: var(--good); }
+span.info { color: var(--accent); }
+span.muted { color: var(--fg-muted); }
+span.code { font-family: tokens.$font-numbers; background: box(rgba(#8b949e, 0.15)); }
+span.mark { background: box(rgba(#e3b341, 0.3)); }
+link { color: var(--accent); text-decoration: underline; cursor: pointer; }
+link:hover { color: lighten(#3fa7ff, 15%); background: box(rgba(#3fa7ff, 0.12)); }
+img { height: 16px; }
+
+// a password: masked by text-mask, its reveal toggle beside it
+passwordfield {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  > textfield { grow: 1; text-mask: "•"; }
+}
+toggle.reveal {
+  size: 22px;
+  radius: tokens.$radius-s;
+  background: image("icons/eye", var(--fg-muted));
+  cursor: pointer;
+  &:hover { background: image("icons/eye", var(--fg)); }
+  &:checked { background: image("icons/eye-off", var(--accent)); }
+}
+
+// a search box: the field and its clear button
+searchfield {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-xs;
+  > textfield { grow: 1; radius: 999px; padding: tokens.$space-s tokens.$space-l; }
+}
+button.clear {
+  size: 18px;
+  radius: 999px;
+  background: image("icons/close", var(--fg-muted));
+  cursor: pointer;
+  &:hover { background: image("icons/close", var(--fg)); }
+}
+
+// a number field: drag handle, the field (numbers to the end), steppers
+numberfield {
+  layout: flex;
+  direction: row;
+  align-items: stretch;
+  gap: tokens.$space-xs;
+  > textfield { grow: 1; min-width: 60px; text-align: end; font-family: tokens.$font-numbers; }
+  &:invalid > textfield { border: 1px var(--danger); }
+}
+handle {
+  width: 10px;
+  radius: tokens.$radius-s;
+  background: box(var(--track));
+  cursor: resize-ew;
+  &:hover { background: box(rgba(#8b949e, 0.4)); }
+  &:pressed { background: box(var(--accent)); }
+}
+button.step-down, button.step-up {
+  width: 22px;
+  radius: tokens.$radius-s;
+  background: box(var(--track));
+  cursor: pointer;
+  &:hover { background: box(rgba(#8b949e, 0.4)); }
+  &:pressed { background: box(var(--accent)); }
+}
+button.step-down { background: image("icons/minus", var(--fg)); }
+button.step-up { background: image("icons/plus", var(--fg)); }
+
+// tag input: chips and the field, wrapping
+taginput {
+  layout: flex;
+  direction: row;
+  wrap: wrap;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-xs;
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  > textfield { grow: 1; border: 0px transparent; background: none; min-width: 60px; }
+}
+chip {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-xs;
+  padding: 1px tokens.$space-xs 1px tokens.$space-m;
+  radius: 999px;
+  background: box(rgba(#3fa7ff, 0.22));
+  > label { color: var(--fg); font-size: map-get(tokens.$text-sizes, caption) + 1px; }
+}
+button.chip-remove {
+  size: 14px;
+  radius: 999px;
+  background: image("icons/close", var(--fg-muted));
+  cursor: pointer;
+  &:hover { background: image("icons/close", var(--danger)); }
+}

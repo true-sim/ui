@@ -192,9 +192,12 @@ class UiStoreTest {
         assertThat(UiState.of("pressed")).isEqualTo(UiState.PRESSED);
         assertThat(UiState.of("nope")).isZero();
         assertThat(UiState.name(UiState.EDITING)).isEqualTo("editing");
-        assertThat(UiState.count()).isEqualTo(12);
+        assertThat(UiState.count()).isEqualTo(14);
+        assertThat(UiState.name(UiState.INVALID)).isEqualTo("invalid");
+        assertThat(UiState.name(UiState.READ_ONLY)).isEqualTo("read-only");
+        assertThat(UiState.name(UiState.INDETERMINATE)).isEqualTo("indeterminate");
         assertThatThrownBy(() -> UiState.name(3)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> UiState.name(1 << 12)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> UiState.name(1 << 14)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

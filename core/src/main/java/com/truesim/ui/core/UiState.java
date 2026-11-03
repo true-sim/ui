@@ -23,14 +23,18 @@ public final class UiState {
     public static final int DROP_TARGET = 1 << 9;
     /** The source of a drag session in progress ({@code :dragging}). */
     public static final int DRAGGING = 1 << 10;
+    /** A value that fails its control's validation: a text field's filter or range ({@code :invalid}). */
+    public static final int INVALID = 1 << 11;
+    /** An editable control that shows its value but does not take changes ({@code :read-only}). */
+    public static final int READ_ONLY = 1 << 12;
     /**
      * Neither on nor off: a tri-state checkbox whose children are mixed, an indeterminate progress bar
      * ({@code :indeterminate}).
      */
-    public static final int INDETERMINATE = 1 << 11;
+    public static final int INDETERMINATE = 1 << 13;
 
     private static final String[] NAMES = {"hover", "pressed", "focused", "disabled", "selected", "checked",
-        "expanded", "editing", "focus-visible", "drop-target", "dragging", "indeterminate"};
+        "expanded", "editing", "focus-visible", "drop-target", "dragging", "invalid", "read-only", "indeterminate"};
 
     private UiState() {
     }

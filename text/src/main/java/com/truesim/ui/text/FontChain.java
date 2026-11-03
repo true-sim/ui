@@ -16,6 +16,7 @@ public final class FontChain {
     private final boolean italic;
     private final FontFace[][] byScript = new FontFace[FontRegistry.scriptCount()][];
     private FontFace[] lastResort;
+    private FontFace[] emoji;
 
     @AllowAllocation("one chain per distinct font request")
     FontChain(FontRegistry registry, FontFace[] faces, int weight, boolean italic) {
@@ -70,6 +71,33 @@ public final class FontChain {
             }
         }
         return primary(); // its missing glyph shows that nothing covers the character
+    }
+
+    /** The first emoji face covering {@code codepoint}, or null (no emoji font has it). */
+    public FontFace emojiFace(int codepoint) {
+        for (FontFace face : emoji()) {
+            if (face.covers(codepoint)) {
+                return face;
+            }
+        }
+        return null;
+    }
+
+    /** Whether {@code face} is one of the registry's emoji faces. */
+    public boolean isEmoji(FontFace face) {
+        for (FontFace e : emoji()) {
+            if (e == face) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private FontFace[] emoji() {
+        if (emoji == null) {
+            emoji = registry.emojiFaces(weight, italic);
+        }
+        return emoji;
     }
 
     private FontFace[] lastResort() {

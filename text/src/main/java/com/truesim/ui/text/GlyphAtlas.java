@@ -34,6 +34,13 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * They share the pages, the lane, the per-frame budget and the placeholder rule with MTSDF glyphs, and
  * are not put in the {@link GlyphCache} (FreeType renders one in microseconds).
  *
+ * <p><b>Colour glyphs</b> (emoji, {@link #colorEntry}): a face with colour bitmaps ({@link FontFace#colorStrike()})
+ * draws them from colour pages of their own ({@link UiTexture.Format#RGBA8_SRGB}, straight alpha), keyed by face,
+ * glyph and level: the bitmap halved that many times ({@link ColorBitmaps}), so it is sampled from at most twice the
+ * pixels it covers. Their bitmaps' sizes are known only once rendered, so a colour glyph's place is reserved when its
+ * job's bitmap is installed (their pages' layout follows the order jobs finish; what is drawn does not). They share
+ * the lane, the per-frame budget and the placeholder rule, and are not cached on disk.
+ *
  * <p>Used from the UI thread; only the generator and rasterizer run elsewhere.
  */
 public final class GlyphAtlas {
@@ -56,6 +63,8 @@ public final class GlyphAtlas {
     private static final int MAX_FACE = 0x7FFF;
     private static final int MAX_SIZE_64 = 0xFFFF;
     private static final int MAX_RASTER_GLYPH = 0xFFFFFF; // a raster key keeps the phase above the glyph
+    private static final int COLOR_KEY = 0x80000000; // a colour key: this bit, the level in bits 24-30, the glyph
+    private static final int COLOR_GUTTER = 2; // texels between colour glyphs: their padding is bled colour
 
     private final UiTextures textures;
     private final MsdfGenerator generator;
@@ -95,6 +104,14 @@ public final class GlyphAtlas {
     }
 
     private final ConcurrentLinkedQueue<Done> done = new ConcurrentLinkedQueue<>();
+
+    private record ColorDone(int entry, int epoch, ColorBitmaps.Prepared bitmap) {
+    }
+
+    private final ConcurrentLinkedQueue<ColorDone> colorDone = new ConcurrentLinkedQueue<>();
+    private final List<UiTexture> colorPages = new ArrayList<>();
+    private int colorPageCount;
+    private final SkylinePacker colorPacker = new SkylinePacker(1, 1);
     private int epoch;
     private long completions;
 
@@ -140,6 +157,29 @@ public final class GlyphAtlas {
         }
         pageCount = 0;
         newPage();
+        if (size != colorPageSize) {
+            colorPages.clear();
+            colorPageSize = size;
+        }
+        colorPageCount = 0; // a colour page is made when the first colour glyph arrives
+    }
+
+    private int colorPageSize;
+
+    @AllowAllocation("a new colour page, when one is full")
+    private void newColorPage() {
+        UiTexture page;
+        if (colorPageCount < colorPages.size()) {
+            page = colorPages.get(colorPageCount);
+            Arrays.fill(page.pixels(), (byte) 0);
+            page.markDirty(0, 0, colorPageSize, colorPageSize);
+        } else {
+            page = textures.create("colour glyph atlas " + colorPages.size(), colorPageSize, colorPageSize,
+                UiTexture.Format.RGBA8_SRGB);
+            colorPages.add(page);
+        }
+        colorPageCount++;
+        colorPacker.reset(colorPageSize, colorPageSize);
     }
 
     @AllowAllocation("a new page, when one is full")
@@ -177,6 +217,19 @@ public final class GlyphAtlas {
             return entry(face, glyph, 0);
         }
         return entry(face, phase << 24 | glyph, size64);
+    }
+
+    /**
+     * The entry of colour glyph {@code glyph} of {@code face} (a face with a {@linkplain FontFace#colorStrike() colour
+     * strike}) to be drawn at {@code sizePx} pixels per em: its bitmap halved to the {@link ColorBitmaps#level} for that
+     * size; known, or queued. Its {@link #plane}s are in ems, as an MTSDF glyph's; it is {@link #color}.
+     */
+    public int colorEntry(FontFace face, int glyph, float sizePx) {
+        if (glyph < 0 || glyph > MAX_RASTER_GLYPH) {
+            throw new IllegalArgumentException("glyph " + glyph + " is out of the colour key's range");
+        }
+        int level = ColorBitmaps.level(face.colorStrike(), sizePx);
+        return entry(face, COLOR_KEY | level << 24 | glyph, 0);
     }
 
     /** Whether text of {@code sizePx} pixels per em, in world space or not, draws raster glyphs here. */
@@ -263,6 +316,12 @@ public final class GlyphAtlas {
                 install(d.entry(), d.pixels());
             }
         }
+        for (ColorDone d = colorDone.poll(); d != null; d = colorDone.poll()) {
+            generating--;
+            if (d.epoch() == epoch) {
+                installColor(d.entry(), d.bitmap());
+            }
+        }
         int budget = (int) settings.glyphsPerFrame().get();
         for (int i = 0; i < budget && queueSize > 0; i++) {
             int e = queue[queueHead];
@@ -283,6 +342,13 @@ public final class GlyphAtlas {
                 generating--;
                 if (d.epoch() == epoch) {
                     install(d.entry(), d.pixels());
+                }
+                handled++;
+            }
+            for (ColorDone d = colorDone.poll(); d != null; d = colorDone.poll()) {
+                generating--;
+                if (d.epoch() == epoch) {
+                    installColor(d.entry(), d.bitmap());
                 }
                 handled++;
             }
@@ -309,6 +375,15 @@ public final class GlyphAtlas {
     }
 
     private void start(int e) {
+        if (isColor(e)) {
+            states[e] = GENERATING;
+            if (lane == null) {
+                installColor(e, colorNow(faces[e], colorGlyph(e), colorLevel(e)));
+            } else {
+                submitColor(e);
+            }
+            return;
+        }
         if (isRaster(e)) {
             if (prepareRaster(e)) {
                 if (lane == null) {
@@ -331,6 +406,10 @@ public final class GlyphAtlas {
     }
 
     private void startNow(int e) {
+        if (isColor(e)) {
+            installColor(e, colorNow(faces[e], colorGlyph(e), colorLevel(e)));
+            return;
+        }
         if (isRaster(e)) {
             if (prepareRaster(e)) {
                 install(e, rasterNow(e));
@@ -403,6 +482,88 @@ public final class GlyphAtlas {
 
     private boolean isRaster(int e) {
         return (keys[e] >>> 32 & MAX_SIZE_64) != 0;
+    }
+
+    private boolean isColor(int e) {
+        return (keys[e] >>> 32 & MAX_SIZE_64) == 0 && ((int) keys[e] & COLOR_KEY) != 0;
+    }
+
+    private int colorGlyph(int e) {
+        return (int) keys[e] & MAX_RASTER_GLYPH;
+    }
+
+    private int colorLevel(int e) {
+        return (int) keys[e] >>> 24 & 0x7F;
+    }
+
+    /**
+     * A colour glyph's prepared bitmap, on this or a job's thread: reads only its arguments; null if it has none or
+     * rendering failed.
+     */
+    private ColorBitmaps.Prepared colorNow(FontFace face, int glyph, int level) {
+        if (rasterizer == null) {
+            return null;
+        }
+        try {
+            GlyphRasterizer.ColorBitmap b = rasterizer.color(face, glyph);
+            return b == null ? null : ColorBitmaps.prepare(b, level);
+        } catch (RuntimeException ex) {
+            return null; // a broken bitmap draws nothing rather than stopping the UI
+        }
+    }
+
+    @AllowAllocation("one job per new colour glyph")
+    private void submitColor(int e) {
+        int jobEpoch = epoch;
+        FontFace face = faces[e];
+        int glyph = colorGlyph(e);
+        int level = colorLevel(e);
+        generating++;
+        lane.execute(() -> colorDone.add(new ColorDone(e, jobEpoch, colorNow(face, glyph, level))));
+    }
+
+    /** Reserves a colour glyph's place on a colour page and copies its bitmap there. */
+    private void installColor(int e, ColorBitmaps.Prepared b) {
+        if (b == null) {
+            markEmpty(e);
+            return;
+        }
+        int w = b.width() + COLOR_GUTTER;
+        int h = b.height() + COLOR_GUTTER;
+        if (w > colorPageSize || h > colorPageSize) {
+            markEmpty(e);
+            return;
+        }
+        if (colorPageCount == 0 || !colorPacker.pack(w, h)) {
+            newColorPage();
+            colorPacker.pack(w, h);
+        }
+        UiTexture page = colorPages.get(colorPageCount - 1);
+        int x = colorPacker.x();
+        int y = colorPacker.y();
+        pageIds[e] = page.id();
+        slotX[e] = x;
+        slotY[e] = y;
+        widths[e] = b.width();
+        heights[e] = b.height();
+        int o = e * 4;
+        planes[o] = b.left();
+        planes[o + 1] = b.top() - b.emHeight();
+        planes[o + 2] = b.left() + b.emWidth();
+        planes[o + 3] = b.top();
+        float inv = 1f / colorPageSize;
+        uvs[o] = x * inv;
+        uvs[o + 1] = y * inv;
+        uvs[o + 2] = (x + b.width()) * inv;
+        uvs[o + 3] = (y + b.height()) * inv;
+        byte[] dst = page.pixels();
+        int row = b.width() * 4;
+        for (int r = 0; r < b.height(); r++) {
+            System.arraycopy(b.pixels(), r * row, dst, ((y + r) * colorPageSize + x) * 4, row);
+        }
+        page.markDirty(x, y, b.width(), b.height());
+        states[e] = READY;
+        completions++;
     }
 
     private int size64(int e) {
@@ -571,6 +732,24 @@ public final class GlyphAtlas {
         return pageIds[e];
     }
 
+    /** Whether entry {@code e} is a colour glyph on a colour page (drawn with {@code FLAG_COLOR}). */
+    public boolean color(int e) {
+        return isColor(e);
+    }
+
+    /** Colour pages in use. */
+    public int colorPageCount() {
+        return colorPageCount;
+    }
+
+    /** Colour page {@code i}. */
+    public UiTexture colorPage(int i) {
+        if (i < 0 || i >= colorPageCount) {
+            throw new IndexOutOfBoundsException(i);
+        }
+        return colorPages.get(i);
+    }
+
     /** Whether entry {@code e} is a hinted raster glyph (its {@link #plane}s are whole pixels). */
     public boolean raster(int e) {
         return isRaster(e);
@@ -583,7 +762,7 @@ public final class GlyphAtlas {
 
     /**
      * Entry {@code e}'s bitmap edges from the pen position, y up: 0 left, 1 bottom, 2 right, 3 top; in ems for an
-     * MTSDF glyph, in whole pixels for a {@link #raster} one.
+     * MTSDF or {@link #color} glyph, in whole pixels for a {@link #raster} one.
      */
     public float plane(int e, int edge) {
         return planes[e * 4 + edge];

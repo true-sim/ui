@@ -227,6 +227,20 @@ public final class DrawList {
         emit(p);
     }
 
+    /**
+     * A colour glyph ({@link Primitive#FLAG_COLOR}): the quad {@code x0..y1} on screen shows the colour bitmap region
+     * {@code u0..v1} of {@code texture} (an {@code RGBA8_SRGB} page), filtered, multiplied by {@code tint} (white with
+     * the text's opacity for an emoji's own colours).
+     */
+    public void colorGlyph(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
+        int texture, long tint) {
+        int[] p = start(Primitive.GLYPH, Primitive.FLAG_COLOR, x0, y0, x1, y1, tint, 0);
+        p[Primitive.UV] = Primitive.unorm16(u0, v0);
+        p[Primitive.UV + 1] = Primitive.unorm16(u1, v1);
+        p[Primitive.TEXTURE] = texture; // pixel range, outline and weight stay 0
+        emit(p);
+    }
+
     /** An image: region {@code u0..v1} of {@code texture}, multiplied by {@code tint}. */
     public void image(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int texture,
         long tint) {

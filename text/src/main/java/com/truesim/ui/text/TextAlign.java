@@ -14,7 +14,7 @@ public enum TextAlign {
     END;
 
     /** The share of a line's free space left of it: 0 hugs the left edge, 1 the right. */
-    float leftShare(boolean rightToLeft) {
+    public float leftShare(boolean rightToLeft) {
         return switch (this) {
             case START -> rightToLeft ? 1 : 0;
             case CENTER -> 0.5f;

@@ -1973,3 +1973,49 @@ nothing without escape analysis (`ControlsAllocationTest`), as do animated frame
   (`DropDown.FilterSource`, `ColorPicker.hexSlot()`); type-ahead starts the engine's text input while a list is open.
 - Scroll views (and scroll bars) are the data controls'; menus, drop-downs and tab strips scroll minimally inside.
 - GPU screenshots of `ControlsGallery` by the integrator.
+
+### Text editing (2026-11-03): built, local branch `text-edit` (and engine branch `ui-text-input`), not yet in CI
+
+| Piece | Built | Where |
+|---|---|---|
+| Fields | `TextEditor.field`: caret, selection by pointer (click, Shift, double click words, triple click lines, drags by unit), touch (tap, drag scrolls, long press selects a word) and keys; every `ui.text` command (arrows with `EXTEND_SELECTION`, words, line and document edges, select all, copy/cut/paste through the interaction's `Clipboard`, undo/redo with coalesced typing and deleting, deletes, submit); IME composition inline and underlined, the candidate window at the caret (`Interaction.imeArea`); BiDi caret movement visual or logical (`ui.text.caretMovement`); horizontal scrolling; placeholder; maximum length; filters and validators (`TextFilters`: characters, patterns, numbers; `:invalid`); read-only (`:read-only`) | `ui-controls` `com.truesim.ui.controls.text`, `ui-text` `com.truesim.ui.text.edit` |
+| Small controls | `PasswordField` (mask from `text-mask`, reveal toggle, PASSWORD text input: no IME, nothing on the clipboard, deletes by character), `SearchField` (clear button, submit, Escape clears), `NumberField` (steppers, Up/Down/Page, drag on its handle `ui.input.numberDragPixels`, range, decimals, commit on Enter and focus loss), `TagInput` (chips from Enter and separators, Backspace, remove buttons) | `ui-controls` |
+| Areas | `TextEditor.area`: word wrap (or sideways scrolling), hard breaks as paragraphs and soft breaks by the layout, Up/Down and pages keeping the column, Tab inserts or moves focus (`ui.text.areaTab`), `submitOnEnter`, line numbers in a stylable `gutter`; virtualized: shaped blocks only for visible paragraphs (a pool of 96), heights in a Fenwick index (estimated until shaped), the edits' line damage (`EditableText.damageFrom/damageTail`) | `ui-controls`, `ui-text` |
+| Rich text | `TextRuns` in `TextBlock`: runs of their own font, size, colour, decorations, highlight or inline object box; runs of one font shape together (a colour change keeps kerning and ligatures); lines take their tallest run. `Spans` follow edits (inside or right after a span widens it, at its start not, deletions merge), copy and paste within the UI keeps them. Styled from `.tss`: `span.<class>`, `link`, `link:hover`, `img`; links call `TextEditor.Listener.link(target)`; images from `UiImages`; underline, line through and highlight drawn as boxes. `TextEditor.richText` shows markup read-only, selectable | `ui-text`, `ui-controls` |
+| Markup | A small BBCode (`Markup`): `[b] [i] [u] [s] [color=] [size=] [bg=] [class=] [link=] [img=]`, `[[` for `[`, quoted values; forgiving (unknown tags stay text); `parse(format(t, s))` round-trips | `ui-text` |
+| Emoji | Noto Color Emoji (CBDT, Unicode 18.0, OFL) in the new optional module `ui-fonts-emoji` (`BundledEmojiFonts.register`, emoji families in `FontRegistry.emoji`); emoji itemisation (presentation, U+FE0F/FE0E, keycaps, flags, skin tones, ZWJ sequences); colour glyphs through FreeType (`FT_LOAD_COLOR`) on `RGBA8_SRGB` colour pages at pre-scaled levels (`ColorBitmaps`), `Primitive.FLAG_COLOR`; emoticon and shortcode replacement (`Emoticons`, a data file, `ui.text.emojiReplacement`) | `ui-text`, `ui-text-native`, `ui-fonts-emoji` |
+| Engine | `UiTextInput` (TextInputHost: the `ui.text` context, SDL text input with the field's kind, the IME area), `SdlClipboard`, `Window.startTextInput(kind)`, `textInputArea`, `Platform.clipboardText`; the shader's colour glyph path; a GPU test of a field with a selection, a preedit and emoji | engine `platform`, `input`, `ui` |
+
+**Decisions:**
+- *Markup: BBCode, not markdown.* Class spans and links with arbitrary targets (console commands with spaces and
+  brackets) need named, valued, explicitly closed spans: BBCode has them; markdown would need an extension
+  (`[text]{.class}`), and its emphasis by `*` and `_` follows context-dependent rules that misread game text
+  (`2*3*4`, `snake_case`). BBCode reserves one character, escaped by doubling. Not a matter of taste.
+- *Emoji format: CBDT.* LWJGL 3.4.3's FreeType renders CBDT in colour (verified: BGRA bitmaps at the 109 px
+  strike); COLRv1 would need FreeType's paint graph rasterised by us.
+- *Colour pages: straight alpha, sRGB, colours bled.* Hardware sRGB decode before filtering stays exact, and bled
+  transparent texels give no dark fringes; halving (premultiplied, in linear light) to the level drawn at most two
+  texels a pixel replaces mipmaps, which would mix neighbouring glyphs.
+- *The shader change* (engine `draw.slang`, done on `ui-text-input`): `primitive.slang` gains
+  `FLAG_COLOR = 4`; in `glyph()`, before the raster test: `if (flags & FLAG_COLOR) return tinted(m, p);`, the
+  image path (`float4(s.rgb * s.a, s.a) * colour A`), on a view of the `RGBA8_SRGB` page.
+- *Parts for styling.* Pieces an editor draws itself (caret, selection, placeholder, composition, gutter, span
+  classes, links, images) are hidden child elements (`Ui.part`) styled with ordinary keys and selectors
+  (`textfield:focused caret`), so no control-specific style keys were needed; two text keys joined `Styles`
+  (`text-decoration`, `text-mask`).
+
+**Shared files changed** (each in its own commit): `ui-core` `Primitive.FLAG_COLOR`, `DrawList.colorGlyph`,
+`UiState.INVALID`/`READ_ONLY`, `TextInputHost` kinds and `Interaction.textInputKind`; `ui-style` `Styles.TEXT_DECORATION`,
+`Styles.TEXT_MASK`, the `@use` lines in both themes, `ThemesTest`; `ui-controls` `Ui.paint`/`repaint`/`remeasure`
+(`Painter`), `Ui.part`, `Ui.onFrame`, the painter's own clip, `Ui.tunables`; `ui-fonts` the last resort lists Noto
+Color Emoji; `settings.gradle.kts` one include.
+
+**Benchmark** (Ryzen 9 9950X3D, without JaCoCo, `TextAreaTest.aMegabyteStaysResponsive`, warmed up): a 1 MB area
+(13,700 paragraphs), typing prose in its middle: 0.045 ms median, 0.085 ms p99 a frame; scrolling: 0.004 ms median,
+0.022 ms p99 (target well under 1 ms). Typing into one paragraph thousands of characters long costs about 1 ms (the
+paragraph is shaped and broken again whole). Idle, caret-blink, scroll and hover frames allocate nothing
+(`TextAreaTest.steadyFramesAllocateNothing`, without escape analysis).
+
+**Left:** incremental shaping of very long paragraphs; the I-beam versus pointer cursor over links (one cursor per
+element); touch selection handles; spell checking; grapheme-level masking in passwords (one mask per code point);
+the `Ui` engine plugin wiring `UiTextInput`, `SdlClipboard` and the window's pixel density.

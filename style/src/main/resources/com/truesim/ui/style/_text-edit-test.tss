@@ -1,0 +1,48 @@
+// The garish test look of the text editing controls (_text-edit.tss): every element type, part and state differs.
+
+@mixin garish-editor($c) {
+  font: italic 800 19px "Comic Sans MS", cursive;
+  color: $c;
+  line-height: 2;
+  background: box(#ff00ff);
+  border: 4px #ffef00;
+  radius: 0 16px 0 16px;
+  padding: 9px 13px;
+  clip: true;
+  cursor: crosshair;
+  &:focused { border: 6px #39ff14; }
+  &:invalid { background: box(#0000ff); }
+  &:read-only { background: box(#8a2be2); }
+  caret { width: 7px; background: box(#00ffff); }
+  selection { background: box(rgba(#ffef00, 0.7)); radius: 6px; }
+  placeholder { color: #ff6600; font-size: 25px; }
+  composition { border: 4px #ff1493; background: box(#00ffff); }
+}
+
+textfield { @include garish-editor(#39ff14); }
+textarea { @include garish-editor(#00ffff); gutter { background: box(#ff6600); color: black; padding: 0 12px; } }
+richtext {
+  color: #ff6600; font-size: 21px; line-height: 2.4;
+  selection { background: box(#39ff14); }
+  placeholder { color: #0000ff; }
+}
+span.warning { color: #0000ff; font-size: 30px; }
+span.error { color: #ffffff; background: box(#ff0000); }
+span.success { color: #ff00ff; }
+span.info { color: #8a2be2; text-decoration: line-through; }
+span.muted { color: #ffef00; }
+span.code { font-family: "Courier New", monospace; background: box(#39ff14); }
+span.mark { background: box(#ff1493); }
+link { color: #ff0000; text-decoration: underline-line-through; }
+link:hover { color: #0000ff; background: box(#ffef00); }
+img { height: 40px; }
+passwordfield { layout: flex; direction: row-reverse; gap: 15px; > textfield { text-mask: "*"; } }
+toggle.reveal { size: 37px; background: box(#ff6600); &:checked { background: box(#00ffff); } }
+searchfield { layout: flex; direction: row-reverse; gap: 11px; }
+button.clear { size: 29px; background: box(#0000ff); }
+numberfield { layout: flex; direction: column; gap: 9px; > textfield { text-align: start; } }
+handle { width: 30px; background: box(#ff1493); &:pressed { background: box(#ffef00); } }
+button.step-down, button.step-up { width: 41px; background: box(#39ff14); }
+taginput { layout: flex; direction: row-reverse; wrap: wrap; gap: 21px; border: 5px #ff1493; }
+chip { padding: 8px; background: box(#00ffff); radius: 0; }
+button.chip-remove { size: 25px; background: box(#ff0000); }
