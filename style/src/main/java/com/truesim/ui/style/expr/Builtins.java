@@ -73,6 +73,9 @@ public final class Builtins {
         if (params == null) {
             return Value.fn(name, args);
         }
+        if (args.size() == 1 && args.get(0) instanceof Value.ListV list && !list.comma() && isColorSpace(name)) {
+            args = list.items(); // CSS syntax: oklch(70% 0.1 250), rgb(255 0 0)
+        }
         if (args.size() > params.length) {
             throw new ValueException(name + "() takes at most " + params.length + " arguments, got " + args.size());
         }
@@ -115,6 +118,13 @@ public final class Builtins {
             case "map-values" -> Value.list(new ArrayList<>(a.map(0).entries().values()), true);
             case "if" -> a.get(0).truthy() ? a.get(1) : a.get(2);
             default -> Value.string(a.get(0).kind()); // type-of
+        };
+    }
+
+    private static boolean isColorSpace(String name) {
+        return switch (name) {
+            case "rgb", "rgba", "hsl", "hsla", "oklch" -> true;
+            default -> false;
         };
     }
 
