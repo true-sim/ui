@@ -1,0 +1,130 @@
+// The garish test look of the data controls (see _data.tss for the element types): every part and state looks
+// obviously different from the default theme, so a control still looking default holds a presentational value in
+// code.
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+
+scroll-pane, list-view, tree-view, table-view {
+  scroll-step: 13;
+  background: linear-gradient(90deg, $sun, $cyan);
+  border: 4px $hot;
+  radius: 0 18px 0 18px;
+  &:focus-visible { focus-ring: 5px $lime; }
+}
+
+scroll-viewport { clip: true; }
+scroll-content { layout: stack; direction: column; gap: 9px; padding: 11px; background: box(#400040); }
+scroll-sticky { layout: stack; direction: column; background: box($lime); }
+
+scroll-bar {
+  width: 17px;
+  height: 17px;
+  thumb-min: 31;
+  scrollbar-overlay: false;
+  scrollbar-visibility: always;
+  background: box(#8a2be2);
+  border: 2px $sun;
+  &[active=true] { background: box($hot); }
+  &:hover { background: box($cyan); }
+}
+
+scroll-button {
+  size: 17px;
+  background: box($lime);
+  &:hover { background: box($sun); }
+  &:pressed { background: box($hot); }
+}
+
+scroll-thumb {
+  background: box($sun);
+  border: 3px $hot;
+  &:hover { background: box($lime); }
+  &:pressed { background: box(#0000ff); }
+}
+
+list-item, tree-item {
+  layout: flex;
+  direction: row-reverse;
+  align-items: end;
+  gap: 7px;
+  height: 37px;
+  padding: 3px 9px;
+  background: box(#202060);
+  border: 2px $cyan;
+  &:hover { background: box(#606020); }
+  &:selected { background: box($hot); }
+  &:focused { border: 4px $lime; }
+  &:focus-visible { border: 6px $sun; }
+  &:drop-target { background: box($sun); }
+}
+
+list-drop-indicator, tree-drop-indicator, table-column-drop-indicator {
+  height: 7px;
+  width: 7px;
+  background: box($lime);
+}
+
+tree-item { indent: 29; }
+tree-indent { height: 3px; background: box($sun); }
+
+tree-expander {
+  size: 15px;
+  background: box($hot);
+  &:expanded { background: box($lime); }
+  &:disabled { background: box(#404040); }
+}
+
+value-check {
+  size: 19px;
+  background: box($cyan);
+  &:checked { background: box($hot); border: 3px $lime; }
+}
+
+label#number { text-align: center; color: $sun; }
+label#color, label#vector, label#enum { color: $cyan; }
+
+value-editor { layout: flex; direction: row; background: box($lime); border: 3px $hot; padding: 4px; }
+
+label.list-drag-preview, label.tree-drag-preview, label.table-drag-preview { background: box($hot); padding: 9px; }
+
+table-header { background: box(#004000); border: 3px $sun; clip: true; }
+table-header-row, table-filter-row { height: 41px; }
+table-header-cell {
+  layout: flex;
+  direction: row-reverse;
+  column-min-width: 47;
+  background: box(#600060);
+  border: 2px $lime;
+  &:hover { background: box($cyan); }
+  &:selected { background: box($sun); }
+  > label { color: $sun; }
+}
+table-sort-indicator { size: 3px; background: box(#404040); }
+table-header-cell[sort=ascending] > table-sort-indicator { size: 13px; background: box($lime); }
+table-header-cell[sort=descending] > table-sort-indicator { size: 13px; background: box($hot); }
+table-column-grip { width: 11px; background: box($cyan); &:hover { background: box($hot); } }
+table-filter-cell { layout: flex; padding: 5px; background: box(#303000); }
+
+table-row {
+  height: 33px;
+  background: box(#002020);
+  &:hover { background: box(#205050); }
+  &:selected { background: box($hot); }
+  &:focused { border: 3px $lime; }
+}
+
+table-cell {
+  layout: flex;
+  direction: row-reverse;
+  padding: 2px 6px;
+  border: 1px $sun;
+  clip: true;
+  &:selected { background: box($lime); }
+  &:focused { border: 4px $hot; }
+  &:editing { background: box($cyan); }
+}
+
+table-frozen > table-cell { background: box(#500000); }
