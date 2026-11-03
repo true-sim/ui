@@ -1748,6 +1748,49 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A2 fixes (2026-11-04): local branches `a2-fixes` (ui) and `ui-a2-fixes` (engine), not yet in CI
+
+The defects the GPU screenshots of the A2 galleries showed, a check that finds their kinds in any UI, the frame in
+two phases (no frame of latency for the game's changes), built-in icons and touch selection handles.
+
+#### Built
+
+| Item | Cause and fix | Where |
+|---|---|---|
+| Data gallery: a section's rows at one place | Style names are inherited by unnamed children; the gallery's root is `panel.hud`, so every unnamed panel in it (a section's body) matched `panel.hud { layout: anchors; anchors: full }` and anchored all its rows to its corner (a minimal pane without a hud root stacked them). The HUD root's rule now applies to the root only (`root > panel.hud, layer > panel.hud`) | `default-theme.tss` |
+| Stuck section headers over their rows | The header moved by its holder's scroll offset, but the `scroll-sticky` bar's background stayed behind, so the stuck title drew over the rows. `ScrollPane` scrolls an unstyled `scroll-stick` holding the bar; the default bar is opaque (the surface is 86 % opaque) | `controls.data` `ScrollPane`, `_data.tss` |
+| Tab under the overflow button | With `tab-overflow: menu` (now the default theme's) the strip shows only tabs it holds whole, the selected one always; the others are drawn transparent and not pickable (their places stay: hiding changes no layout, so no oscillation) and reached through the menu (`TabPane.overflowing(i)`). Scroll mode scrolls and clips before the button; the test theme wraps | `TabPane` |
+| Carousel: slides floating, mostly empty | The viewport is a surface of its own (96 px), clips, shows one page; a page lays its content over itself, stretched (`layout: overlay`), so a slide fills it; arrows beside, dots right below | `_basic.tss`, gallery |
+| Split pane | Both panes are surfaces (background, border, padding, clip), the splitter visible | `_basic.tss` |
+| Window buttons without icons | `BuiltinIcons`: the toolkit's own icons (close, dismiss, minimise, maximise, restore, more, previous, next, up, down, the drop-down, collapsible, menu and breadcrumb arrows, chevrons, check, minus, plus, eye, eye-off, search, grip), distance fields of lines, triangles, circles and rings on a 16-unit grid, rendered once at 32 texels when a style first names `icons/<name>`, tinted by the style's image colour; `UiImages.get` falls back to them, a game's image under the same name wins. Each `window-button` holds an `image.icon` of its id (`restore` while maximised) | `controls` `BuiltinIcons`, `UiImages`, `FloatingWindow`, `_windows.tss` |
+| Test theme: rich text over its neighbours | `richtext` clips in both themes (it scrolls when taller than its box) | `_text-edit*.tss` |
+| A clipping label's text drew outside it | Text and image content were recorded under the parent's clip only; all content now switches to the element's own clip, as painted content did (found by the check below) | `Ui` |
+| More | Gallery: the drawer's row lost its flex row to a second inline style; sized panels are minimum sizes (the test theme's text overflowed them); test theme: date cells, badges and step numbers sized for its text | gallery, `_basic-test.tss` |
+| `LayoutSanity` | `LayoutSanity.check(ui)` (ui-testkit) lists a laid-out, recorded UI's defects over every layer, from what is drawn (each range's primitives where they draw, cut by their clips; glyphs by their inked atlas texels; transparent primitives, shadows and focus rings left out; boxes transformed as their primitives): `CLIP` (drawn outside the nearest clipping ancestor's clip), `OVERLAP` (siblings of a stack, flex or grid overlap; not overlay, anchors, border or absolute layouts or negative margins), `TEXT_OVERFLOW` (ink leaves the box; sideways up to 0.4 of the ink's height for italics), `TEXT_OVERLAP` (two elements' glyphs overlap with nothing opaque drawn between them: it found the data gallery's rows, which `OVERLAP` cannot see in an anchors layout), `TAB_UNDER_OVERFLOW`, `TAB_PARTIAL`. `assertSane(ui, what)` throws with the list. `GallerySanityTest` runs it on every gallery in both themes with the real text path (controls, with its overlays open, while the carousel turns; data; windows; text) | `ui-testkit`, `controls` tests |
+| Two-phase frame | `Ui.input(input, nanos)` at the frame's start (picking, events, states, focus, commands, text: the game's update sees this frame's clicks); `Ui.update(width, height)` after the game's update (listeners, animations, styles, layout, recording: what the input and the game changed shows in this frame). `Ui.input()` keeps returning the frame's input in the second phase, so popovers and tooltips see the pointer; `update(w, h, input, nanos)` does both. Engine: `UiPlugin` runs `input` in `beforeUpdate` and `update`, the submit and the cursor in `afterUpdate` (after the game's update and late update); `UiPlugin.pointers(source)` adds pointer sources | `Ui`, engine `UiPlugin` |
+| Touch selection handles | A touch long press selects a word with a `selection-handle` (size, background, radius) at each end, centred on the line's bottom; touching within a line height of one drags that end (kept where grabbed, swapping past the other end); typing, a tap, a mouse press end them | `TextEditor`, `_text-edit*.tss` |
+
+#### Decisions
+
+- *A tab that does not fit is hidden, not taken out of the row*: taking it out would shrink the row, which would
+  then fit and bring it back; transparent and unpickable, it keeps its place and the layout does not change.
+- *Icons as small rendered textures*, not primitives: an image element already draws a texture tinted and fitted by
+  its style; 32 texels with a texel of distance antialiasing stay crisp at the 10 to 16 px the themes use. Shapes are
+  code, so no asset pipeline is needed and a game can still register its own.
+- *The checker reads the draw lists*, not the layout alone: the defects users see are where things draw (clips,
+  offsets, scales, text ink); layout-only checks missed the anchored rows and the label clip.
+- *Two phases, one per side of the game's update*, instead of a second input-free update: input is processed once,
+  everything after it once.
+
+#### Left
+
+- Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
+  label's text overflows its box rather than the row overflowing. The galleries use minimum sizes; a layout change is
+  its own step (the Yoga oracle tests pin the current behaviour).
+- `LayoutSanity` tolerates italic overhang by a share of the ink's height; it does not check text against elision
+  (no element elides yet) nor overlaps across layers (pop-ups are meant to cover).
+- Touch handles are not magnified (no loupe) and do not scroll a field while dragged past its edge.
+
 ### Group A2 (2026-11-04): built, local branches `a2-group` (ui) and `ui-a2` (engine), not yet in CI
 
 The interaction core (A2 groundwork) and the four areas of the plan additions built on it in parallel (text editing;
@@ -1793,8 +1836,8 @@ and `ui-controls` (`com.truesim.ui.controls.{text,overlay,windows,basic,anim,dat
   overlay is logically hidden at once (focus, modality, `showing()`).
 - *Scrolling by offset, not by re-recording*, with whole-pixel scroll shifts so draw and pick positions agree
   exactly; a non-region scroll (a sticky header) still records its content again.
-- *Engine frame wiring at the frame's start.* What the UI's listeners change shows in the same frame; the game's own
-  changes to UI state in its update show from the next frame (left, below).
+- ~~*Engine frame wiring at the frame's start.*~~ The frame is two phases since the fixes below: input at the
+  frame's start, the update after the game's.
 - From the branches: BBCode markup, CBDT colour emoji on straight-alpha sRGB pages, style parts instead of
   control-specific keys (text); positions in code as layout inputs and overlays placed after layout in the same frame
   (windows); animated values in `Visuals`, never inline styles, and pages taken out of the tree rather than hidden
@@ -1833,14 +1876,10 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
 
 #### Left
 
-- The scroll pane of the data gallery lays the rows of a section's body on top of one another (pre-existing on the
-  `data-controls` branch; a minimal pane with the same sections stacks them correctly, so the cause is in how the
-  gallery's wrapping row sizes the pane): to find.
-- The game's changes to UI state in its update show the next frame (`UiPlugin` updates at the frame's start); an
-  optional second, input-free update after the game's update would remove that frame without re-processing input.
-- Windows' title bar buttons draw no icons in the windows scene (it registers none); the controls gallery's tab
-  strip overflow button overlaps a clipped tab.
-- From the branches: incremental shaping of very long paragraphs, touch selection handles, spell checking,
+- ~~The scroll pane of the data gallery lays the rows of a section's body on top of one another~~,
+  ~~the game's changes to UI state show the next frame~~, ~~windows' title bar buttons draw no icons~~, ~~the tab
+  strip's overflow button overlaps a clipped tab~~: fixed, see "Group A2 fixes" above.
+- From the branches: incremental shaping of very long paragraphs, ~~touch selection handles~~, spell checking,
   grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
   `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
   primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
