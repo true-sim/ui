@@ -11,4 +11,12 @@ dependencies {
     api(project(":ui-layout"))
     api(project(":ui-text"))
     testImplementation(project(":ui-testkit"))
+    testImplementation(project(":ui-text-native")) // the real text path in allocation tests and benchmarks
+}
+
+// Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.
+tasks.test {
+    if (providers.environmentVariable("TRUESIM_BENCHMARK").orNull == "true") {
+        extensions.configure<JacocoTaskExtension> { isEnabled = false }
+    }
 }
