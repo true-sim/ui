@@ -77,6 +77,15 @@ public final class SoftwareGlyphRenderer {
         int py0 = Math.max(0, (int) Math.floor(y0));
         int px1 = Math.min(width, (int) Math.ceil(x1));
         int py1 = Math.min(height, (int) Math.ceil(y1));
+        int clip = Primitive.clip(list.header(i));
+        if (clip != DrawList.NO_CLIP) { // the clip's rectangle (its rounded corners are left out here)
+            float[] c = list.clips();
+            int o = clip * DrawList.CLIP_FLOATS;
+            px0 = Math.max(px0, (int) Math.floor(c[o]));
+            py0 = Math.max(py0, (int) Math.floor(c[o + 1]));
+            px1 = Math.min(px1, (int) Math.ceil(c[o + 2]));
+            py1 = Math.min(py1, (int) Math.ceil(c[o + 3]));
+        }
         for (int py = py0; py < py1; py++) {
             float v = v0 + (py + 0.5f - y0) / (y1 - y0) * (v1 - v0);
             for (int px = px0; px < px1; px++) {

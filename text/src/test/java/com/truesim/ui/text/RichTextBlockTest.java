@@ -258,6 +258,39 @@ class RichTextBlockTest {
     }
 
     @Test
+    void theSoftwareRendererKeepsGlyphsInTheirClip() {
+        TextBlock b = new TextBlock(system);
+        b.set("ab", LATIN, 20, 400, false, TextAlign.START, INF, 0);
+        DrawList list = new DrawList();
+        int start = list.allocate(2);
+        int clip = list.addClip(0, 0, 10, 40, 0);
+        for (int pass = 0; pass < 2; pass++) {
+            atlas.beginFrame();
+            list.begin(start, 2);
+            list.clip(clip);
+            b.record(list, 0, 0, Rgba.BLACK, 0, 0, 0);
+            list.end();
+        }
+        float[] rgb = new float[40 * 40 * 3];
+        java.util.Arrays.fill(rgb, 1);
+        SoftwareGlyphRenderer.render(list, atlas.textures(), rgb, 40, 40);
+        float inside = 0;
+        float outside = 0;
+        for (int y = 0; y < 40; y++) {
+            for (int x = 0; x < 40; x++) {
+                float dark = 1 - rgb[(y * 40 + x) * 3];
+                if (x < 10) {
+                    inside += dark;
+                } else {
+                    outside += dark;
+                }
+            }
+        }
+        assertThat(inside).isGreaterThan(1);
+        assertThat(outside).as("the second glyph is outside the clip").isZero();
+    }
+
+    @Test
     void colourBitmapsArePreScaledPaddedAndBled() {
         byte[] px = new byte[4 * 4 * 4];
         for (int i = 0; i < 16; i++) { // a red 2x2 square in the top left, the rest transparent

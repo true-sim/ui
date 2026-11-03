@@ -171,6 +171,7 @@ public final class TextEditor implements Painter, UiListener, LongConsumer {
     private float wrapWidth = -1;
     private float charWidth; // average advance, for estimating unshaped paragraphs
     private long textSeen = -1;
+    private long selectionSeen = -1;
 
     // the pool of shaped paragraphs
     private final TextBlock[] pool = new TextBlock[POOL];
@@ -441,6 +442,7 @@ public final class TextEditor implements Painter, UiListener, LongConsumer {
 
     /** The text or selection changed: lines to redo, the caret to reveal, the owner to tell. */
     private void changed(boolean byUser) {
+        selectionSeen = text.selectionVersion();
         revealCaret = true;
         goalX = Float.NaN;
         blinkStart = now;
@@ -1362,6 +1364,9 @@ public final class TextEditor implements Painter, UiListener, LongConsumer {
         now = nanos;
         if (glyphsArrived()) {
             ui.repaint(element);
+        }
+        if (text.selectionVersion() != selectionSeen) {
+            changed(false); // the text or selection was changed through editable() by code
         }
         if (!focused() || readOnly()) {
             return;
