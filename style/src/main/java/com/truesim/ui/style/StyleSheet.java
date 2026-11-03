@@ -169,7 +169,7 @@ public final class StyleSheet {
             return this;
         }
 
-        /** Sets {@code key} to a live expression over tokens ({@code TokenExpr.call("lighten", token("accent"), ...)}). */
+        /** Sets {@code key} to a live expression over tokens: {@code call("lighten", token("accent"), ...)}. */
         public RuleBuilder live(StyleKey<?> key, TokenExpr expression) {
             declarations.add(Declaration.live(key, expression));
             return this;

@@ -96,12 +96,12 @@ final class Compiler {
         final List<String> selectors;
         final Pos pos;
         final String text;
-        final List<String> trace;
+        final List<Frame> trace;
         final List<Declaration> declarations = new ArrayList<>();
         List<Selector> parsed;
         final List<Selector> extended = new ArrayList<>();
 
-        OutRule(List<String> selectors, Pos pos, List<String> trace) {
+        OutRule(List<String> selectors, Pos pos, List<Frame> trace) {
             this.selectors = selectors;
             this.pos = pos;
             this.text = String.join(", ", selectors);
@@ -110,10 +110,26 @@ final class Compiler {
     }
 
     private record ExtendRequest(List<String> extenders, String target, Pos pos, String selector,
-        List<String> trace) {
+        List<Frame> trace) {
     }
 
-    private record LiveCheck(StyleKey<?> key, TokenExpr expression, Pos pos, String selector, List<String> trace) {
+    private record LiveCheck(StyleKey<?> key, TokenExpr expression, Pos pos, String selector, List<Frame> trace) {
+    }
+
+    /** One step of the include and call trace; shown as text only when an error needs it. */
+    private record Frame(String what, Pos pos) {
+        @Override
+        public String toString() {
+            return what + " at " + pos;
+        }
+    }
+
+    private static List<String> frames(Iterable<Frame> frames) {
+        List<String> out = new ArrayList<>();
+        for (Frame f : frames) {
+            out.add(f.toString());
+        }
+        return out;
     }
 
     /** Thrown by {@code @return} to leave a function body. */
@@ -139,7 +155,7 @@ final class Compiler {
     private final Map<String, Map<String, Value>> sets = new LinkedHashMap<>();
     private final List<ExtendRequest> extendRequests = new ArrayList<>();
     private final List<LiveCheck> lives = new ArrayList<>();
-    private final Deque<String> trace = new ArrayDeque<>();
+    private final Deque<Frame> trace = new ArrayDeque<>();
     private Ctx ctx = Ctx.NONE;
     private int functionDepth;
     private int mixinDepth;
@@ -180,7 +196,7 @@ final class Compiler {
     // ---------------------------------------------------------------- errors
 
     private TssException fail(Pos p, String message) {
-        return new TssException(message, p.file(), p.line(), p.column(), ctx.selector, List.copyOf(trace));
+        return new TssException(message, p.file(), p.line(), p.column(), ctx.selector, frames(trace));
     }
 
     // ---------------------------------------------------------------- statements
@@ -197,7 +213,8 @@ final class Compiler {
             case Ast.Decl d -> declaration(d, scope);
             case Ast.RuleStmt r -> rule(r, scope);
             case Ast.MixinDef m -> scope.mixins.put(m.name(), new Callable(m.name(), m.params(), m.body(), scope));
-            case Ast.FunctionDef f -> scope.functions.put(f.name(), new Callable(f.name(), f.params(), f.body(), scope));
+            case Ast.FunctionDef f ->
+                scope.functions.put(f.name(), new Callable(f.name(), f.params(), f.body(), scope));
             case Ast.Include i -> include(i, scope);
             case Ast.Content c -> content(c);
             case Ast.Return r -> {
@@ -438,7 +455,7 @@ final class Compiler {
         Callable mixin = callable(scope, i.namespace(), i.name(), true, i.pos());
         Scope body = bind(mixin, i.args(), scope, i.pos(), "@include " + i.name());
         Content content = i.content() == null ? null : new Content(i.content(), scope, ctx.content);
-        trace.push("@include " + i.name() + " at " + i.pos());
+        trace.push(new Frame("@include " + i.name(), i.pos()));
         Ctx saved = ctx;
         ctx = ctx.withContent(content);
         mixinDepth++;
@@ -861,7 +878,7 @@ final class Compiler {
                     + ": live values go through built-in functions only");
             }
         }
-        trace.push(function.name() + "() at " + c.pos());
+        trace.push(new Frame(function.name() + "()", c.pos()));
         functionDepth++;
         try {
             exec(function.body(), s);
@@ -884,7 +901,7 @@ final class Compiler {
                     r.parsed.addAll(Selector.parseList(text));
                 } catch (ValueException e) {
                     throw new TssException(e.getMessage(), r.pos.file(), r.pos.line(), r.pos.column(), r.text,
-                        r.trace);
+                        frames(r.trace));
                 }
             }
         }
@@ -913,7 +930,8 @@ final class Compiler {
     }
 
     private TssException fail(ExtendRequest e, String message) {
-        return new TssException(message, e.pos().file(), e.pos().line(), e.pos().column(), e.selector(), e.trace());
+        return new TssException(message, e.pos().file(), e.pos().line(), e.pos().column(), e.selector(),
+            frames(e.trace()));
     }
 
     private void extend(ExtendRequest e) {
@@ -1004,11 +1022,11 @@ final class Compiler {
         if (p == null) {
             p = tokenPos.get(name);
         }
+        String text = set == null ? message : "in @tokens " + set + ": " + message;
         if (p == null) {
-            p = new Pos(sources.get(0), 1, 1);
+            return new TssException(text, sources.get(0), 1, 1, null, List.of());
         }
-        return new TssException(set == null ? message : "in @tokens " + set + ": " + message, p.file(), p.line(),
-            p.column(), null, List.of());
+        return new TssException(text, p.file(), p.line(), p.column(), null, List.of());
     }
 
     /** Evaluates every live value with the token defaults and with each token set, so errors show at load. */
@@ -1034,7 +1052,7 @@ final class Compiler {
                 } catch (ValueException e) {
                     throw new TssException(c.key().name() + ": " + e.getMessage()
                         + (set == null ? "" : " (with token set " + set + ")"), c.pos().file(), c.pos().line(),
-                        c.pos().column(), c.selector(), c.trace());
+                        c.pos().column(), c.selector(), frames(c.trace()));
                 }
             }
         }

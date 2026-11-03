@@ -6,7 +6,7 @@ import com.truesim.ui.core.draw.Rgba;
 /**
  * A colour as a style holds it: sRGB-encoded channels (what style sheets write, and what colour functions such as
  * {@link Colors#lighten} work in) with straight alpha, plus the packed linear form the draw list takes
- * ({@link #rgba()}), converted once when the colour is made so drawing never converts. Value equality over the encoded
+ * ({@link #rgba()}), converted once on first use so drawing never converts. Value equality over the encoded
  * channels, so a colour built in Java and the same colour from a {@code .tss} file are equal.
  *
  * <p>Channels may exceed 1 (HDR intensities above paper white).
@@ -30,14 +30,16 @@ public final class Color {
     private final float g;
     private final float b;
     private final float a;
-    private final long rgba;
+    // packed on first use, then kept (like String's hash): the colours a sheet computes on the way (inside lighten,
+    // mix, ...) are never drawn, so they never pay for the conversion; a race only computes the same value twice
+    private long rgba;
+    private boolean packed;
 
     private Color(float r, float g, float b, float a) {
         this.r = r;
         this.g = g;
         this.b = b;
         this.a = a;
-        this.rgba = Rgba.pack(linear(r), linear(g), linear(b), a);
     }
 
     private static float linear(float encoded) {
@@ -144,8 +146,12 @@ public final class Color {
         return a;
     }
 
-    /** The colour as the draw list takes it: linear, four half floats ({@link Rgba}). */
+    /** The colour as the draw list takes it: linear, four half floats ({@link Rgba}); converted once, on first use. */
     public long rgba() {
+        if (!packed) {
+            rgba = Rgba.pack(linear(r), linear(g), linear(b), a);
+            packed = true;
+        }
         return rgba;
     }
 
@@ -157,7 +163,8 @@ public final class Color {
     @Override
     public boolean equals(Object o) {
         return o instanceof Color c && Float.floatToIntBits(r) == Float.floatToIntBits(c.r)
-            && Float.floatToIntBits(g) == Float.floatToIntBits(c.g) && Float.floatToIntBits(b) == Float.floatToIntBits(c.b)
+            && Float.floatToIntBits(g) == Float.floatToIntBits(c.g)
+            && Float.floatToIntBits(b) == Float.floatToIntBits(c.b)
             && Float.floatToIntBits(a) == Float.floatToIntBits(c.a);
     }
 

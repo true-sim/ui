@@ -11,11 +11,23 @@ final class Ast {
     private Ast() {
     }
 
-    /** A place in a source file. */
-    record Pos(String file, int line, int column) {
+    /** A place in a source file: an offset, turned into a line and column only when a message needs it. */
+    record Pos(Lexer source, int offset) {
+        String file() {
+            return source.file;
+        }
+
+        int line() {
+            return source.line(offset);
+        }
+
+        int column() {
+            return source.column(offset);
+        }
+
         @Override
         public String toString() {
-            return file + ":" + line + ":" + column;
+            return file() + ":" + line() + ":" + column();
         }
     }
 

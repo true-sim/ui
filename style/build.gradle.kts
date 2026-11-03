@@ -8,3 +8,13 @@ description = "UI styles for true-sim: typed style keys and sheets, selectors, t
 dependencies {
     api(project(":ui-core"))
 }
+
+// The reload benchmark (TRUESIM_BENCHMARK=true) prints its timings; it measures the code, not coverage probes, with
+// a heap large enough that young collections stay rare.
+tasks.test {
+    if (providers.environmentVariable("TRUESIM_BENCHMARK").orNull == "true") {
+        maxHeapSize = "2g"
+        extensions.configure<JacocoTaskExtension> { isEnabled = false }
+        testLogging.showStandardStreams = true
+    }
+}

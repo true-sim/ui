@@ -31,11 +31,13 @@ final class Parser {
 
     private final Lexer lex;
     private final String src;
-    private int pos;
+    private final Token[] tokens;
+    private int index;
 
     Parser(Lexer lex) {
         this.lex = lex;
         this.src = lex.src;
+        this.tokens = lex.tokenize();
     }
 
     /** The statements of the whole file. */
@@ -53,19 +55,21 @@ final class Parser {
     // ---------------------------------------------------------------- tokens
 
     private Token peek() {
-        return lex.token(pos);
+        return tokens[index];
     }
 
-    private Token peekAfter(Token t) {
-        return lex.token(t.end());
+    /** The token after {@link #peek()}. */
+    private Token peek2() {
+        return tokens[Math.min(index + 1, tokens.length - 1)];
     }
 
     private Token next() {
-        Token t = peek();
-        pos = t.end();
+        Token t = tokens[index];
+        if (t.kind() != Kind.EOF) {
+            index++;
+        }
         return t;
     }
-
     private Pos at(Token t) {
         return lex.pos(t.start());
     }
@@ -129,49 +133,63 @@ final class Parser {
             out.add(atRule());
             return;
         }
-        if (t.kind() == Kind.VAR && peekAfter(t).is(":")) {
+        if (t.kind() == Kind.VAR && peek2().is(":")) {
             out.add(variable());
             return;
         }
-        int end = scan(t.start());
-        if (end < src.length() && src.charAt(end) == '{') {
-            Template selector = template(t.start(), end);
-            pos = end;
+        int end = scan(index);
+        if (tokens[end].is("{")) {
+            Template selector = template(t.start(), tokens[end].start());
+            index = end;
             out.add(new Ast.RuleStmt(at(t), selector, block()));
             return;
         }
         out.add(declaration());
     }
 
-    /** The offset of the first {@code {}, {@code ;} or {@code }} at depth 0 from {@code from}, or the end. */
+    /** The index of the first {@code {}, {@code ;} or {@code }} token at depth 0 from {@code from}, or of the end. */
     private int scan(int from) {
         int depth = 0;
-        int i = from;
-        while (i < src.length()) {
-            char c = src.charAt(i);
-            if (c == '"' || c == '\'') {
-                i = lex.token(i).end();
+        int interpolation = 0;
+        for (int k = from; ; k++) {
+            Token t = tokens[k];
+            if (t.kind() == Kind.EOF) {
+                return k;
+            }
+            if (t.kind() != Kind.PUNCT) {
                 continue;
             }
-            if (c == '/' && i + 1 < src.length() && (src.charAt(i + 1) == '/' || src.charAt(i + 1) == '*')) {
-                i = lex.skip(i);
-                continue;
-            }
-            if (c == '#' && i + 1 < src.length() && src.charAt(i + 1) == '{') {
-                int close = src.indexOf('}', i);
-                i = close < 0 ? src.length() : close + 1;
-                continue;
-            }
-            if (c == '(' || c == '[') {
+            if (t.is("#{")) {
+                interpolation++;
+            } else if (interpolation > 0) {
+                if (t.is("{")) {
+                    interpolation++;
+                } else if (t.is("}")) {
+                    interpolation--;
+                }
+            } else if (t.is("(") || t.is("[")) {
                 depth++;
-            } else if (c == ')' || c == ']') {
+            } else if (t.is(")") || t.is("]")) {
                 depth--;
-            } else if (depth <= 0 && (c == '{' || c == ';' || c == '}')) {
-                return i;
+            } else if (depth <= 0 && (t.is("{") || t.is(";") || t.is("}"))) {
+                return k;
             }
-            i++;
         }
-        return i;
+    }
+
+    /** The index of the token starting at offset {@code offset}. */
+    private int tokenAt(int offset) {
+        int lo = 0;
+        int hi = tokens.length - 1;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (tokens[mid].start() < offset) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     /** Raw text from {@code from} to {@code end} with {@code #{...}} interpolations parsed. */
@@ -186,10 +204,9 @@ final class Parser {
                     parts.add(literal.toString());
                     literal.setLength(0);
                 }
-                pos = i + 2;
+                index = tokenAt(i) + 1;
                 parts.add(commaList());
-                expect("}");
-                i = pos;
+                i = expect("}").end();
             } else if (c == '/' && i + 1 < end && (src.charAt(i + 1) == '/' || src.charAt(i + 1) == '*')) {
                 i = lex.skip(i);
                 literal.append(' ');
@@ -203,7 +220,6 @@ final class Parser {
         }
         return new Template(lex.pos(from), parts);
     }
-
     private Stmt variable() {
         Token t = next();
         expect(":");
@@ -342,10 +358,10 @@ final class Parser {
                 return new Ast.For(p, v.text(), from, or(), inclusive, block());
             }
             case "extend" -> {
-                int start = peek().start();
-                int end = scan(start);
-                Template target = template(start, end);
-                pos = end;
+                int start = index;
+                int end = scan(index);
+                Template target = template(tokens[start].start(), tokens[end].start());
+                index = end;
                 endStatement();
                 return new Ast.Extend(p, target);
             }
@@ -416,7 +432,7 @@ final class Parser {
         List<Arg> out = new ArrayList<>();
         while (!peek().is(")")) {
             Token t = peek();
-            if (t.kind() == Kind.VAR && peekAfter(t).is(":")) {
+            if (t.kind() == Kind.VAR && peek2().is(":")) {
                 next();
                 next();
                 out.add(new Arg(t.text(), spaceList()));
@@ -469,8 +485,8 @@ final class Parser {
         return switch (t.kind()) {
             case NUMBER, STRING, HASH, VAR -> true;
             case IDENT -> !t.text().equals("and") && !t.text().equals("or");
-            case PUNCT -> t.is("(") || (t.is("-") || t.is("+")) && t.spaceBefore() && !peekAfter(t).spaceBefore()
-                && peekAfter(t).kind() != Kind.EOF;
+            case PUNCT -> t.is("(") || (t.is("-") || t.is("+")) && t.spaceBefore() && !peek2().spaceBefore()
+                && peek2().kind() != Kind.EOF;
             default -> false;
         };
     }
@@ -518,7 +534,7 @@ final class Parser {
             if (!(t.is("+") || t.is("-"))) {
                 return left;
             }
-            if (t.spaceBefore() && !peekAfter(t).spaceBefore()) {
+            if (t.spaceBefore() && !peek2().spaceBefore()) {
                 return left; // "1px -2px": a list of two numbers, not a subtraction
             }
             next();

@@ -408,6 +408,35 @@ class StyleResolverTest {
     }
 
     @Test
+    void namesNoSelectorTestsDoNotSplitTheCache() {
+        UiStore store = new UiStore();
+        Element panel = store.create("panel", null);
+        store.root().add(panel);
+        List<Element> rows = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            // unique ids and an untested type and style: none of them tested by a selector
+            Element row = store.create(i % 2 == 0 ? "row" : "widget", "row" + i).style("plain" + i);
+            panel.add(row);
+            rows.add(row);
+        }
+        Element tested = store.create("row", "row3.special");
+        panel.add(tested);
+        StyleSheet sheet = StyleSheet.builder()
+            .rule(sel("panel").descendant(Selector.any())).set(FONT_SIZE, 9f)
+            .rule(Selector.any().id("special")).set(COLOR, RED)
+            .build();
+        StyleResolver r = new StyleResolver(store, sheet);
+        int first = r.resolve(rows.get(0).slot());
+        for (Element row : rows) {
+            assertThat(r.resolve(row.slot())).isEqualTo(first);
+        }
+        assertThat(r.style(first).getFloat(FONT_SIZE)).isEqualTo(9f);
+        ResolvedStyle special = r.styleOf(tested.slot());
+        assertThat(special.handle()).isNotEqualTo(first); // a dotted id with one tested segment keeps its name
+        assertThat(special.get(COLOR)).isEqualTo(RED);
+    }
+
+    @Test
     void placeholderRulesAreNotApplied() {
         UiStore store = new UiStore();
         Element label = store.create("label", null);

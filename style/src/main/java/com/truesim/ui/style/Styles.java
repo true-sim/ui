@@ -39,7 +39,7 @@ public final class Styles {
 
     // ---------------------------------------------------------------- look
 
-    /** The fill: {@code none}, a colour, {@code box()}, {@code linear-gradient()}, {@code image()}, {@code nine-slice()}. */
+    /** The fill: {@code none}, a colour, {@code box()}, {@code linear-gradient()}, {@code image()}, nine-slice. */
     public static final StyleKey<Paint> BACKGROUND = StyleKey.of("background", StyleTypes.paint(), Paint.NONE);
     /** The border: {@code 1px #fff}. */
     public static final StyleKey<Border> BORDER = StyleKey.of("border", StyleTypes.border(), Border.NONE);

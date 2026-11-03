@@ -73,7 +73,7 @@ public sealed interface Value {
         return new ListV(items, comma);
     }
 
-    /** A function value that is not a built-in ({@code box(...)}, {@code minmax(...)}); a {@link Live} if an argument is. */
+    /** A function value that is not a built-in ({@code box(...)}); a {@link Live} if an argument is one. */
     static Value fn(String name, List<Value> args) {
         for (Value arg : args) {
             if (arg instanceof Live) {
