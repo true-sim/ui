@@ -195,3 +195,7 @@ image.hud { size: 32px; }
 image.value { size: 28px; }
 image.card { size: 24px; }
 image.meter { size: 12px; }
+
+// ------------------------------------------------------------------ overlays, windows and docking (ui-controls)
+
+@import "windows";

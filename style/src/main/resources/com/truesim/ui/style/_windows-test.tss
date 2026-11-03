@@ -1,0 +1,130 @@
+// The garish look of overlays, tooltips, popovers, floating windows and docking, imported by test-theme.tss: every
+// element and state differs obviously from the default theme.
+
+backdrop { background: box(rgba($lime, 0.6)); transition: opacity 1s linear; }
+
+tooltip {
+  layout: stack;
+  padding: 11px;
+  background: box($sun);
+  border: 4px $hot;
+  radius: 0 16px 0 16px;
+  placement: bottom;
+  placement-align: start;
+  placement-gap: 13px;
+  viewport-margin: 9px;
+  tooltip-mode: follow;
+
+  > label { color: $hot; font-size: 19px; }
+}
+
+hover-card, popover {
+  layout: stack;
+  padding: 15px;
+  background: linear-gradient(90deg, $cyan, $hot);
+  border: 6px $lime;
+  radius: 20px 0 20px 0;
+  placement: right;
+  placement-align: end;
+  placement-gap: 17px;
+  viewport-margin: 3px;
+}
+
+popover { placement: left; border: 6px $sun; }
+
+window-host { background: box(rgba($hot, 0.1)); pointer-events: none; }
+
+window {
+  min-width: 222px;
+  min-height: 133px;
+  resize-handle: 14px;
+  &:focus-visible { focus-ring: 7px $sun; }
+}
+
+window-frame {
+  layout: flex;
+  direction: column;
+  background: box($cyan);
+  border: 6px $hot;
+  radius: 0 30px 0 30px;
+  clip: true;
+}
+
+window:selected > window-frame { border: 9px $lime; }
+window[mode=maximised] > window-frame { background: box($sun); }
+
+window-title-bar {
+  layout: flex;
+  direction: row-reverse;
+  padding: 9px;
+  background: box($hot);
+  cursor: grab;
+}
+
+window:selected window-title-bar { background: box($lime); }
+
+label.window-title { color: $sun; font-size: 21px; }
+
+window-button {
+  size: 22px;
+  radius: 0;
+  background: box($sun);
+  border: 3px $hot;
+  cursor: crosshair;
+  &:hover { background: box($lime); }
+  &:pressed { scale: 1.4; }
+  &#close:hover { background: box(#0000ff); }
+  &:checked { background: box(#ff6600); }
+}
+
+window-content { layout: flex; direction: column-reverse; grow: 1; padding: 19px; background: box(rgba($sun, 0.3)); clip: true; }
+
+window-resize {
+  background: box(rgba($hot, 0.5));
+  &#n, &#s { cursor: crosshair; }
+  &#e, &#w { cursor: wait; }
+  &#nw, &#se { cursor: grab; }
+  &#ne, &#sw { cursor: grabbing; }
+}
+
+dock-space { layout: flex; direction: column; background: box(#2b0040); dock-zone: 0.45; dock-min-pane: 90px; }
+dock-split { layout: flex; gap: 0px; background: box($sun); }
+dock-splitter {
+  background: box($hot);
+  &[orientation=row] { width: 11px; cursor: crosshair; }
+  &[orientation=column] { height: 11px; cursor: crosshair; }
+  &:hover, &:pressed { background: box($lime); }
+}
+dock-tabs { layout: flex; direction: column; background: box($cyan); border: 3px $hot; }
+dock-tab-strip { layout: flex; direction: row-reverse; padding: 7px; background: box($lime); &:drop-target { background: box($hot); } }
+dock-tab {
+  layout: flex;
+  direction: row-reverse;
+  padding: 9px;
+  background: box($sun);
+  radius: 12px;
+  &:hover { background: box(#ff6600); }
+  &:selected { background: box($hot); }
+  &:dragging { opacity: 0.2; }
+  &:focus-visible { focus-ring: 5px $lime; }
+  > label { color: #0000ff; font-size: 17px; }
+}
+dock-tab-close { size: 18px; background: box(#0000ff); &:hover { background: box($lime); } }
+dock-pane-body { layout: flex; direction: column; grow: 1; padding: 21px; background: box(rgba($hot, 0.3)); clip: true; }
+dock-drop-preview { background: box(rgba($lime, 0.7)); border: 8px $hot; radius: 0; }
+dock-zones {
+  layout: grid;
+  grid-template-columns: 40px 40px 40px;
+  grid-template-rows: 40px 40px 40px;
+  gap: 6px;
+}
+dock-zone {
+  background: box($hot);
+  border: 4px $lime;
+  &#top { grid-column: 2; grid-row: 1; }
+  &#left { grid-column: 1; grid-row: 2; }
+  &#center { grid-column: 2; grid-row: 2; }
+  &#right { grid-column: 3; grid-row: 2; }
+  &#bottom { grid-column: 2; grid-row: 3; }
+  &:selected { background: box($sun); }
+}

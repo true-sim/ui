@@ -85,3 +85,5 @@ panel.meter {
   height: 19px;
   > panel { background: box($cyan); }
 }
+
+@import "windows-test";

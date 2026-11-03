@@ -1000,6 +1000,9 @@ public final class Ui {
         all.add(StyleResolver.CACHE_LIMIT);
         all.add(StyleWatcher.DELAY);
         all.addAll(Interaction.tunables());
+        all.addAll(com.truesim.ui.controls.windows.Tooltips.tunables());
+        all.addAll(com.truesim.ui.controls.windows.Popovers.tunables());
+        all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
         }
