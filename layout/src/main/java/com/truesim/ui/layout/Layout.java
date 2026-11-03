@@ -661,7 +661,9 @@ public final class Layout {
     /**
      * Scrolls the element's children by {@code x, y} panel units (left and up): their positions are shifted without
      * a new layout, so scrolling costs a visit of the subtree's positions, not a measure. A negative value shifts
-     * them the other way (a sticky header following the viewport). Default 0, 0.
+     * them the other way (a sticky header following the viewport). Default 0, 0. With snapping (the default) the
+     * shift is whole pixels ({@link #scrollPixelsX}), so a scrolled child's rectangle moves by exactly the scroll and a
+     * renderer can move recorded content by it instead of recording it again.
      */
     public Layout scroll(int slot, float x, float y) {
         own(slot);
@@ -687,6 +689,20 @@ public final class Layout {
     /** The element's vertical scroll in panel units ({@link #scroll}). */
     public float scrollY(int slot) {
         return slot < capacity && owner[slot] == store.element(slot) ? scrollY[slot] : 0;
+    }
+
+    /** How far the element's children are shifted left by its scroll, in UI pixels (whole when snapping). */
+    public float scrollPixelsX(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? pixels(scrollX[slot], lastScale) : 0;
+    }
+
+    /** How far the element's children are shifted up by its scroll, in UI pixels (whole when snapping). */
+    public float scrollPixelsY(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? pixels(scrollY[slot], lastScale) : 0;
+    }
+
+    private float pixels(float panelUnits, float scale) {
+        return snapping ? (float) Math.rint(panelUnits * scale) : panelUnits * scale;
     }
 
     /**
@@ -1164,8 +1180,8 @@ public final class Layout {
 
     /** Visits the children of {@code s}, whose border box is at {@code ax, ay}, shifted by its scroll. */
     private void visitChildren(int s, float ax, float ay, float scale, boolean moved) {
-        float cx = ax - scrollX[s];
-        float cy = ay - scrollY[s];
+        float cx = ax - (scrollX[s] == 0 ? 0 : pixels(scrollX[s], scale) / scale);
+        float cy = ay - (scrollY[s] == 0 ? 0 : pixels(scrollY[s], scale) / scale);
         // Hidden children and their subtrees collapse to an empty rectangle (not shown: nothing draws or picks
         // there); their layout is kept for when they show again.
         for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {

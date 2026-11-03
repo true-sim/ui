@@ -17,6 +17,7 @@ public final class HexField implements TextEditor.Listener, Runnable {
     private final ColorPicker picker;
     private final TextEditor field;
 
+    @AllowAllocation("controls are made when a UI is built")
     private HexField(Ui ui, ColorPicker picker, String label) {
         this.picker = picker;
         field = TextEditor.field(ui, "hex", label).maxLength(9).filter(TextFilters.chars("[#0-9a-fA-F]"))

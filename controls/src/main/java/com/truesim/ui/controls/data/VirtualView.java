@@ -130,6 +130,7 @@ public abstract class VirtualView<R> extends ScrollView {
         body.semantics(Role.GROUP, null); // it takes the rows' pointer events
         viewport.add(body);
         ui.codeLayout(body, Ui.CODE_KIND | Ui.CODE_PLACEMENT);
+        ui.scrollRegion(body, true); // scrolling moves the body's clip offset: rows are not recorded again
         layout.kind(body.slot(), LayoutKind.ANCHORS).anchors(body.slot(), 0, 0, 1, 1)
             .independent(body.slot(), true);
         interaction.focusable(root, true);

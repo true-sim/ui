@@ -37,6 +37,7 @@ public final class ScrollPane extends ScrollView {
         content = ui.element("scroll-content", null);
         viewport.add(content);
         ui.codeLayout(content, Ui.CODE_PLACEMENT);
+        ui.scrollRegion(viewport, true); // scrolling moves the viewport's clip offset: content is not recorded again
         fitWidth(true);
     }
 

@@ -411,10 +411,11 @@ class ListViewTest {
         f.run(2);
         list.scrollTo(0, 30);
         f.run();
+        // rows draw under the body's scroll-region clip (2), inside the viewport's (1)
         String expected = """
-            box clip=1 0.00,-30.00 290.00,-10.00 a=(0.00 0.00 0.00 0.00) radii=0.00,0.00 0.00,0.00
-            box clip=1 0.00,-10.00 290.00,10.00 a=(0.00 0.00 0.00 0.00) radii=0.00,0.00 0.00,0.00
-            box clip=1 0.00,10.00 290.00,30.00 a=(0.00 0.00 1.00 1.00) radii=0.00,0.00 0.00,0.00
+            box clip=2 0.00,-30.00 290.00,-10.00 a=(0.00 0.00 0.00 0.00) radii=0.00,0.00 0.00,0.00
+            box clip=2 0.00,-10.00 290.00,10.00 a=(0.00 0.00 0.00 0.00) radii=0.00,0.00 0.00,0.00
+            box clip=2 0.00,10.00 290.00,30.00 a=(0.00 0.00 1.00 1.00) radii=0.00,0.00 0.00,0.00
             """;
         String drawn = DrawListDump.of(f.ui.layers()[0]);
         assertThat(drawn).contains(expected.lines().toList().get(2));

@@ -18,11 +18,17 @@ import java.util.Arrays;
  * <p><b>Dirty words.</b> Writes compare before they write: only words that really change widen the dirty range
  * ({@link #dirtyFrom()}, {@link #dirtyTo()}), so re-recording an unchanged element dirties nothing, and a frame where
  * nothing changed uploads nothing. Recording allocates nothing once the arrays have grown.
+ *
+ * <p><b>Clips and their offsets.</b> Each primitive names a clip of the clip table: a rounded rectangle it is cut to,
+ * in pixels of the screen, and an offset added to the primitive's own coordinates when it is drawn
+ * ({@link #setClipOffset}). A scrolled region records its content once, unscrolled, under a clip of its own; scrolling
+ * moves that clip's offset (seven floats) instead of recording the content again. Everything that reads positions
+ * back (picking, previews, goldens) adds the offset: {@link #clipOffsetX}, {@link #clipOffsetY}.
  */
 public final class DrawList {
 
-    /** Floats per clip rectangle: x0, y0, x1, y1, corner radius. */
-    public static final int CLIP_FLOATS = 5;
+    /** Floats per clip: x0, y0, x1, y1, corner radius, then the offset x, y of its primitives. */
+    public static final int CLIP_FLOATS = 7;
     /** The clip that clips nothing, always at index 0. */
     public static final int NO_CLIP = 0;
 
@@ -62,6 +68,8 @@ public final class DrawList {
         clips[2] = Float.MAX_VALUE;
         clips[3] = Float.MAX_VALUE;
         clips[4] = 0;
+        clips[5] = 0;
+        clips[6] = 0;
         clipsDirty = true;
         dirtyFrom = 0;
         dirtyTo = 0;
@@ -138,8 +146,49 @@ public final class DrawList {
             clips = grow(clips, clips.length * 2);
         }
         int index = clipCount++;
+        int o = index * CLIP_FLOATS;
+        clips[o + 5] = 0;
+        clips[o + 6] = 0;
+        clips[o] = Float.NaN; // compared unequal: set below
         setClip(index, x0, y0, x1, y1, radius);
         return index;
+    }
+
+    /**
+     * Sets the offset added to the coordinates of clip {@code index}'s primitives when they are drawn (a scrolled
+     * region's scroll); the clip rectangle itself does not move. Marks the clip table dirty only when it changed.
+     */
+    public void setClipOffset(int index, float x, float y) {
+        if (index <= NO_CLIP || index >= clipCount) {
+            throw new IllegalArgumentException("no clip " + index);
+        }
+        int o = index * CLIP_FLOATS;
+        if (clips[o + 5] != x || clips[o + 6] != y) {
+            clips[o + 5] = x;
+            clips[o + 6] = y;
+            clipsDirty = true;
+            version++;
+        }
+    }
+
+    /** The horizontal offset of clip {@code index}'s primitives ({@link #setClipOffset}). */
+    public float clipOffsetX(int index) {
+        return clips[index * CLIP_FLOATS + 5];
+    }
+
+    /** The vertical offset of clip {@code index}'s primitives ({@link #setClipOffset}). */
+    public float clipOffsetY(int index) {
+        return clips[index * CLIP_FLOATS + 6];
+    }
+
+    /** Where primitive {@code index}'s word {@code word} (an x coordinate) draws: plus its clip's offset. */
+    public float drawnX(int index, int word) {
+        return floatAt(index, word) + clipOffsetX(Primitive.clip(header(index)));
+    }
+
+    /** Where primitive {@code index}'s word {@code word} (a y coordinate) draws: plus its clip's offset. */
+    public float drawnY(int index, int word) {
+        return floatAt(index, word) + clipOffsetY(Primitive.clip(header(index)));
     }
 
     /** Moves clip {@code index}. */

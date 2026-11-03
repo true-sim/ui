@@ -162,6 +162,8 @@ public final class Ui {
     private final Animator animator;
     private final Measure measure = this::measure;
     private DrawList rec; // the list being recorded
+    private float recordShiftX; // the shift of the element being recorded: its clip owner's scroll
+    private float recordShiftY;
     private StyleWatcher watcher;
 
     // per slot
@@ -180,6 +182,14 @@ public final class Ui {
     private int[] clipOwner = new int[0]; // the nearest clipping ancestor, or NONE
     private int[] clipStamp = new int[0];
     private float[] clipRect = new float[0];
+    private boolean[] region = new boolean[0]; // a scroll region: its scroll moves its clip's offset, not its content
+    private float[] shiftX = new float[0]; // per clip owner: the scroll its content is shifted by (cached per pass)
+    private float[] shiftY = new float[0];
+    private int[] shiftStamp = new int[0];
+    private int shiftPass = 1;
+    private float[] appliedShiftX = new float[0]; // per clip owner: the shift its clip's offset holds
+    private float[] appliedShiftY = new float[0];
+    private float[] recRect = new float[0]; // per slot: the rectangle last recorded, in its clip's content space
     private int clipPass;
     private boolean clipsMoved;
     private final Element[] previews = new Element[UiInput.MAX_POINTERS];
@@ -296,6 +306,7 @@ public final class Ui {
         ensure();
         content[e.slot()] = NONE;
         codeLayout[e.slot()] = 0;
+        region[e.slot()] = false;
         painters[e.slot()] = null;
         parts[e.slot()] = false;
         applied[e.slot()] = null; // a reused slot applies its style again
@@ -468,6 +479,29 @@ public final class Ui {
         codeLayout[slot] |= bits;
     }
 
+    /**
+     * Makes {@code element} a scroll region (or not): its children are recorded unscrolled under a clip of its own,
+     * whose offset follows its {@code Layout.scroll} (and its ancestors'), so scrolling moves one clip entry instead of
+     * recording the content again (design 6.1). The region clips like its nearest clipping ancestor; picking and
+     * everything reading the layout see the scrolled positions, which are where the content draws. Scroll views make
+     * their scrolled element one.
+     */
+    public void scrollRegion(Element element, boolean on) {
+        int slot = element.slot();
+        if (region[slot] != on) {
+            region[slot] = on;
+            int li = layerStack.indexOf(slot);
+            if (li >= 0) {
+                rebuild[li] = true; // clip indices are given out in tree order
+            }
+        }
+    }
+
+    /** Whether {@code element} is a {@linkplain #scrollRegion scroll region}. */
+    public boolean scrollRegion(Element element) {
+        return region[element.slot()];
+    }
+
     /** The layout inputs code owns for {@code element} ({@link #codeLayout}). */
     public int codeLayout(Element element) {
         return codeLayout[element.slot()];
@@ -521,6 +555,15 @@ public final class Ui {
             clipOwner = Arrays.copyOf(clipOwner, n);
             clipStamp = Arrays.copyOf(clipStamp, n);
             clipRect = Arrays.copyOf(clipRect, n * 4);
+            int old = region.length;
+            region = Arrays.copyOf(region, n);
+            shiftX = Arrays.copyOf(shiftX, n);
+            shiftY = Arrays.copyOf(shiftY, n);
+            shiftStamp = Arrays.copyOf(shiftStamp, n);
+            appliedShiftX = Arrays.copyOf(appliedShiftX, n);
+            appliedShiftY = Arrays.copyOf(appliedShiftY, n);
+            recRect = Arrays.copyOf(recRect, n * 4);
+            Arrays.fill(recRect, old * 4, n * 4, Float.NaN);
         }
         if (rebuild.length < layerStack.count()) {
             rebuild = Arrays.copyOf(rebuild, layerStack.count() * 2);
@@ -682,10 +725,20 @@ public final class Ui {
     /** Lays out what changed; what moved records again and tells picking. */
     private void layOut(float width, float height) {
         layout.update(measure, width, height);
+        shiftPass++;
         int[] moved = layout.changedSlots();
         for (int i = 0; i < layout.changedCount(); i++) {
             int slot = moved[i];
-            store.markDirty(slot, UiStore.DIRTY_DRAW);
+            int owner = clipOwner[slot];
+            if (owner != UiStore.NONE && store.alive(owner)) {
+                shift(owner);
+                if (shiftX[owner] != appliedShiftX[owner] || shiftY[owner] != appliedShiftY[owner]) {
+                    clipsMoved = true; // a region scrolled: its clip's offset moves
+                }
+            }
+            if (!recordedAt(slot, owner)) {
+                store.markDirty(slot, UiStore.DIRTY_DRAW); // not just scrolled with its region: record again
+            }
             interaction.picking().moved(slot);
             if (visuals.transformed(slot)) {
                 visuals.redrawSubtree(slot); // the centre its subtree scales about moved
@@ -694,6 +747,38 @@ public final class Ui {
                 clipsMoved = true;
             }
         }
+    }
+
+    /**
+     * The scroll {@code owner}'s content is shifted by, in UI pixels: its own and its ancestors' (whole pixels when
+     * the layout snaps), cached for this layout pass in {@link #shiftX}, {@link #shiftY}.
+     */
+    private void shift(int owner) {
+        if (shiftStamp[owner] == shiftPass) {
+            return;
+        }
+        shiftStamp[owner] = shiftPass;
+        float x = 0;
+        float y = 0;
+        for (int a = owner; a != UiStore.NONE; a = store.parent(a)) {
+            x += layout.scrollPixelsX(a);
+            y += layout.scrollPixelsY(a);
+        }
+        shiftX[owner] = x;
+        shiftY[owner] = y;
+    }
+
+    /** Whether {@code slot} is recorded where it is now, in the content space of its clip (owned by {@code owner}). */
+    private boolean recordedAt(int slot, int owner) {
+        float sx = 0;
+        float sy = 0;
+        if (owner != UiStore.NONE && store.alive(owner)) {
+            sx = shiftX[owner];
+            sy = shiftY[owner];
+        }
+        int o = slot * 4;
+        return recRect[o] == layout.x(slot) + sx && recRect[o + 1] == layout.y(slot) + sy
+            && recRect[o + 2] == layout.width(slot) && recRect[o + 3] == layout.height(slot);
     }
 
     /** Whether a listener changed styles or layout inputs after layout: another pass resolves and lays them out. */
@@ -933,9 +1018,23 @@ public final class Ui {
             ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
                 clipRadius(slot));
             childOwner = slot;
+        } else if (region[slot]) { // a scroll region clips like its owner; its clip carries the scroll
+            regionBox(slot, owner);
+            int o = slot * 4;
+            ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
+                owner == UiStore.NONE ? 0 : clipRadius(owner));
+            childOwner = slot;
+        }
+        if (ownClip[slot] != DrawList.NO_CLIP) {
+            shift(slot);
+            list.setClipOffset(ownClip[slot], -shiftX[slot], -shiftY[slot]);
+            appliedShiftX[slot] = shiftX[slot];
+            appliedShiftY[slot] = shiftY[slot];
         }
         if (needed > 0) {
             record(slot, list);
+        } else {
+            remember(slot); // nothing to draw: moving with its region needs no recording either
         }
         for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
             allocate(c, list, childOwner);
@@ -960,6 +1059,19 @@ public final class Ui {
         clipRect[o + 1] = y0;
         clipRect[o + 2] = x1;
         clipRect[o + 3] = y1;
+    }
+
+    /** A scroll region's clip rectangle: its clipping ancestor's (none: everything). */
+    private void regionBox(int slot, int owner) {
+        int o = slot * 4;
+        if (owner != UiStore.NONE) {
+            System.arraycopy(clipRect, owner * 4, clipRect, o, 4);
+        } else {
+            clipRect[o] = -Float.MAX_VALUE;
+            clipRect[o + 1] = -Float.MAX_VALUE;
+            clipRect[o + 2] = Float.MAX_VALUE;
+            clipRect[o + 3] = Float.MAX_VALUE;
+        }
     }
 
     private float clipRadius(int slot) {
@@ -989,10 +1101,20 @@ public final class Ui {
         if (li < 0) {
             return;
         }
-        clipBox(slot, owner);
+        boolean clips = resolver.styleOf(slot).get(Styles.CLIP);
+        if (clips) {
+            clipBox(slot, owner);
+        } else {
+            regionBox(slot, owner);
+        }
         int o = slot * 4;
-        layerStack.at(li).drawList().setClip(ownClip[slot], clipRect[o], clipRect[o + 1], clipRect[o + 2],
-            clipRect[o + 3], clipRadius(slot));
+        DrawList list = layerStack.at(li).drawList();
+        list.setClip(ownClip[slot], clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
+            clips ? clipRadius(slot) : owner == UiStore.NONE ? 0 : clipRadius(owner));
+        shift(slot);
+        list.setClipOffset(ownClip[slot], -shiftX[slot], -shiftY[slot]);
+        appliedShiftX[slot] = shiftX[slot];
+        appliedShiftY[slot] = shiftY[slot];
     }
 
     /** Records the element's primitives into its range; false if they do not fit (a rebuild gives it a larger one). */
@@ -1002,9 +1124,29 @@ public final class Ui {
             list.clip(clipOf[slot]);
         }
         rec = list;
+        remember(slot);
         recordPrimitives(slot);
         recorded++;
         return list.end();
+    }
+
+    /** Notes where {@code slot} is recorded: its rectangle in its clip's content space (the clip owner's shift). */
+    private void remember(int slot) {
+        int owner = clipOwner[slot];
+        float sx = 0;
+        float sy = 0;
+        if (owner != UiStore.NONE && store.alive(owner)) {
+            shift(owner);
+            sx = shiftX[owner];
+            sy = shiftY[owner];
+        }
+        recordShiftX = sx;
+        recordShiftY = sy;
+        int o = slot * 4;
+        recRect[o] = layout.x(slot) + sx;
+        recRect[o + 1] = layout.y(slot) + sy;
+        recRect[o + 2] = layout.width(slot);
+        recRect[o + 3] = layout.height(slot);
     }
 
     private void recordPrimitives(int slot) {
@@ -1020,8 +1162,10 @@ public final class Ui {
         float y1 = y0 + layout.height(slot);
         visuals.compose(slot);
         float opacity = visuals.composedOpacity();
-        if (visuals.composedScale() != 1 || visuals.composedX() != 0 || visuals.composedY() != 0) {
-            rec.transform(visuals.composedScale(), visuals.composedX(), visuals.composedY());
+        float composedX = visuals.composedX() + recordShiftX; // content space of its clip: unscrolled
+        float composedY = visuals.composedY() + recordShiftY;
+        if (visuals.composedScale() != 1 || composedX != 0 || composedY != 0) {
+            rec.transform(visuals.composedScale(), composedX, composedY);
         }
         int overrides = visuals.flags(slot);
         Radii r = s.get(Styles.RADIUS);
@@ -1102,6 +1246,12 @@ public final class Ui {
         } else if (content[slot] == PAINTED) {
             if (ownClip[slot] != DrawList.NO_CLIP) {
                 rec.clip(ownClip[slot]);
+                shift(slot); // its own clip's content space: its own scroll too
+                float ox = visuals.composedX() + shiftX[slot];
+                float oy = visuals.composedY() + shiftY[slot];
+                if (ox != composedX || oy != composedY) {
+                    rec.transform(visuals.composedScale(), ox, oy);
+                }
             }
             painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, opacity);
         }

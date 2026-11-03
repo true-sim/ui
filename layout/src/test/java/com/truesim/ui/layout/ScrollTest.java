@@ -33,6 +33,25 @@ class ScrollTest {
         assertThat(ui.layout.changedCount()).isEqualTo(3); // content, a, b
         ui.run();
         assertThat(ui.layout.changedCount()).isZero();
+        assertThat(ui.layout.scrollPixelsY(view)).isEqualTo(30);
+        // snapping: a fractional scroll shifts by whole pixels, so rectangles move by exactly the scroll in pixels
+        ui.layout.snapping(true);
+        ui.layout.scroll(view, 4, 30.4f);
+        ui.run();
+        assertThat(ui.layout.scrollPixelsY(view)).isEqualTo(30);
+        assertRect(ui, b, 6, 6, 100, 16);
+        ui.layout.scroll(view, 4, 30.6f);
+        ui.run();
+        assertThat(ui.layout.scrollPixelsY(view)).isEqualTo(31);
+        assertRect(ui, b, 6, 5, 100, 16);
+        assertThat(ui.layout.scrollPixelsX(9999)).isZero();
+        assertThat(ui.layout.scrollPixelsY(9999)).isZero();
+        ui.layout.snapping(false);
+        ui.layout.scroll(view, 4, 30.5f);
+        ui.run();
+        assertThat(ui.layout.scrollPixelsY(view)).isEqualTo(30.5f);
+        ui.layout.scroll(view, 4, 30);
+        ui.run();
         ui.layout.scroll(view, 4, 30); // the same: nothing to do
         ui.run();
         assertThat(ui.layout.changedCount()).isZero();

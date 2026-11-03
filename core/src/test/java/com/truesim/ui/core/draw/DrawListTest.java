@@ -164,6 +164,35 @@ class DrawListTest {
     }
 
     @Test
+    void aClipsOffsetMovesItsPrimitivesWhereTheyDrawAndDirtiesOnlyTheClipTable() {
+        DrawList list = new DrawList();
+        int clip = list.addClip(0, 0, 100, 100, 0);
+        int a = list.allocate(1);
+        list.begin(a, 1);
+        list.clip(clip);
+        list.box(10, 20, 30, 40, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.end();
+        list.clean();
+        long version = list.version();
+        list.setClipOffset(clip, 0, 0); // as it is
+        assertThat(list.clipsDirty()).isFalse();
+        list.setClipOffset(clip, -5, -15);
+        assertThat(list.clipsDirty()).isTrue();
+        assertThat(list.version()).isGreaterThan(version);
+        assertThat(list.dirtyTo()).isEqualTo(list.dirtyFrom()); // no primitive changed
+        assertThat(list.clipOffsetX(clip)).isEqualTo(-5);
+        assertThat(list.clipOffsetY(clip)).isEqualTo(-15);
+        assertThat(list.floatAt(a, Primitive.X0)).isEqualTo(10);
+        assertThat(list.drawnX(a, Primitive.X0)).isEqualTo(5);
+        assertThat(list.drawnY(a, Primitive.Y1)).isEqualTo(25);
+        assertThat(list.clips()[clip * DrawList.CLIP_FLOATS + 5]).isEqualTo(-5);
+        assertThatThrownBy(() -> list.setClipOffset(0, 1, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setClipOffset(9, 1, 1)).isInstanceOf(IllegalArgumentException.class);
+        list.reset();
+        assertThat(list.clipOffsetX(0)).isZero();
+    }
+
+    @Test
     void clipsAndGrowthAreTracked() {
         DrawList list = new DrawList();
         for (int i = 0; i < 40; i++) {
