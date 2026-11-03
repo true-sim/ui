@@ -23,8 +23,10 @@ import com.truesim.ui.core.draw.UiTextures;
  * </pre>
  * {@code pixelRange} is the atlas range in screen pixels: atlas pixel range × font size ÷ atlas em size, which
  * {@link TextBlock#record} writes. A raster glyph ({@link Primitive#FLAG_RASTER}, small text) is coverage instead:
- * {@code alpha = color.a * s.a}, the quad on whole pixels sampling texel centres. Colours are blended over the target
- * in linear light.
+ * {@code alpha = color.a * s.a}, the quad on whole pixels sampling texel centres. A colour glyph
+ * ({@link Primitive#FLAG_COLOR}, an emoji on an {@code RGBA8_SRGB} page) is the page's colour, decoded from sRGB per
+ * texel before filtering (as the hardware does), times colour A: {@code rgb * color.rgb, alpha = s.a * color.a}.
+ * Colours are blended over the target in linear light.
  */
 public final class SoftwareGlyphRenderer {
 
@@ -69,6 +71,7 @@ public final class SoftwareGlyphRenderer {
         long color = list.colorAt(i, Primitive.COLOR_A);
         long outlineColor = list.colorAt(i, Primitive.COLOR_B);
         boolean raster = (Primitive.flags(list.header(i)) & Primitive.FLAG_RASTER) != 0;
+        boolean colorGlyph = (Primitive.flags(list.header(i)) & Primitive.FLAG_COLOR) != 0;
         float[] s = new float[4];
         int px0 = Math.max(0, (int) Math.floor(x0));
         int py0 = Math.max(0, (int) Math.floor(y0));
@@ -79,6 +82,11 @@ public final class SoftwareGlyphRenderer {
             for (int px = px0; px < px1; px++) {
                 float u = u0 + (px + 0.5f - x0) / (x1 - x0) * (u1 - u0);
                 sample(page, u, v, s);
+                if (colorGlyph) {
+                    blend(rgb, (py * width + px) * 3, s[0] * Rgba.r(color), s[1] * Rgba.g(color),
+                        s[2] * Rgba.b(color), s[3] * Rgba.a(color));
+                    continue;
+                }
                 if (raster) {
                     blend(rgb, (py * width + px) * 3, Rgba.r(color), Rgba.g(color), Rgba.b(color),
                         Rgba.a(color) * s[3]);
@@ -124,19 +132,22 @@ public final class SoftwareGlyphRenderer {
         float fx = x - xa;
         float fy = y - ya;
         byte[] p = page.pixels();
+        boolean srgb = page.format() == UiTexture.Format.RGBA8_SRGB;
         for (int c = 0; c < 4; c++) {
-            float t00 = texel(p, w, h, xa, ya, c);
-            float t10 = texel(p, w, h, xa + 1, ya, c);
-            float t01 = texel(p, w, h, xa, ya + 1, c);
-            float t11 = texel(p, w, h, xa + 1, ya + 1, c);
+            boolean decode = srgb && c < 3;
+            float t00 = texel(p, w, h, xa, ya, c, decode);
+            float t10 = texel(p, w, h, xa + 1, ya, c, decode);
+            float t01 = texel(p, w, h, xa, ya + 1, c, decode);
+            float t11 = texel(p, w, h, xa + 1, ya + 1, c, decode);
             out[c] = lerp(lerp(t00, t10, fx), lerp(t01, t11, fx), fy);
         }
     }
 
-    private static float texel(byte[] p, int w, int h, int x, int y, int c) {
+    private static float texel(byte[] p, int w, int h, int x, int y, int c, boolean decode) {
         int cx = Math.max(0, Math.min(w - 1, x));
         int cy = Math.max(0, Math.min(h - 1, y));
-        return (p[(cy * w + cx) * 4 + c] & 0xFF) / 255f;
+        int v = p[(cy * w + cx) * 4 + c] & 0xFF;
+        return decode ? ColorBitmaps.linear(v) : v / 255f;
     }
 
     private static float lerp(float a, float b, float t) {

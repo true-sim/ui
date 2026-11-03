@@ -21,6 +21,14 @@ public interface GlyphRasterizer {
     Coverage rasterize(FontFace face, int glyph, float sizePx, float offsetX);
 
     /**
+     * Glyph {@code glyph}'s colour bitmap at its face's {@linkplain FontFace#colorStrike() strike}, or null if it has
+     * none (an outline face, a missing glyph); the default has none.
+     */
+    default ColorBitmap color(FontFace face, int glyph) {
+        return null;
+    }
+
+    /**
      * A coverage bitmap.
      *
      * @param width pixels
@@ -30,5 +38,19 @@ public interface GlyphRasterizer {
      * @param pixels {@code width * height} coverage bytes, rows top to bottom
      */
     record Coverage(int width, int height, int left, int top, byte[] pixels) {
+    }
+
+    /**
+     * A colour bitmap (an emoji) at its strike's size.
+     *
+     * @param width pixels
+     * @param height pixels
+     * @param left the bitmap's left edge, pixels right of the pen position
+     * @param top the bitmap's top edge, pixels above the baseline
+     * @param strike pixels per em the bitmap is drawn at
+     * @param pixels {@code width * height} texels of four bytes, red, green, blue, alpha: sRGB-encoded colour with
+     *     straight (not premultiplied) alpha, rows top to bottom
+     */
+    record ColorBitmap(int width, int height, int left, int top, float strike, byte[] pixels) {
     }
 }

@@ -2,6 +2,7 @@ package com.truesim.ui.text;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.draw.DrawList;
+import com.truesim.ui.core.draw.Rgba;
 import java.lang.Character.UnicodeScript;
 import java.text.Bidi;
 import java.text.BreakIterator;
@@ -31,6 +32,20 @@ import java.util.Objects;
  * the block is not in world space ({@link #worldSpace(boolean)}) and it has no outline and no weight offset (effects
  * only the distance field has). Which technique draws never changes the layout: positions come from shaping.
  *
+ * <p><b>Rich text</b> ({@link #set(CharSequence, TextRuns, TextAlign, float, float, TextDirection, String)}): style
+ * runs give parts of the text their own font, size, colour, decorations, highlight or an inline object box. Runs of
+ * the same font shape together (a colour change keeps kerning and ligatures); lines take the height of their tallest
+ * run, so line tops are kept per line ({@link #lineTop}, {@link #lineHeight}).
+ *
+ * <p><b>Emoji</b>: characters shown as emoji (emoji presentation, U+FE0F, keycaps, flags, skin tones; ZWJ sequences
+ * stay together) take the registry's emoji faces first ({@link FontRegistry#emoji}); a face with colour bitmaps
+ * ({@link FontFace#colorStrike()}) draws them as colour glyphs ({@link DrawList#colorGlyph}) from the atlas's colour
+ * pages, white with the text colour's alpha.
+ *
+ * <p><b>Editing support</b>: carets per character ({@link #caretX}, {@link #hitTest}), visual caret movement through
+ * mixed directions ({@link #moveVisually}), the boxes a range covers per line ({@link #rangeBoxes}) and recording only
+ * some lines ({@link #recordLines}) for scrolled text.
+ *
  * <p>Coordinates are pixels relative to the block's top left, y down; baselines are on whole pixels.
  */
 public final class TextBlock {
@@ -53,6 +68,8 @@ public final class TextBlock {
     private String language;
     private boolean shaped;
     private long fontsVersion;
+    private TextRuns runs; // null: one style
+    private long runsVersion;
 
     // shaping, in logical order
     private FontFace primary;
@@ -71,7 +88,13 @@ public final class TextBlock {
     private int[] runGlyphEnd = new int[8];
     private byte[] runLevel = new byte[8];
     private FontFace[] runFace = new FontFace[8];
+    private float[] runSize = new float[8];
+    private int[] runStyle = new int[8]; // the style run of the run's first character, -1 without runs
     private final ShapedGlyphs shapedGlyphs = new ShapedGlyphs();
+    private int[] charStyle = new int[32];
+    private FontChain[] styleChain = new FontChain[8];
+    private float[] styleAbove = new float[8]; // a style's line box above and below the baseline, pixels
+    private float[] styleBelow = new float[8];
 
     // layout, in visual order
     private int glyphCount;
@@ -80,6 +103,9 @@ public final class TextBlock {
     private float[] glyphX = new float[32];
     private float[] glyphY = new float[32];
     private int[] glyphEntries = new int[32];
+    private int[] glyphCluster = new int[32];
+    private float[] glyphSize = new float[32];
+    private int[] glyphStyle = new int[32];
     private int lineCount;
     private int[] lineStart = new int[4];
     private int[] lineEnd = new int[4];
@@ -88,6 +114,8 @@ public final class TextBlock {
     private float[] lineLeft = new float[4];
     private float[] lineWidth = new float[4];
     private float[] lineBaseline = new float[4];
+    private float[] lineTop = new float[4];
+    private float[] lineBox = new float[4];
     private boolean[] lineRtl = new boolean[4];
     private float[] charX0 = new float[32];
     private float[] charX1 = new float[32];
@@ -107,7 +135,13 @@ public final class TextBlock {
     private int pending;
     private long seenCompletions = -1;
     private boolean worldSpace;
-    private boolean entriesRaster; // whether glyphEntries are raster entries
+    private boolean entriesRaster; // whether glyphEntries were looked up for raster drawing
+    private boolean entriesWorld; // the world space the entries were looked up for
+    private long entriesTechnique = -1; // the technique version the entries were looked up at
+    private int[] stops = new int[16]; // visual caret movement's scratch
+    private float[] stopX = new float[16];
+    private float[] spanX0 = new float[16]; // range boxes' scratch
+    private float[] spanX1 = new float[16];
     private long seenTechnique; // the atlas settings' technique version version() last saw
     private float lastOutline; // the outline and weight of the last record, for looking up glyphs on layout
     private float lastWeight;
@@ -144,9 +178,30 @@ public final class TextBlock {
      */
     public boolean set(CharSequence text, List<String> families, float sizePx, int weight, boolean italic,
         TextAlign align, float maxWidth, float lineHeight, TextDirection direction, String language) {
+        return set(text, null, families, sizePx, weight, italic, align, maxWidth, lineHeight, direction, language);
+    }
+
+    /**
+     * Sets rich text: {@code text} in the style {@code runs} give it (at least one run, the first at 0); otherwise as
+     * {@link #set(CharSequence, List, float, int, boolean, TextAlign, float, float, TextDirection, String)}. The first
+     * run's font gives the block's {@link #size()} and the metrics of an empty block. Reshapes when the text, the runs'
+     * {@link TextRuns#version()}, the direction or language changed.
+     */
+    public boolean set(CharSequence text, TextRuns styleRuns, TextAlign align, float maxWidth, float lineHeight,
+        TextDirection direction, String language) {
+        if (styleRuns.count() == 0) {
+            throw new IllegalArgumentException("rich text needs at least one run");
+        }
+        return set(text, styleRuns, styleRuns.families(0), styleRuns.size(0), styleRuns.weight(0),
+            styleRuns.italic(0), align, maxWidth, lineHeight, direction, language);
+    }
+
+    private boolean set(CharSequence text, TextRuns styleRuns, List<String> families, float sizePx, int weight,
+        boolean italic, TextAlign align, float maxWidth, float lineHeight, TextDirection direction, String language) {
         boolean reshape = !shaped || !sameText(text) || families != this.families && !families.equals(this.families)
             || sizePx != size || weight != this.weight || italic != this.italic || direction != this.direction
-            || !Objects.equals(language, this.language) || system.fonts().version() != fontsVersion;
+            || !Objects.equals(language, this.language) || system.fonts().version() != fontsVersion
+            || styleRuns != runs || styleRuns != null && styleRuns.version() != runsVersion;
         boolean relayout = reshape || align != this.align || maxWidth != this.maxWidth
             || lineHeight != this.lineHeight;
         if (!relayout) {
@@ -179,6 +234,8 @@ public final class TextBlock {
             this.italic = italic;
             this.direction = Objects.requireNonNull(direction, "direction");
             this.language = language;
+            this.runs = styleRuns;
+            this.runsVersion = styleRuns == null ? 0 : styleRuns.version();
             shape();
         }
         layout();
@@ -212,6 +269,7 @@ public final class TextBlock {
     private void growText(int n) {
         int c = Math.max(n, chars.length * 2);
         chars = new char[c];
+        charStyle = new int[c];
         levels = new byte[c];
         charAdvance = new float[c];
         charX0 = new float[c];
@@ -231,6 +289,7 @@ public final class TextBlock {
         paraCount = 0;
         runCount = 0;
         shapedGlyphs.clear();
+        styles(fonts);
         int start = 0;
         for (int i = 0; i <= length; i++) {
             if (i == length || chars[i] == '\n' || chars[i] == ' ') {
@@ -243,6 +302,45 @@ public final class TextBlock {
             charAdvance[shapedGlyphs.cluster(g)] += shapedGlyphs.advance(g);
         }
         shaped = true;
+    }
+
+    /** Each character's style run, each style's font chain and line box (rich text). */
+    private void styles(FontRegistry fonts) {
+        if (runs == null) {
+            return;
+        }
+        int n = runs.count();
+        if (styleChain.length < n) {
+            growStyles(n);
+        }
+        for (int st = 0; st < n; st++) {
+            FontChain c = fonts.chain(runs.families(st), runs.weight(st), runs.italic(st));
+            styleChain[st] = c;
+            FontFace f = c.primary() != null ? c.primary() : primary;
+            float sz = runs.size(st);
+            float a = f.ascender() * sz;
+            float d = f.descender() * sz;
+            float h = lineHeight > 0 ? lineHeight * sz : a + d + f.lineGap() * sz;
+            float above = (h - (a + d)) * 0.5f + a;
+            float below = h - above;
+            if (runs.isObject(st)) {
+                above = Math.max(above, runs.objectHeight(st));
+            }
+            styleAbove[st] = above;
+            styleBelow[st] = below;
+            int end = st + 1 < n ? Math.min(length, runs.start(st + 1)) : length;
+            for (int i = Math.min(length, runs.start(st)); i < end; i++) {
+                charStyle[i] = st;
+            }
+        }
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growStyles(int n) {
+        int c = Math.max(n, styleChain.length * 2);
+        styleChain = new FontChain[c];
+        styleAbove = new float[c];
+        styleBelow = new float[c];
     }
 
     private void paragraph(int start, int end, FontChain chain) {
@@ -260,8 +358,15 @@ public final class TextBlock {
         TextShaper shaper = system.shaper();
         for (int r = paraRunStart[p]; r < runCount; r++) {
             runGlyphStart[r] = shapedGlyphs.size();
-            shaper.shape(chars, length, runStart[r], runEnd[r], runFace[r], size, (runLevel[r] & 1) != 0, language,
-                shapedGlyphs);
+            int st = runStyle[r];
+            if (st >= 0 && runs.isObject(st)) {
+                for (int i = runStart[r]; i < runEnd[r]; i++) { // a box per character, no glyph
+                    shapedGlyphs.add(-1, i, runs.objectWidth(st), 0, 0);
+                }
+            } else {
+                shaper.shape(chars, length, runStart[r], runEnd[r], runFace[r], runSize[r], (runLevel[r] & 1) != 0,
+                    language, shapedGlyphs);
+            }
             runGlyphEnd[r] = shapedGlyphs.size();
         }
     }
@@ -294,32 +399,78 @@ public final class TextBlock {
         byte level = 0;
         int script = -1; // none yet: common characters take the script that follows
         FontFace face = null;
+        boolean emojiFace = false;
+        int style = -1;
+        FontChain c = chain;
         for (int i = start; i < end; ) {
             int cp = Character.codePointAt(chars, i, end);
+            int st = runs == null ? -1 : charStyle[i];
+            boolean newStyle = i > start && st != style && (runs.isObject(st) || runs.isObject(style)
+                || !runs.sameFont(st, style));
+            if (st >= 0) {
+                c = styleChain[st];
+            }
             UnicodeScript us = UnicodeScript.of(cp);
             boolean neutral = us == UnicodeScript.COMMON || us == UnicodeScript.INHERITED;
             int s = neutral ? -1 : us.ordinal();
             FontFace f;
-            if (face != null && (staysWithBase(cp) || neutral && face.covers(cp))) {
+            FontFace emoji;
+            if (face != null && !newStyle && staysWithBase(cp)) {
+                f = face; // marks, joiners, variation selectors and skin tones stay with their base
+            } else if (wantsEmoji(cp, i + Character.charCount(cp), end) && (emoji = c.emojiFace(cp)) != null) {
+                f = emoji;
+            } else if (face != null && !newStyle && !emojiFace && neutral && face.covers(cp)) {
                 f = face;
             } else {
-                f = chain.faceFor(cp, neutral && script >= 0 ? SCRIPTS[script] : us);
+                f = c.faceFor(cp, neutral && script >= 0 ? SCRIPTS[script] : us);
             }
             byte l = levels[i];
-            if (i > start && (l != level || f != face || s >= 0 && script >= 0 && s != script)) {
-                addRun(from, i, level, face);
+            if (i > start && (l != level || f != face || newStyle || s >= 0 && script >= 0 && s != script)) {
+                addRun(from, i, level, face, style);
                 from = i;
                 script = s;
             } else if (script < 0) {
                 script = s;
             }
             level = l;
+            if (f != face) {
+                emojiFace = c.isEmoji(f);
+            }
             face = f;
+            style = i == from ? st : style;
             i += Character.charCount(cp);
         }
         if (end > start) {
-            addRun(from, end, level, face);
+            addRun(from, end, level, face, style);
         }
+    }
+
+    /**
+     * Whether {@code cp}, followed by {@code chars[next, end)}, is shown as an emoji: emoji presentation by default
+     * (unless U+FE0E follows), an emoji asked for with U+FE0F, a keycap ({@code 0-9 # *} with U+20E3), a regional
+     * indicator (flags), an emoji modifier base with a skin tone.
+     */
+    private boolean wantsEmoji(int cp, int next, int end) {
+        if (cp < 0x80 && !isKeycapBase(cp)) {
+            return false; // the common case, without a look at the next character
+        }
+        int after = next < end ? Character.codePointAt(chars, next, end) : -1;
+        if (after == 0xFE0E) {
+            return false;
+        }
+        if (isKeycapBase(cp)) {
+            if (after == 0xFE0F && next + 1 < end) {
+                after = Character.codePointAt(chars, next + 1, end);
+            }
+            return after == 0x20E3;
+        }
+        return after == 0xFE0F && Character.isEmoji(cp) || cp >= 0x1F1E6 && cp <= 0x1F1FF
+            || Character.isEmojiPresentation(cp)
+            || after >= 0x1F3FB && after <= 0x1F3FF && Character.isEmojiModifierBase(cp);
+    }
+
+    private static boolean isKeycapBase(int cp) {
+        return cp >= '0' && cp <= '9' || cp == '#' || cp == '*';
     }
 
     /** Marks, joiners and variation selectors are shaped with their base character's face. */
@@ -330,7 +481,7 @@ public final class TextBlock {
             || cp >= 0x1F3FB && cp <= 0x1F3FF; // emoji skin tone modifiers
     }
 
-    private void addRun(int start, int end, byte level, FontFace face) {
+    private void addRun(int start, int end, byte level, FontFace face, int style) {
         if (runCount == runStart.length) {
             growRuns();
         }
@@ -338,6 +489,8 @@ public final class TextBlock {
         runEnd[runCount] = end;
         runLevel[runCount] = level;
         runFace[runCount] = face;
+        runStyle[runCount] = style;
+        runSize[runCount] = style < 0 ? size : runs.size(style);
         runCount++;
     }
 
@@ -356,7 +509,10 @@ public final class TextBlock {
         for (int p = 0; p < paraCount; p++) {
             breakLines(p);
         }
-        height = lineCount * lineHeightPx;
+        height = lineCount == 0 ? 0 : lineTop[lineCount - 1] + lineBox[lineCount - 1];
+        if (runs == null) {
+            height = lineCount * lineHeightPx;
+        }
         float box = maxWidth < Float.POSITIVE_INFINITY ? maxWidth : width;
         for (int l = 0; l < lineCount; l++) {
             float shift = (box - lineWidth[l]) * align.leftShare(lineRtl[l]);
@@ -369,7 +525,7 @@ public final class TextBlock {
                 charX1[i] += shift;
             }
         }
-        lookUpGlyphs(raster(lastOutline, lastWeight));
+        lookUpGlyphs(rasterMode(lastOutline, lastWeight));
     }
 
     /** Moves the lines to their alignment in the current box; true if any moved. */
@@ -395,10 +551,14 @@ public final class TextBlock {
         return moved;
     }
 
-    /** Whether glyphs drawn with {@code outlineWidth} and {@code weight} are hinted raster glyphs now. */
-    private boolean raster(float outlineWidth, float weight) {
-        GlyphAtlas atlas = system.atlas();
-        return atlas != null && outlineWidth == 0 && weight == 0 && atlas.rasterFor(size, worldSpace);
+    /** Whether glyphs drawn with {@code outlineWidth} and {@code weight} may be hinted raster glyphs (at their size). */
+    private boolean rasterMode(float outlineWidth, float weight) {
+        return system.atlas() != null && outlineWidth == 0 && weight == 0;
+    }
+
+    /** Whether glyph {@code g} draws as a hinted raster glyph in raster mode {@code raster}. */
+    private boolean rasterGlyph(GlyphAtlas atlas, int g, boolean raster) {
+        return raster && glyphFaces[g].colorStrike() == 0 && atlas.rasterFor(glyphSize[g], worldSpace);
     }
 
     private void lookUpGlyphs(boolean raster) {
@@ -406,12 +566,20 @@ public final class TextBlock {
         if (atlas == null) {
             return;
         }
-        if (!raster) { // raster entries depend on where the pen falls within a pixel: record finds them
-            for (int g = 0; g < glyphCount; g++) {
+        for (int g = 0; g < glyphCount; g++) {
+            if (glyphIds[g] < 0) {
+                glyphEntries[g] = -1; // an inline object
+            } else if (glyphFaces[g].colorStrike() > 0) {
+                glyphEntries[g] = atlas.colorEntry(glyphFaces[g], glyphIds[g], glyphSize[g]);
+            } else if (!rasterGlyph(atlas, g, raster)) {
                 glyphEntries[g] = atlas.entry(glyphFaces[g], glyphIds[g]);
+            } else {
+                glyphEntries[g] = -1; // raster entries depend on where the pen falls within a pixel: record finds them
             }
         }
         entriesRaster = raster;
+        entriesWorld = worldSpace;
+        entriesTechnique = atlas.settings().techniqueVersion();
         atlasEpoch = atlas.epoch();
         versionEpoch = atlasEpoch;
         pending = glyphCount; // until recorded: the glyphs may still be generating
@@ -496,11 +664,9 @@ public final class TextBlock {
             visible--;
         }
         boolean rtl = paraRtl[p];
-        float baseline = Math.round(l * lineHeightPx + baselineOffset);
         lineStart[l] = start;
         lineEnd[l] = end;
         lineRtl[l] = rtl;
-        lineBaseline[l] = baseline;
         lineGlyphStart[l] = glyphCount;
 
         int pieces = 0;
@@ -516,6 +682,7 @@ public final class TextBlock {
             }
         }
         reorder(pieces);
+        float baseline = lineMetrics(l, pieces, start);
 
         float pen = 0;
         for (int k = 0; k < pieces; k++) {
@@ -538,7 +705,7 @@ public final class TextBlock {
                 }
                 if (!Character.isWhitespace(chars[c])) {
                     addGlyph(shapedGlyphs.glyph(g), runFace[r], pen + shapedGlyphs.offsetX(g),
-                        baseline - shapedGlyphs.offsetY(g));
+                        baseline - shapedGlyphs.offsetY(g), c, runSize[r], runStyle[r]);
                 }
                 pen += advance;
             }
@@ -547,6 +714,36 @@ public final class TextBlock {
         lineGlyphEnd[l] = glyphCount;
         width = Math.max(width, pen);
         carets(start, visible, end, rtl, pen);
+    }
+
+    /**
+     * Line {@code l}'s top, box height and baseline from the runs of its {@code pieces} (rich text: the tallest run's
+     * box above and below the baseline; an empty line the style at its start), or the block's uniform line height.
+     */
+    private float lineMetrics(int l, int pieces, int start) {
+        if (runs == null) {
+            lineTop[l] = l * lineHeightPx;
+            lineBox[l] = lineHeightPx;
+            lineBaseline[l] = Math.round(l * lineHeightPx + baselineOffset);
+            return lineBaseline[l];
+        }
+        float above = 0;
+        float below = 0;
+        for (int k = 0; k < pieces; k++) {
+            int st = runStyle[pieceRun[k]];
+            above = Math.max(above, styleAbove[st]);
+            below = Math.max(below, styleBelow[st]);
+        }
+        if (pieces == 0) {
+            int st = length == 0 ? 0 : charStyle[Math.min(start, length - 1)];
+            above = styleAbove[st];
+            below = styleBelow[st];
+        }
+        float top = l == 0 ? 0 : lineTop[l - 1] + lineBox[l - 1];
+        lineTop[l] = top;
+        lineBox[l] = above + below;
+        lineBaseline[l] = Math.round(top + above);
+        return lineBaseline[l];
     }
 
     /** Splits each cluster's extent among its characters and puts characters without a glyph at the line's end. */
@@ -611,7 +808,7 @@ public final class TextBlock {
         }
     }
 
-    private void addGlyph(int glyph, FontFace face, float x, float y) {
+    private void addGlyph(int glyph, FontFace face, float x, float y, int cluster, float glyphPx, int style) {
         if (glyphCount == glyphIds.length) {
             growGlyphs();
         }
@@ -619,6 +816,9 @@ public final class TextBlock {
         glyphFaces[glyphCount] = face;
         glyphX[glyphCount] = x;
         glyphY[glyphCount] = y;
+        glyphCluster[glyphCount] = cluster;
+        glyphSize[glyphCount] = glyphPx;
+        glyphStyle[glyphCount] = style;
         glyphCount++;
     }
 
@@ -635,48 +835,81 @@ public final class TextBlock {
      */
     public void record(DrawList list, float x, float y, long color, float outlineWidth, long outlineColor,
         float weight) {
+        record(list, x, y, color, outlineWidth, outlineColor, weight, 1, 0, lineCount);
+    }
+
+    /**
+     * Records lines {@code firstLine} up to {@code endLine} (exclusive) without outline or weight: the visible lines of
+     * scrolled text. Runs with a colour of their own draw in it faded by {@code opacity}; the rest in {@code color}.
+     * Allocation-free.
+     */
+    public void recordLines(DrawList list, float x, float y, long color, float opacity, int firstLine, int endLine) {
+        record(list, x, y, color, 0, 0, 0, opacity, firstLine, endLine);
+    }
+
+    private void record(DrawList list, float x, float y, long color, float outlineWidth, long outlineColor,
+        float weight, float opacity, int firstLine, int endLine) {
         GlyphAtlas atlas = system.atlas();
         if (atlas == null) {
             throw new IllegalStateException("this text system has no atlas: it measures only");
         }
-        boolean raster = raster(outlineWidth, weight);
+        boolean raster = rasterMode(outlineWidth, weight);
         lastOutline = outlineWidth;
         lastWeight = weight;
-        if (atlasEpoch != atlas.epoch() || raster != entriesRaster) {
+        if (atlasEpoch != atlas.epoch() || raster != entriesRaster || entriesWorld != worldSpace
+            || entriesTechnique != atlas.settings().techniqueVersion()) {
             lookUpGlyphs(raster);
         }
         float top = (float) Math.floor(y + 0.5f);
-        float range = atlas.pixelRange() * size / atlas.emSize();
         int waiting = 0;
-        for (int g = 0; g < glyphCount; g++) {
+        int fl = Math.max(0, firstLine);
+        int el = Math.min(lineCount, endLine);
+        int from = fl < el ? lineGlyphStart[fl] : 0;
+        int to = fl < el ? lineGlyphEnd[el - 1] : 0;
+        for (int g = from; g < to; g++) {
+            if (glyphIds[g] < 0) {
+                continue; // an inline object: its owner draws it
+            }
             float px = x + glyphX[g];
             float py = top + glyphY[g];
+            float gs = glyphSize[g];
+            long c = color;
+            if (runs != null && glyphStyle[g] >= 0 && runs.hasColor(glyphStyle[g])) {
+                c = Rgba.fade(runs.color(glyphStyle[g]), opacity);
+            }
+            FontFace face = glyphFaces[g];
             int e;
             float qx = 0;
-            if (raster) {
+            boolean rasterHere = rasterGlyph(atlas, g, raster);
+            if (rasterHere) {
                 // the pen to a quarter pixel: a whole pixel and the phase the bitmap was rendered at
                 int quarters = (int) Math.floor(px * GlyphAtlas.RASTER_PHASES + 0.5f);
                 int whole = Math.floorDiv(quarters, GlyphAtlas.RASTER_PHASES);
                 qx = whole;
-                e = atlas.rasterEntry(glyphFaces[g], glyphIds[g], size, quarters - whole * GlyphAtlas.RASTER_PHASES);
+                e = atlas.rasterEntry(face, glyphIds[g], gs, quarters - whole * GlyphAtlas.RASTER_PHASES);
             } else {
                 e = glyphEntries[g];
             }
             byte state = atlas.state(e);
-            if (state == GlyphAtlas.READY && raster) {
+            if (state == GlyphAtlas.READY && rasterHere) {
                 // the bitmap's planes are whole pixels from the pen's whole pixel: texel for pixel
                 float qy = (float) Math.floor(py + 0.5f);
                 list.rasterGlyph(qx + atlas.plane(e, 0), qy - atlas.plane(e, 3), qx + atlas.plane(e, 2),
                     qy - atlas.plane(e, 1), atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3),
-                    atlas.texture(e), color);
+                    atlas.texture(e), c);
+            } else if (state == GlyphAtlas.READY && atlas.color(e)) {
+                list.colorGlyph(px + atlas.plane(e, 0) * gs, py - atlas.plane(e, 3) * gs,
+                    px + atlas.plane(e, 2) * gs, py - atlas.plane(e, 1) * gs,
+                    atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3), atlas.texture(e),
+                    Rgba.pack(1, 1, 1, Rgba.a(c)));
             } else if (state == GlyphAtlas.READY) {
-                list.glyph(px + atlas.plane(e, 0) * size, py - atlas.plane(e, 3) * size,
-                    px + atlas.plane(e, 2) * size, py - atlas.plane(e, 1) * size,
-                    atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3), atlas.texture(e), range, color,
-                    outlineWidth, outlineColor, weight);
+                list.glyph(px + atlas.plane(e, 0) * gs, py - atlas.plane(e, 3) * gs,
+                    px + atlas.plane(e, 2) * gs, py - atlas.plane(e, 1) * gs,
+                    atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3), atlas.texture(e),
+                    atlas.pixelRange() * gs / atlas.emSize(), c, outlineWidth, outlineColor, weight);
             } else if (state != GlyphAtlas.EMPTY) {
-                list.glyph(px, py, px, py, 0, 0, 0, 0, atlas.page(0).id(), range, color, outlineWidth, outlineColor,
-                    weight);
+                list.glyph(px, py, px, py, 0, 0, 0, 0, atlas.page(0).id(), atlas.pixelRange() * gs / atlas.emSize(), c,
+                    outlineWidth, outlineColor, weight);
                 waiting++;
             }
         }
@@ -727,9 +960,10 @@ public final class TextBlock {
         return worldSpace;
     }
 
-    /** Whether the last {@link #record} drew hinted raster glyphs. */
+    /** Whether the last {@link #record} drew hinted raster glyphs (at the block's size). */
     public boolean drewRaster() {
-        return entriesRaster;
+        GlyphAtlas atlas = system.atlas();
+        return entriesRaster && atlas != null && atlas.rasterFor(size, worldSpace);
     }
 
     // ---------------------------------------------------------------- measures
@@ -779,6 +1013,43 @@ public final class TextBlock {
         return lineBaseline[l];
     }
 
+    /** Line {@code l}'s top below the block's top, pixels. */
+    public float lineTop(int l) {
+        return lineTop[l];
+    }
+
+    /** Line {@code l}'s box height, pixels (the block's line height, or its tallest run's for rich text). */
+    public float lineHeight(int l) {
+        return lineBox[l];
+    }
+
+    /** The line at {@code y} pixels below the top (clamped to the first and last line); 0 without lines. */
+    public int lineAt(float y) {
+        int lo = 0;
+        int hi = lineCount - 1;
+        int found = 0;
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            if (lineTop[mid] <= y) {
+                found = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return found;
+    }
+
+    /** The first visible glyph of line {@code l}. */
+    public int lineGlyphStart(int l) {
+        return lineGlyphStart[l];
+    }
+
+    /** The visible glyph after line {@code l}'s last. */
+    public int lineGlyphEnd(int l) {
+        return lineGlyphEnd[l];
+    }
+
     /** Line {@code l}'s left edge after alignment. */
     public float lineLeft(int l) {
         return lineLeft[l];
@@ -812,6 +1083,36 @@ public final class TextBlock {
     /** Visible glyph {@code g}'s baseline, pixels from the top (offset by its shaping offset). */
     public float glyphY(int g) {
         return glyphY[g];
+    }
+
+    /** The first character visible glyph {@code g} came from. */
+    public int glyphCluster(int g) {
+        return glyphCluster[g];
+    }
+
+    /** Visible glyph {@code g}'s size, pixels per em (its run's, for rich text). */
+    public float glyphSize(int g) {
+        return glyphSize[g];
+    }
+
+    /** Whether character {@code index} is laid out right to left (its BiDi level is odd). */
+    public boolean rightToLeft(int index) {
+        return (levels[index] & 1) != 0;
+    }
+
+    /** Character {@code index}'s left edge, pixels (its line's end for characters without a glyph). */
+    public float charLeft(int index) {
+        return charX0[index];
+    }
+
+    /** Character {@code index}'s right edge, pixels. */
+    public float charRight(int index) {
+        return charX1[index];
+    }
+
+    /** The style runs the block was set with, or null. */
+    public TextRuns runs() {
+        return runs;
     }
 
     /** Characters. */
@@ -860,8 +1161,7 @@ public final class TextBlock {
         if (lineCount == 0) {
             return 0;
         }
-        int l = (int) Math.floor(y / lineHeightPx);
-        l = Math.max(0, Math.min(lineCount - 1, l));
+        int l = lineAt(y);
         int start = lineStart[l];
         int end = lineEnd[l];
         int best = lineRtl[l] ? end : start;
@@ -886,6 +1186,157 @@ public final class TextBlock {
             }
         }
         return graphemeStart(Math.min(best, end), start, end);
+    }
+
+    /**
+     * The caret position one step left ({@code right} false) or right of {@code index} on screen: through the line's
+     * grapheme boundaries in visual order, so in mixed-direction text the caret moves the way the arrow points; past a
+     * line's visual end it goes to the next line in reading order (right in a left-to-right paragraph, left in a
+     * right-to-left one) at that line's start, or back to the previous line's end. Positions with the same x (the two sides of a direction change)
+     * count once. Allocation-free once its scratch is large enough.
+     */
+    public int moveVisually(int index, boolean right) {
+        checkIndex(index);
+        if (lineCount == 0) {
+            return index;
+        }
+        int l = caretLine(index);
+        int n = lineStops(l);
+        float x = caretX(index);
+        int best = -1;
+        float bestX = 0;
+        for (int k = 0; k < n; k++) {
+            float sx = stopX[k];
+            boolean beyond = right ? sx > x + 0.01f : sx < x - 0.01f;
+            if (beyond && (best < 0 || (right ? sx < bestX : sx > bestX))) {
+                best = stops[k];
+                bestX = sx;
+            }
+        }
+        if (best >= 0) {
+            return best;
+        }
+        boolean forward = right != lineRtl[l]; // reading order: off the line's end goes on to the next line
+        int next = forward ? l + 1 : l - 1;
+        if (next < 0 || next >= lineCount) {
+            return index;
+        }
+        int m = lineStops(next);
+        // the next line in reading order is entered at its reading start, the previous one at its reading end
+        return forward ? stops[0] : stops[m - 1];
+    }
+
+    /** Line {@code l}'s caret positions (grapheme boundaries, the line's start and end) with their x into the scratch. */
+    private int lineStops(int l) {
+        int start = lineStart[l];
+        int end = lineEnd[l];
+        int n = 0;
+        BreakIterator graphemes = start < end ? system.characterBreaks(chars, start, end) : null;
+        for (int b = start; b != BreakIterator.DONE && b <= end; b = graphemes == null ? BreakIterator.DONE
+            : graphemes.following(b)) {
+            if (b == end && l + 1 < lineCount && lineStart[l + 1] == end) {
+                break; // a soft break: that position is the next line's start
+            }
+            if (n == stops.length) {
+                growStops();
+            }
+            stops[n] = b;
+            stopX[n] = caretX(b);
+            n++;
+            if (b == end) {
+                break;
+            }
+        }
+        return n;
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growStops() {
+        stops = Arrays.copyOf(stops, stops.length * 2);
+        stopX = Arrays.copyOf(stopX, stopX.length * 2);
+    }
+
+    /**
+     * The boxes characters {@code [from, to)} cover, line by line in visual pieces (a range crossing a direction change
+     * covers separate pieces): four floats a box into {@code out} ({@code x0, y0, x1, y1}, pixels), returning how many
+     * boxes there are; when {@code out} is too small the boxes that fit are written and the count still returned. A
+     * range that goes on past a hard line break covers {@code breakWidth} pixels more at that line's end (a selected
+     * line feed). Allocation-free once its scratch is large enough.
+     */
+    public int rangeBoxes(int from, int to, float breakWidth, float[] out) {
+        int a = Math.max(0, Math.min(from, to));
+        int b = Math.min(length, Math.max(from, to));
+        int boxes = 0;
+        if (a >= b || lineCount == 0) {
+            return 0;
+        }
+        for (int l = caretLine(a); l < lineCount && lineStart[l] < b; l++) {
+            int s = Math.max(a, lineStart[l]);
+            int e = Math.min(b, lineEnd[l]);
+            int n = 0;
+            for (int i = s; i < e; i++) {
+                float x0 = charX0[i];
+                float x1 = charX1[i];
+                if (!(x1 > x0)) {
+                    continue;
+                }
+                if (n == spanX0.length) {
+                    growSpans();
+                }
+                // insertion by x0: lines are short
+                int k = n++;
+                while (k > 0 && spanX0[k - 1] > x0) {
+                    spanX0[k] = spanX0[k - 1];
+                    spanX1[k] = spanX1[k - 1];
+                    k--;
+                }
+                spanX0[k] = x0;
+                spanX1[k] = x1;
+            }
+            boolean hardBreak = lineEnd[l] < b && (l + 1 >= lineCount || lineStart[l + 1] > lineEnd[l]);
+            if (hardBreak && breakWidth > 0) {
+                float edge = lineRtl[l] ? lineLeft[l] - breakWidth : lineLeft[l] + lineWidth[l];
+                if (lineEnd[l] == lineStart[l]) {
+                    edge = lineRtl[l] ? lineLeft[l] - breakWidth : lineLeft[l];
+                }
+                if (n == spanX0.length) {
+                    growSpans();
+                }
+                int k = n++;
+                while (k > 0 && spanX0[k - 1] > edge) {
+                    spanX0[k] = spanX0[k - 1];
+                    spanX1[k] = spanX1[k - 1];
+                    k--;
+                }
+                spanX0[k] = edge;
+                spanX1[k] = edge + breakWidth;
+            }
+            float y0 = lineTop[l];
+            float y1 = lineTop[l] + lineBox[l];
+            for (int k = 0; k < n; ) {
+                float x0 = spanX0[k];
+                float x1 = spanX1[k];
+                k++;
+                while (k < n && spanX0[k] <= x1 + 0.5f) {
+                    x1 = Math.max(x1, spanX1[k]);
+                    k++;
+                }
+                if (boxes * 4 + 3 < out.length) {
+                    out[boxes * 4] = x0;
+                    out[boxes * 4 + 1] = y0;
+                    out[boxes * 4 + 2] = x1;
+                    out[boxes * 4 + 3] = y1;
+                }
+                boxes++;
+            }
+        }
+        return boxes;
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growSpans() {
+        spanX0 = Arrays.copyOf(spanX0, spanX0.length * 2);
+        spanX1 = Arrays.copyOf(spanX1, spanX1.length * 2);
     }
 
     private int graphemeStart(int index, int start, int end) {
@@ -923,6 +1374,8 @@ public final class TextBlock {
         runGlyphEnd = Arrays.copyOf(runGlyphEnd, n);
         runLevel = Arrays.copyOf(runLevel, n);
         runFace = Arrays.copyOf(runFace, n);
+        runSize = Arrays.copyOf(runSize, n);
+        runStyle = Arrays.copyOf(runStyle, n);
         pieceRun = new int[n];
         pieceStart = new int[n];
         pieceEnd = new int[n];
@@ -939,6 +1392,8 @@ public final class TextBlock {
         lineLeft = Arrays.copyOf(lineLeft, n);
         lineWidth = Arrays.copyOf(lineWidth, n);
         lineBaseline = Arrays.copyOf(lineBaseline, n);
+        lineTop = Arrays.copyOf(lineTop, n);
+        lineBox = Arrays.copyOf(lineBox, n);
         lineRtl = Arrays.copyOf(lineRtl, n);
     }
 
@@ -950,5 +1405,8 @@ public final class TextBlock {
         glyphX = Arrays.copyOf(glyphX, n);
         glyphY = Arrays.copyOf(glyphY, n);
         glyphEntries = Arrays.copyOf(glyphEntries, n);
+        glyphCluster = Arrays.copyOf(glyphCluster, n);
+        glyphSize = Arrays.copyOf(glyphSize, n);
+        glyphStyle = Arrays.copyOf(glyphStyle, n);
     }
 }

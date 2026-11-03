@@ -1,0 +1,89 @@
+# Emoticons and shortcodes the optional replacement filter turns into emoji: one per line, the text, then the emoji's
+# code points in hexadecimal (a sequence separated by spaces). Shortcodes are written between colons.
+# Emoticons
+:)	1F642
+:-)	1F642
+:(	1F641
+:-(	1F641
+:D	1F600
+:-D	1F600
+;)	1F609
+;-)	1F609
+:P	1F61B
+:-P	1F61B
+:p	1F61B
+:O	1F62E
+:o	1F62E
+:'(	1F622
+:|	1F610
+:-|	1F610
+:/	1F615
+:-/	1F615
+<3	2764 FE0F
+</3	1F494
+B)	1F60E
+8)	1F60E
+xD	1F606
+XD	1F606
+^^	1F60A
+o/	1F44B
+# Shortcodes
+:smile:	1F604
+:grin:	1F601
+:joy:	1F602
+:wink:	1F609
+:blush:	1F60A
+:heart_eyes:	1F60D
+:thinking:	1F914
+:neutral_face:	1F610
+:cry:	1F622
+:sob:	1F62D
+:angry:	1F620
+:sunglasses:	1F60E
+:scream:	1F631
+:sleeping:	1F634
+:thumbsup:	1F44D
+:+1:	1F44D
+:thumbsdown:	1F44E
+:-1:	1F44E
+:clap:	1F44F
+:wave:	1F44B
+:ok_hand:	1F44C
+:pray:	1F64F
+:muscle:	1F4AA
+:eyes:	1F440
+:heart:	2764 FE0F
+:broken_heart:	1F494
+:fire:	1F525
+:star:	2B50
+:sparkles:	2728
+:tada:	1F389
+:rocket:	1F680
+:warning:	26A0 FE0F
+:check:	2705
+:x:	274C
+:question:	2753
+:100:	1F4AF
+:skull:	1F480
+:ghost:	1F47B
+:robot:	1F916
+:trophy:	1F3C6
+:crown:	1F451
+:gem:	1F48E
+:moneybag:	1F4B0
+:bomb:	1F4A3
+:zap:	26A1
+:snowflake:	2744 FE0F
+:sun:	2600 FE0F
+:moon:	1F319
+:earth:	1F30D
+:car:	1F697
+:plane:	2708 FE0F
+:gift:	1F381
+:coffee:	2615
+:pizza:	1F355
+:beer:	1F37A
+:family:	1F468 200D 1F469 200D 1F467 200D 1F466
+:flag_de:	1F1E9 1F1EA
+:flag_us:	1F1FA 1F1F8
+:keycap_1:	0031 FE0F 20E3
