@@ -1,0 +1,21 @@
+// Design constants of the default theme: spacing, radii, type and motion. Colours are live tokens (default-theme.tss)
+// so a palette swap (light, dark, high contrast) is one change at run time; these values are fixed at load.
+
+$space-xs: 2px;
+$space-s: 4px;
+$space-m: 8px;
+$space-l: 12px;
+$space-xl: 20px;
+
+$radius-s: 3px;
+$radius-m: 6px;
+$radius-l: 10px;
+
+// No font file ships with the toolkit: the first installed family of the chain wins.
+$font-ui: "Inter", "Segoe UI", "DejaVu Sans", sans-serif;
+$font-numbers: "Inter", "Segoe UI", "DejaVu Sans Mono", monospace;
+
+$text-sizes: (caption: 11px, body: 14px, title: 18px, value: 22px);
+
+$fast: 90ms;
+$normal: 160ms;

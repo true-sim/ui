@@ -1,0 +1,31 @@
+// Mixins and functions shared by the shipped themes. Java sheets mirror them as methods (Colors, rule mixins).
+
+@use "tokens";
+
+/// A drop shadow that grows with $depth, in the theme's shadow colour.
+@mixin raised($depth: 1) {
+  shadow: 0 ($depth * 2px) ($depth * 6px) var(--shadow);
+}
+
+/// Text of one of the theme's sizes ($text-sizes) and a weight.
+@mixin text($size: body, $weight: normal) {
+  font-size: map-get(tokens.$text-sizes, $size);
+  font-weight: $weight;
+}
+
+/// A fully rounded shape.
+@mixin pill($pad-y: tokens.$space-xs, $pad-x: tokens.$space-m) {
+  radius: 999px;
+  padding: $pad-y $pad-x;
+}
+
+/// Smooth changes of the keys that react to the pointer.
+@mixin reactive {
+  transition: background tokens.$normal ease-out, border tokens.$normal ease-out, scale tokens.$fast ease-out,
+    opacity tokens.$normal;
+}
+
+/// $n steps of the 4 px spacing grid.
+@function space($n) {
+  @return $n * tokens.$space-s;
+}

@@ -1,0 +1,76 @@
+// A deliberately garish theme for tests and visual checks (design 13: "a test theme restyles every new element").
+// Every element type and style name the default theme styles looks obviously different here, so anything still
+// looking like the default theme under it holds a presentational value in code instead of reading a style.
+
+@use "mixins" as *;
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+// each style name with a step, so every variant differs from the others too
+$names: (hud: 1, card: 2, title: 3, value: 4, caption: 5, primary: 6, danger: 7, meter: 8);
+
+:root {
+  --bg: #2b0040;
+  --surface: $hot;
+  --surface-raised: lighten(var(--surface), 10%);
+  --edge: $sun;
+  --fg: $lime;
+  --fg-muted: $cyan;
+  --accent: #ff6600;
+  --danger: #0000ff;
+  --good: #ff1493;
+  --track: #8a2be2;
+  --shadow: rgba($lime, 0.8);
+  --outline: $hot;
+}
+
+@tokens dark { --surface: #800080; }
+@tokens light { --surface: #ffb6ff; --fg: #006400; }
+@tokens high-contrast { --surface: $sun; --fg: black; }
+
+panel {
+  layout: stack;
+  direction: row-reverse;
+  gap: 13px;
+  background: linear-gradient(45deg, var(--surface), var(--track));
+  border: 5px var(--edge);
+  radius: 0 24px 0 24px;
+  padding: 17px;
+  shadow: 8px 8px 0 4px var(--shadow), -4px -4px 0 var(--edge);
+  opacity: 0.93;
+
+  &:hover { scale: 1.08; background: box(var(--surface-raised)); }
+  &:pressed { scale: 0.85; }
+  &:focused { border: 7px var(--fg); }
+  &:disabled { opacity: 0.3; }
+}
+
+label {
+  color: var(--fg);
+  font: italic 900 17px "Comic Sans MS", "Comic Neue", cursive;
+  text-outline: 3px var(--outline);
+  text-align: center;
+  line-height: 2.2;
+  scale: 1.1;
+}
+
+image {
+  size: 41px 23px;
+  image: "test/checker" #ff00ff fill;
+  border: 3px $lime;
+  radius: 12px;
+}
+
+@each $name, $step in $names {
+  panel.#{$name} { padding: 5px + 3px * $step; radius: $step * 2px; @include raised($step); }
+  label.#{$name} { font-size: 10px + $step * 2; color: mix($lime, $hot, 10% * $step); }
+  image.#{$name} { size: 10px * $step; }
+}
+
+panel.meter {
+  layout: flex;
+  height: 19px;
+  > panel { background: box($cyan); }
+}
