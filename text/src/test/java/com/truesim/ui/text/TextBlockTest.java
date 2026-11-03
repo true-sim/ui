@@ -9,6 +9,7 @@ import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.draw.UiTextures;
+import com.truesim.ui.text.jdk.JdkRasterizer;
 import com.truesim.ui.text.jdk.JdkSdfGenerator;
 import java.lang.Character.UnicodeScript;
 import java.nio.file.Path;
@@ -390,5 +391,117 @@ class TextBlockTest {
         assertThat(copy.getEndIndex()).isEqualTo(4);
         assertThatThrownBy(() -> it.setIndex(5)).isInstanceOf(IllegalArgumentException.class);
         assertThat(new CharArrayIterator().reset(new char[0], 0, 0).last()).isEqualTo(java.text.CharacterIterator.DONE);
+    }
+
+    // ---------------------------------------------------------------- small text (UI16)
+
+    private TextSystem rasterSystem() {
+        GlyphAtlas raster = new GlyphAtlas(new UiTextures(), new JdkSdfGenerator(), new JdkRasterizer(), null, null,
+            settings);
+        return new TextSystem(fonts, new Fakes.Shaper(), raster);
+    }
+
+    /** Records {@code b} at (10.3, 20.4) after a frame (so its glyphs are ready); returns the list. */
+    private static DrawList recorded(TextBlock b, float outline, float weight) {
+        DrawList list = new DrawList();
+        int start = list.allocate(b.glyphCount());
+        list.begin(start, b.glyphCount());
+        b.record(list, 10.3f, 20.4f, Rgba.WHITE, outline, Rgba.BLACK, weight);
+        list.end();
+        b.version();
+        b.system().atlas().beginFrame();
+        list.begin(start, b.glyphCount());
+        b.record(list, 10.3f, 20.4f, Rgba.WHITE, outline, Rgba.BLACK, weight);
+        list.end();
+        return list;
+    }
+
+    private static boolean raster(DrawList list) {
+        return (Primitive.flags(list.header(0)) & Primitive.FLAG_RASTER) != 0;
+    }
+
+    @Test
+    void smallTextDrawsRasterGlyphsOnWholePixels() {
+        TextSystem rs = rasterSystem();
+        TextBlock b = new TextBlock(rs);
+        b.set("ab c", LATIN, 10, 400, false, TextAlign.START, INF, 0);
+        DrawList list = recorded(b, 0, 0);
+        assertThat(b.drewRaster()).isTrue();
+        assertThat(raster(list)).isTrue();
+        GlyphAtlas atlas = rs.atlas();
+        // the pen at 10.3 px: pixel 10, phase 1 (10.25, the nearest quarter)
+        assertThat(b.glyphX(0)).isZero();
+        int e = atlas.rasterEntry(b.glyphFace(0), 'a', 10, 1);
+        assertThat(atlas.raster(e)).isTrue();
+        float x0 = list.floatAt(0, Primitive.X0);
+        float y0 = list.floatAt(0, Primitive.Y0);
+        assertThat(x0).isEqualTo(10 + atlas.plane(e, 0));
+        assertThat(x0 % 1).as("on a whole pixel").isZero();
+        assertThat(y0 % 1).isZero();
+        assertThat(list.floatAt(0, Primitive.X1) - x0).isEqualTo(atlas.plane(e, 2) - atlas.plane(e, 0));
+        assertThat(list.intAt(0, Primitive.TEXTURE)).isEqualTo(atlas.texture(e));
+        assertThat(list.floatAt(0, Primitive.PIXEL_RANGE)).isZero();
+    }
+
+    @Test
+    void switchingTechniqueRedrawsWithoutReflowing() {
+        TextSystem rs = rasterSystem();
+        TextBlock b = new TextBlock(rs);
+        b.set("ab c", LATIN, 10, 400, false, TextAlign.START, INF, 0);
+        recorded(b, 0, 0);
+        float width = b.width();
+        float[] xs = {b.glyphX(0), b.glyphX(1), b.glyphX(2)};
+        long v = b.version();
+
+        settings.smallText().select("MTSDF");
+        assertThat(b.version()).as("records again").isGreaterThan(v);
+        assertThat(b.set("ab c", LATIN, 10, 400, false, TextAlign.START, INF, 0)).as("no new layout").isFalse();
+        assertThat(raster(recorded(b, 0, 0))).isFalse();
+        assertThat(b.drewRaster()).isFalse();
+        assertThat(b.width()).isEqualTo(width);
+        assertThat(new float[] {b.glyphX(0), b.glyphX(1), b.glyphX(2)}).isEqualTo(xs);
+
+        settings.smallText().select("HINTED");
+        assertThat(raster(recorded(b, 0, 0))).isTrue();
+        assertThat(b.width()).isEqualTo(width);
+        assertThat(new float[] {b.glyphX(0), b.glyphX(1), b.glyphX(2)}).isEqualTo(xs);
+    }
+
+    @Test
+    void worldSpaceOutlinesWeightAndLargeTextDrawMtsdf() {
+        TextBlock b = new TextBlock(rasterSystem());
+        b.set("ab", LATIN, 12, 400, false, TextAlign.START, INF, 0);
+        assertThat(b.worldSpace()).isFalse();
+        long v = b.version();
+        b.worldSpace(true);
+        b.worldSpace(true);
+        assertThat(b.version()).isEqualTo(v + 1);
+        assertThat(raster(recorded(b, 0, 0))).as("world space").isFalse();
+        b.worldSpace(false);
+        assertThat(raster(recorded(b, 0, 0))).isTrue();
+        assertThat(raster(recorded(b, 1, 0))).as("an outline").isFalse();
+        // a new layout looks glyphs up for the last record's outline: still MTSDF
+        b.set("abc", LATIN, 12, 400, false, TextAlign.START, INF, 0);
+        assertThat(b.drewRaster()).isFalse();
+        assertThat(raster(recorded(b, 0, 0.3f))).as("a weight offset").isFalse();
+        assertThat(raster(recorded(b, 0, 0))).isTrue();
+        b.set("abc", LATIN, 13, 400, false, TextAlign.START, INF, 0);
+        assertThat(raster(recorded(b, 0, 0))).as("at the threshold").isFalse();
+    }
+
+    @Test
+    void rasterTextSetsAndRecordsWithoutAllocating() {
+        TextBlock b = new TextBlock(rasterSystem());
+        String text = "Hello אב world";
+        b.set(text, LATIN, 10, 400, false, TextAlign.START, 60, 0);
+        DrawList list = recorded(b, 0, 0);
+        assertThat(raster(list)).isTrue();
+        AllocationAssertions.assertAllocationFree(() -> {
+            b.set(text, LATIN, 10, 400, false, TextAlign.START, 60, 0);
+            list.begin(0, b.glyphCount());
+            b.record(list, 0, 0, Rgba.WHITE, 0, 0, 0);
+            list.end();
+            b.version();
+        });
     }
 }

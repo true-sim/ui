@@ -19,7 +19,7 @@ import org.lwjgl.system.MemoryStack;
 
 /**
  * The text backend of the engine (UI9, UI10, UI11): FreeType faces and outlines, HarfBuzz shaping, msdfgen MTSDF
- * glyphs, FreeType's hinted raster for the small-text comparison, all through LWJGL. Owns its FreeType library and the
+ * glyphs, FreeType's hinted raster for small text, all through LWJGL. Owns its FreeType library and the
  * faces it opened; {@link #close()} frees them.
  */
 public final class NativeTextBackend implements TextBackend, AutoCloseable {
@@ -27,6 +27,7 @@ public final class NativeTextBackend implements TextBackend, AutoCloseable {
     private final long library;
     private final List<NativeFontFace> faces = new ArrayList<>();
     private final MsdfgenGenerator generator = new MsdfgenGenerator();
+    private final FreeTypeRasterizer rasterizer = new FreeTypeRasterizer();
     private boolean closed;
 
     /** Starts FreeType. */
@@ -70,9 +71,8 @@ public final class NativeTextBackend implements TextBackend, AutoCloseable {
     }
 
     @Override
-    @AllowAllocation("a rasterizer per thread, once")
     public GlyphRasterizer newRasterizer() {
-        return new FreeTypeRasterizer();
+        return rasterizer; // thread-safe: one is enough
     }
 
     /** Frees every face and FreeType. */

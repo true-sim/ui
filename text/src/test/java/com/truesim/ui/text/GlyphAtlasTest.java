@@ -9,6 +9,7 @@ import com.truesim.common.jobs.TaskScheduler;
 import com.truesim.testing.AllocationAssertions;
 import com.truesim.ui.core.draw.UiTexture;
 import com.truesim.ui.core.draw.UiTextures;
+import com.truesim.ui.text.jdk.JdkRasterizer;
 import com.truesim.ui.text.jdk.JdkSdfGenerator;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -221,7 +222,7 @@ class GlyphAtlasTest {
         assertThat(atlas.page(0)).isNotSameAs(page);
         assertThat(atlas.page(0).width()).isEqualTo(512);
         assertThat(textures.count()).isEqualTo(3);
-        assertThat(settings.all()).hasSize(4);
+        assertThat(settings.all()).hasSize(6);
     }
 
     @Test
@@ -256,5 +257,168 @@ class GlyphAtlasTest {
         assertThat(atlas.size()).isEqualTo(640);
         atlas.beginFrame();
         assertThat(atlas.pending()).isZero();
+    }
+
+    // ---------------------------------------------------------------- raster glyphs (UI16)
+
+    private static GlyphAtlas rasterAtlas(UiTextures textures, Lane lane, GlyphCache cache, AtlasSettings settings) {
+        return new GlyphAtlas(textures, new JdkSdfGenerator(), new JdkRasterizer(), lane, cache, settings);
+    }
+
+    @Test
+    void rasterGlyphsAreKeyedBySizeAndShareThePages() {
+        UiTextures textures = new UiTextures();
+        GlyphAtlas atlas = rasterAtlas(textures, null, null, new AtlasSettings());
+        Fakes.Face f = face(1);
+        int msdf = atlas.entry(f, 40);
+        int r10 = atlas.rasterEntry(f, 40, 10, 0);
+        int r12 = atlas.rasterEntry(f, 40, 12, 0);
+        assertThat(atlas.rasterEntry(f, 40, 10.001f, 0)).as("the same 1/64 pixel").isEqualTo(r10);
+        assertThat(atlas.rasterEntry(f, 40, 10.25f, 0)).isNotEqualTo(r10);
+        assertThat(java.util.Set.of(msdf, r10, r12)).hasSize(3);
+        assertThat(atlas.raster(r10)).isTrue();
+        assertThat(atlas.raster(msdf)).isFalse();
+        int space = atlas.rasterEntry(f, 32, 10, 0);
+        assertThat(atlas.state(r10)).isEqualTo(GlyphAtlas.QUEUED);
+
+        atlas.beginFrame();
+        assertThat(atlas.state(r10)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.state(r12)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.state(space)).isEqualTo(GlyphAtlas.EMPTY);
+        assertThat(atlas.texture(r10)).as("the same page as MTSDF glyphs").isEqualTo(atlas.texture(msdf));
+        // a 0.4 em square at 10 px is 4 px from the pen, padded by 2 px each side: whole pixels
+        assertThat(atlas.plane(r10, 0)).isEqualTo(-2);
+        assertThat(atlas.plane(r10, 1)).isEqualTo(-2);
+        assertThat(atlas.plane(r10, 2)).isEqualTo(6);
+        assertThat(atlas.plane(r10, 3)).isEqualTo(6);
+        assertThat(atlas.plane(r12, 2) - atlas.plane(r12, 0)).as("4.8 px rounded out, padded").isEqualTo(9);
+        assertThat((atlas.uv(r10, 2) - atlas.uv(r10, 0)) * 1024)
+            .isCloseTo(8, org.assertj.core.data.Offset.offset(1e-3f));
+        UiTexture page = atlas.page(0);
+        int x = (int) (atlas.uv(r10, 0) * 1024 + 0.5f);
+        int y = (int) (atlas.uv(r10, 1) * 1024 + 0.5f);
+        byte[] p = page.pixels();
+        int inside = ((y + 3) * 1024 + x + 3) * 4; // texel 3, 3 of the box: inside the square (texels 2 to 5)
+        assertThat(p[inside] & 0xFF).isEqualTo(255);
+        assertThat(p[inside + 1]).isEqualTo(p[inside]);
+        assertThat(p[inside + 3]).as("alpha is the coverage").isEqualTo(p[inside]);
+        int pad = ((y + 1) * 1024 + x + 1) * 4;
+        assertThat(p[pad + 3]).as("the padding stays clear").isZero();
+        assertThat(atlas.rasterizer()).isInstanceOf(JdkRasterizer.class);
+    }
+
+    @Test
+    void rasterGlyphsFollowTheSettingsSizeAndSpace() {
+        AtlasSettings settings = new AtlasSettings();
+        GlyphAtlas atlas = rasterAtlas(new UiTextures(), null, null, settings);
+        assertThat(settings.smallText().option()).isEqualTo("HINTED");
+        assertThat(settings.hintedBelow().get()).isEqualTo(13);
+        assertThat(atlas.rasterFor(12.9f, false)).isTrue();
+        assertThat(atlas.rasterFor(13, false)).as("at the threshold: MTSDF").isFalse();
+        assertThat(atlas.rasterFor(10, true)).as("world space: MTSDF").isFalse();
+        Fakes.Face g = face(2);
+        int[] phases = new int[GlyphAtlas.RASTER_PHASES];
+        for (int p = 0; p < phases.length; p++) {
+            phases[p] = atlas.rasterEntry(g, 40, 10, p);
+        }
+        assertThat(java.util.Arrays.stream(phases).distinct().count()).as("one entry per phase").isEqualTo(4);
+        atlas.beginFrame();
+        // a 4 px square moved by 3/4 px: its box reaches one pixel further right
+        assertThat(atlas.plane(phases[3], 2)).isEqualTo(atlas.plane(phases[0], 2) + 1);
+        assertThat(atlas.plane(phases[3], 0)).isEqualTo(atlas.plane(phases[0], 0));
+        assertThat(atlas.raster(atlas.rasterEntry(g, 40, 10, 4))).as("no such phase: MTSDF").isFalse();
+        assertThat(atlas.raster(atlas.rasterEntry(g, -1, 10, 0))).isFalse();
+        assertThat(atlas.raster(atlas.rasterEntry(g, 0x1000000, 10, 0))).as("beyond a raster key's glyphs").isFalse();
+        assertThat(atlas.raster(atlas.rasterEntry(g, 40, 10, -1))).isFalse();
+        long v = settings.techniqueVersion();
+        settings.smallText().select("MTSDF");
+        assertThat(settings.techniqueVersion()).isGreaterThan(v);
+        assertThat(atlas.rasterFor(10, false)).isFalse();
+        settings.smallText().set(AtlasSettings.HINTED);
+        settings.hintedBelow().set(9);
+        assertThat(atlas.rasterFor(10, false)).isFalse();
+        assertThat(settings.all()).contains(settings.smallText(), settings.hintedBelow());
+
+        GlyphAtlas none = new GlyphAtlas(new UiTextures(), new JdkSdfGenerator(), null, null, new AtlasSettings());
+        assertThat(none.rasterFor(10, false)).as("no rasterizer: MTSDF").isFalse();
+        Fakes.Face f = face(1);
+        int e = none.rasterEntry(f, 40, 10, 0);
+        assertThat(e).isEqualTo(none.entry(f, 40));
+        assertThat(none.raster(e)).isFalse();
+        assertThat(atlas.raster(atlas.rasterEntry(f, 40, 0, 0))).as("no size: MTSDF").isFalse();
+        assertThatThrownBy(() -> atlas.entry(face(0x8000), 40)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> atlas.entry(face(-1), 40)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rasterJobsOnLaneThreadsMatchASynchronousAtlas() throws Exception {
+        UiTextures syncTextures = new UiTextures();
+        GlyphAtlas sync = rasterAtlas(syncTextures, null, null, new AtlasSettings());
+        UiTextures jobTextures = new UiTextures();
+        try (TaskScheduler scheduler = new TaskScheduler()) {
+            GlyphAtlas jobs = rasterAtlas(jobTextures, scheduler.lane(LaneSpec.platform("glyphs", 3)), null,
+                new AtlasSettings());
+            Fakes.Face f = face(1);
+            for (int g = 10; g < 70; g += 3) {
+                sync.entry(f, g);
+                jobs.entry(f, g);
+                sync.rasterEntry(f, g, 11, 0);
+                jobs.rasterEntry(f, g, 11, 0);
+            }
+            sync.beginFrame();
+            sync.finishAll();
+            jobs.beginFrame();
+            long deadline = System.nanoTime() + 20_000_000_000L;
+            while (jobs.pending() > 0 && System.nanoTime() < deadline) {
+                Thread.sleep(2);
+                jobs.beginFrame();
+            }
+            assertThat(jobs.pending()).isZero();
+            assertThat(jobs.state(jobs.rasterEntry(f, 13, 11, 0))).isEqualTo(GlyphAtlas.READY);
+            assertThat(jobTextures.get(jobs.page(0).id()).pixels())
+                .isEqualTo(syncTextures.get(sync.page(0).id()).pixels());
+            jobs.rasterEntry(f, 32, 9, 0); // a space: empty without a job
+            jobs.rasterEntry(f, 40, 9, 0);
+            jobs.finishAll();
+            assertThat(jobs.state(jobs.rasterEntry(f, 40, 9, 0))).isEqualTo(GlyphAtlas.READY);
+            assertThat(jobs.state(jobs.rasterEntry(f, 32, 9, 0))).isEqualTo(GlyphAtlas.EMPTY);
+        }
+    }
+
+    @Test
+    void anUnchangedFrameWithRasterGlyphsAllocatesNothing() {
+        GlyphAtlas atlas = rasterAtlas(new UiTextures(), null, null, new AtlasSettings());
+        Fakes.Face f = face(1);
+        int e = atlas.rasterEntry(f, 40, 10, 0);
+        atlas.beginFrame();
+        AllocationAssertions.assertAllocationFree(() -> {
+            atlas.beginFrame();
+            atlas.rasterEntry(f, 40, 10, 0);
+            atlas.state(e);
+        });
+    }
+
+    @Test
+    void aFailingOrInklessRasterizerLeavesTheGlyphEmptyAndTheCacheHoldsNoRaster() throws Exception {
+        GlyphRasterizer failing = (face, glyph, size, offset) -> {
+            if (glyph == 41) {
+                return null;
+            }
+            throw new IllegalStateException("broken");
+        };
+        GlyphCache cache = new GlyphCache(40, 6);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), new JdkSdfGenerator(), failing, null, cache,
+            new AtlasSettings());
+        Fakes.Face f = face(1);
+        int broken = atlas.rasterEntry(f, 40, 10, 0);
+        int inkless = atlas.rasterEntry(f, 41, 10, 0);
+        atlas.beginFrame();
+        assertThat(atlas.state(broken)).isEqualTo(GlyphAtlas.EMPTY);
+        assertThat(atlas.state(inkless)).isEqualTo(GlyphAtlas.EMPTY);
+        GlyphAtlas good = rasterAtlas(new UiTextures(), null, cache, new AtlasSettings());
+        int r = good.rasterEntry(f, 40, 10, 0);
+        good.beginFrame();
+        assertThat(good.state(r)).isEqualTo(GlyphAtlas.READY);
+        assertThat(cache.size()).as("raster glyphs are not cached").isZero();
     }
 }

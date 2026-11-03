@@ -17,6 +17,6 @@ public interface TextBackend {
     /** The MTSDF generator; thread-safe. */
     MsdfGenerator msdfGenerator();
 
-    /** A new rasterizer of hinted coverage glyphs for one thread. */
+    /** A rasterizer of hinted coverage glyphs; thread-safe. */
     GlyphRasterizer newRasterizer();
 }

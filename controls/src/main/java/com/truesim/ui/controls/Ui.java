@@ -97,7 +97,9 @@ public final class Ui {
     private int textSlotCount;
 
     private boolean rebuild = true;
+    private boolean worldSpace;
     private long seenCompletions = -1;
+    private long seenTechnique = -1;
     private int recorded; // elements recorded in the last update
     private long frames;
 
@@ -167,6 +169,7 @@ public final class Ui {
             blocks[slot] = new TextBlock(text);
             strings[slot] = new StringBuilder();
         }
+        blocks[slot].worldSpace(worldSpace);
         strings[slot].setLength(0);
         strings[slot].append(initial);
         drawnTextVersion[slot] = -1;
@@ -231,6 +234,28 @@ public final class Ui {
         rebuild = true;
     }
 
+    /**
+     * Marks this UI as a world-space panel (3D or VR: its text draws MTSDF at every size, sharp at any distance and
+     * angle) or a screen UI (the default: small text may draw hinted raster glyphs, {@code ui.text.smallText}). Changes
+     * no layout; the labels record again.
+     */
+    public void worldSpace(boolean on) {
+        if (on == worldSpace) {
+            return;
+        }
+        worldSpace = on;
+        for (int i = 0; i < textSlotCount; i++) {
+            int slot = textSlots[i];
+            blocks[slot].worldSpace(on);
+            store.markDirty(slot, UiStore.DIRTY_DRAW);
+        }
+    }
+
+    /** Whether this UI is a world-space panel. */
+    public boolean worldSpace() {
+        return worldSpace;
+    }
+
     /** Follows a development file watch: each update applies its last good sheet. */
     public void watch(StyleWatcher sheets) {
         this.watcher = sheets;
@@ -262,8 +287,10 @@ public final class Ui {
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
             atlas.beginFrame();
-            if (atlas.completions() != seenCompletions) {
+            long technique = atlas.settings().techniqueVersion();
+            if (atlas.completions() != seenCompletions || technique != seenTechnique) {
                 seenCompletions = atlas.completions();
+                seenTechnique = technique;
                 for (int i = 0; i < textSlotCount; i++) {
                     int slot = textSlots[i];
                     if (blocks[slot].version() != drawnTextVersion[slot]) {

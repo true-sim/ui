@@ -22,7 +22,9 @@ import com.truesim.ui.core.draw.UiTextures;
  *              with alpha = lerp(outlineColor.a * line, color.a, fill)   (outline 0: color with alpha color.a * fill)
  * </pre>
  * {@code pixelRange} is the atlas range in screen pixels: atlas pixel range × font size ÷ atlas em size, which
- * {@link TextBlock#record} writes. Colours are blended over the target in linear light.
+ * {@link TextBlock#record} writes. A raster glyph ({@link Primitive#FLAG_RASTER}, small text) is coverage instead:
+ * {@code alpha = color.a * s.a}, the quad on whole pixels sampling texel centres. Colours are blended over the target
+ * in linear light.
  */
 public final class SoftwareGlyphRenderer {
 
@@ -66,6 +68,7 @@ public final class SoftwareGlyphRenderer {
         float weight = list.floatAt(i, Primitive.WEIGHT);
         long color = list.colorAt(i, Primitive.COLOR_A);
         long outlineColor = list.colorAt(i, Primitive.COLOR_B);
+        boolean raster = (Primitive.flags(list.header(i)) & Primitive.FLAG_RASTER) != 0;
         float[] s = new float[4];
         int px0 = Math.max(0, (int) Math.floor(x0));
         int py0 = Math.max(0, (int) Math.floor(y0));
@@ -76,6 +79,11 @@ public final class SoftwareGlyphRenderer {
             for (int px = px0; px < px1; px++) {
                 float u = u0 + (px + 0.5f - x0) / (x1 - x0) * (u1 - u0);
                 sample(page, u, v, s);
+                if (raster) {
+                    blend(rgb, (py * width + px) * 3, Rgba.r(color), Rgba.g(color), Rgba.b(color),
+                        Rgba.a(color) * s[3]);
+                    continue;
+                }
                 float sd = median(s[0], s[1], s[2]);
                 float fill = saturate(range * (sd - 0.5f) + weight + 0.5f);
                 float r;
@@ -94,12 +102,15 @@ public final class SoftwareGlyphRenderer {
                     g = Rgba.g(color);
                     b = Rgba.b(color);
                 }
-                int o = (py * width + px) * 3;
-                rgb[o] = rgb[o] * (1 - a) + r * a;
-                rgb[o + 1] = rgb[o + 1] * (1 - a) + g * a;
-                rgb[o + 2] = rgb[o + 2] * (1 - a) + b * a;
+                blend(rgb, (py * width + px) * 3, r, g, b, a);
             }
         }
+    }
+
+    private static void blend(float[] rgb, int o, float r, float g, float b, float a) {
+        rgb[o] = rgb[o] * (1 - a) + r * a;
+        rgb[o + 1] = rgb[o + 1] * (1 - a) + g * a;
+        rgb[o + 2] = rgb[o + 2] * (1 - a) + b * a;
     }
 
     /** Bilinear sample of {@code page} at {@code (u, v)}, clamped to the edge, channels 0 to 1. */

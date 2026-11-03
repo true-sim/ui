@@ -26,6 +26,11 @@ import java.util.Objects;
  * Unchanged inputs cost a comparison. {@link #record} writes one {@link DrawList#glyph GLYPH} primitive per visible
  * glyph and allocates nothing.
  *
+ * <p><b>Small text</b> (UI16): {@link #record} draws hinted raster glyphs ({@link DrawList#rasterGlyph}, on whole
+ * pixels) instead of MTSDF when the atlas's settings ask for them at this size ({@link AtlasSettings#smallText()}),
+ * the block is not in world space ({@link #worldSpace(boolean)}) and it has no outline and no weight offset (effects
+ * only the distance field has). Which technique draws never changes the layout: positions come from shaping.
+ *
  * <p>Coordinates are pixels relative to the block's top left, y down; baselines are on whole pixels.
  */
 public final class TextBlock {
@@ -101,6 +106,11 @@ public final class TextBlock {
     private int versionEpoch; // the epoch version() last saw
     private int pending;
     private long seenCompletions = -1;
+    private boolean worldSpace;
+    private boolean entriesRaster; // whether glyphEntries are raster entries
+    private long seenTechnique; // the atlas settings' technique version version() last saw
+    private float lastOutline; // the outline and weight of the last record, for looking up glyphs on layout
+    private float lastWeight;
 
     /** An empty block of {@code system}'s text. */
     @AllowAllocation("one per text element, made when the element is")
@@ -359,7 +369,7 @@ public final class TextBlock {
                 charX1[i] += shift;
             }
         }
-        lookUpGlyphs();
+        lookUpGlyphs(raster(lastOutline, lastWeight));
     }
 
     /** Moves the lines to their alignment in the current box; true if any moved. */
@@ -385,14 +395,23 @@ public final class TextBlock {
         return moved;
     }
 
-    private void lookUpGlyphs() {
+    /** Whether glyphs drawn with {@code outlineWidth} and {@code weight} are hinted raster glyphs now. */
+    private boolean raster(float outlineWidth, float weight) {
+        GlyphAtlas atlas = system.atlas();
+        return atlas != null && outlineWidth == 0 && weight == 0 && atlas.rasterFor(size, worldSpace);
+    }
+
+    private void lookUpGlyphs(boolean raster) {
         GlyphAtlas atlas = system.atlas();
         if (atlas == null) {
             return;
         }
-        for (int g = 0; g < glyphCount; g++) {
-            glyphEntries[g] = atlas.entry(glyphFaces[g], glyphIds[g]);
+        if (!raster) { // raster entries depend on where the pen falls within a pixel: record finds them
+            for (int g = 0; g < glyphCount; g++) {
+                glyphEntries[g] = atlas.entry(glyphFaces[g], glyphIds[g]);
+            }
         }
+        entriesRaster = raster;
         atlasEpoch = atlas.epoch();
         versionEpoch = atlasEpoch;
         pending = glyphCount; // until recorded: the glyphs may still be generating
@@ -610,7 +629,9 @@ public final class TextBlock {
      * block's top left at {@code (x, y)} (y is rounded to a whole pixel, so baselines stay on pixel rows).
      * {@code color} and {@code outlineColor} are {@link com.truesim.ui.core.draw.Rgba} colours, {@code outlineWidth}
      * pixels of outline (0 for none), {@code weight} pixels the edge moves out (bolder) or in. A glyph still generating
-     * is recorded as a zero-sized quad, so the primitive count does not change when it arrives. Allocation-free.
+     * is recorded as a zero-sized quad, so the primitive count does not change when it arrives. Small text without
+     * outline and weight draws hinted raster glyphs where the atlas's settings say so, each on whole pixels.
+     * Allocation-free.
      */
     public void record(DrawList list, float x, float y, long color, float outlineWidth, long outlineColor,
         float weight) {
@@ -618,18 +639,37 @@ public final class TextBlock {
         if (atlas == null) {
             throw new IllegalStateException("this text system has no atlas: it measures only");
         }
-        if (atlasEpoch != atlas.epoch()) {
-            lookUpGlyphs();
+        boolean raster = raster(outlineWidth, weight);
+        lastOutline = outlineWidth;
+        lastWeight = weight;
+        if (atlasEpoch != atlas.epoch() || raster != entriesRaster) {
+            lookUpGlyphs(raster);
         }
         float top = (float) Math.floor(y + 0.5f);
         float range = atlas.pixelRange() * size / atlas.emSize();
         int waiting = 0;
         for (int g = 0; g < glyphCount; g++) {
-            int e = glyphEntries[g];
-            byte state = atlas.state(e);
             float px = x + glyphX[g];
             float py = top + glyphY[g];
-            if (state == GlyphAtlas.READY) {
+            int e;
+            float qx = 0;
+            if (raster) {
+                // the pen to a quarter pixel: a whole pixel and the phase the bitmap was rendered at
+                int quarters = (int) Math.floor(px * GlyphAtlas.RASTER_PHASES + 0.5f);
+                int whole = Math.floorDiv(quarters, GlyphAtlas.RASTER_PHASES);
+                qx = whole;
+                e = atlas.rasterEntry(glyphFaces[g], glyphIds[g], size, quarters - whole * GlyphAtlas.RASTER_PHASES);
+            } else {
+                e = glyphEntries[g];
+            }
+            byte state = atlas.state(e);
+            if (state == GlyphAtlas.READY && raster) {
+                // the bitmap's planes are whole pixels from the pen's whole pixel: texel for pixel
+                float qy = (float) Math.floor(py + 0.5f);
+                list.rasterGlyph(qx + atlas.plane(e, 0), qy - atlas.plane(e, 3), qx + atlas.plane(e, 2),
+                    qy - atlas.plane(e, 1), atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3),
+                    atlas.texture(e), color);
+            } else if (state == GlyphAtlas.READY) {
                 list.glyph(px + atlas.plane(e, 0) * size, py - atlas.plane(e, 3) * size,
                     px + atlas.plane(e, 2) * size, py - atlas.plane(e, 1) * size,
                     atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3), atlas.texture(e), range, color,
@@ -651,6 +691,11 @@ public final class TextBlock {
     public long version() {
         GlyphAtlas atlas = system.atlas();
         if (atlas != null) {
+            long technique = atlas.settings().techniqueVersion();
+            if (technique != seenTechnique) {
+                seenTechnique = technique;
+                version++; // raster or MTSDF may have changed: record again
+            }
             long completions = atlas.completions();
             if (atlas.epoch() != versionEpoch || pending > 0 && completions != seenCompletions) {
                 version++;
@@ -659,6 +704,32 @@ public final class TextBlock {
             }
         }
         return version;
+    }
+
+    /**
+     * Marks the block as drawn in world space (a 3D or VR panel: MTSDF at every size, sharp at any distance and
+     * angle) or on screen (the default: small text may draw hinted raster glyphs). Changes no layout.
+     */
+    public void worldSpace(boolean on) {
+        if (on != worldSpace) {
+            worldSpace = on;
+            version++;
+        }
+    }
+
+    /** The text system it belongs to. */
+    public TextSystem system() {
+        return system;
+    }
+
+    /** Whether the block is drawn in world space. */
+    public boolean worldSpace() {
+        return worldSpace;
+    }
+
+    /** Whether the last {@link #record} drew hinted raster glyphs. */
+    public boolean drewRaster() {
+        return entriesRaster;
     }
 
     // ---------------------------------------------------------------- measures

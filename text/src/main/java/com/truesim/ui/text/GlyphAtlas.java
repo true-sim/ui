@@ -11,7 +11,8 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * MTSDF glyphs on atlas pages ({@link UiTexture}s in {@link UiTexture.Format#RGBA8_UNORM}), generated on demand.
+ * MTSDF glyphs, and hinted raster glyphs for small text, on atlas pages ({@link UiTexture}s in
+ * {@link UiTexture.Format#RGBA8_UNORM}), generated on demand.
  *
  * <p><b>Flow.</b> {@link #entry} finds a glyph or queues it (allocation-free when known). Once per frame, at its start,
  * {@link #beginFrame()} hands over glyphs that finished generating (copies them into their page and marks the region
@@ -24,7 +25,16 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * {@link MsdfGenerator} and {@link MsdfGeometry}, so the same glyph requests give byte-identical pages whichever thread
  * finished first, and whether the glyphs came from a {@link GlyphCache} baked at build time or were generated now.
  *
- * <p>Used from the UI thread; only the generator runs elsewhere.
+ * <p><b>Raster glyphs</b> (UI16, {@link AtlasSettings#smallText()}): {@link #rasterEntry} keys a glyph by face, glyph,
+ * pixel size (in 1/64 pixel, FreeType's 26.6) and horizontal phase: the pen's position within its pixel in
+ * {@link #RASTER_PHASES}ths, so a glyph drawn on whole pixels still sits where shaping put it (to a quarter pixel) and
+ * spacing stays even. Its place is reserved from the outline's bounds at that size and phase, rounded out to whole
+ * pixels plus {@link #RASTER_PAD} pixels each side for hinting's moves, so places stay in request order; the job
+ * renders the {@link GlyphRasterizer}'s coverage into that box (all four channels: a texel's alpha is the coverage).
+ * They share the pages, the lane, the per-frame budget and the placeholder rule with MTSDF glyphs, and
+ * are not put in the {@link GlyphCache} (FreeType renders one in microseconds).
+ *
+ * <p>Used from the UI thread; only the generator and rasterizer run elsewhere.
  */
 public final class GlyphAtlas {
 
@@ -37,10 +47,19 @@ public final class GlyphAtlas {
     /** Nothing to draw: no ink (a space), or it failed. */
     public static final byte EMPTY = 4;
 
+    /** Pixels added on each side of a raster glyph's outline bounds: hinting moves edges by less than this. */
+    public static final int RASTER_PAD = 2;
+    /** Horizontal positions per pixel a raster glyph is rendered at (subpixel positioning). */
+    public static final int RASTER_PHASES = 4;
+
     private static final int GUTTER = 1; // texels between glyphs, against filtering across neighbours
+    private static final int MAX_FACE = 0x7FFF;
+    private static final int MAX_SIZE_64 = 0xFFFF;
+    private static final int MAX_RASTER_GLYPH = 0xFFFFFF; // a raster key keeps the phase above the glyph
 
     private final UiTextures textures;
     private final MsdfGenerator generator;
+    private final GlyphRasterizer rasterizer;
     private final Lane lane;
     private final GlyphCache cache;
     private final AtlasSettings settings;
@@ -61,8 +80,10 @@ public final class GlyphAtlas {
     private int[] pageIds = new int[256];
     private int[] slotX = new int[256];
     private int[] slotY = new int[256];
+    private int[] widths = new int[256];
+    private int[] heights = new int[256];
     private MsdfGeometry[] geometries = new MsdfGeometry[256];
-    private float[] planes = new float[256 * 4]; // left, bottom, right, top in ems
+    private float[] planes = new float[256 * 4]; // left, bottom, right, top in ems (raster: pixels)
     private float[] uvs = new float[256 * 4];
 
     private int[] queue = new int[256];
@@ -88,8 +109,19 @@ public final class GlyphAtlas {
     @AllowAllocation("made once per UI")
     public GlyphAtlas(UiTextures textures, MsdfGenerator generator, Lane lane, GlyphCache cache,
         AtlasSettings settings) {
+        this(textures, generator, null, lane, cache, settings);
+    }
+
+    /**
+     * As {@link #GlyphAtlas(UiTextures, MsdfGenerator, Lane, GlyphCache, AtlasSettings)}, with hinted raster glyphs
+     * for small text from {@code rasterizer} (thread-safe; null: MTSDF at every size).
+     */
+    @AllowAllocation("made once per UI")
+    public GlyphAtlas(UiTextures textures, MsdfGenerator generator, GlyphRasterizer rasterizer, Lane lane,
+        GlyphCache cache, AtlasSettings settings) {
         this.textures = Objects.requireNonNull(textures, "textures");
         this.generator = Objects.requireNonNull(generator, "generator");
+        this.rasterizer = rasterizer;
         this.lane = lane;
         this.cache = cache;
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -130,7 +162,33 @@ public final class GlyphAtlas {
      * atlas starts over ({@link #epoch()} grows).
      */
     public int entry(FontFace face, int glyph) {
-        long key = (long) face.id() << 32 | glyph & 0xFFFFFFFFL;
+        return entry(face, glyph, 0);
+    }
+
+    /**
+     * The entry of glyph {@code glyph} of {@code face} as hinted coverage at {@code sizePx} pixels per em (rounded to
+     * 1/64 pixel), its pen {@code phase} {@link #RASTER_PHASES}ths of a pixel right of a whole pixel (0 to 3): known,
+     * or queued. Without a rasterizer, the MTSDF entry.
+     */
+    public int rasterEntry(FontFace face, int glyph, float sizePx, int phase) {
+        int size64 = (int) (sizePx * 64 + 0.5f);
+        if (rasterizer == null || size64 <= 0 || size64 > MAX_SIZE_64 || glyph < 0 || glyph > MAX_RASTER_GLYPH
+            || phase < 0 || phase >= RASTER_PHASES) {
+            return entry(face, glyph, 0);
+        }
+        return entry(face, phase << 24 | glyph, size64);
+    }
+
+    /** Whether text of {@code sizePx} pixels per em, in world space or not, draws raster glyphs here. */
+    public boolean rasterFor(float sizePx, boolean worldSpace) {
+        return rasterizer != null && settings.hinted(sizePx, worldSpace);
+    }
+
+    private int entry(FontFace face, int glyph, int size64) {
+        if (face.id() > MAX_FACE || face.id() < 0) {
+            throw new IllegalArgumentException("face id " + face.id() + " is out of the atlas key's range");
+        }
+        long key = (long) face.id() << 48 | (long) size64 << 32 | glyph & 0xFFFFFFFFL;
         int e = index.get(key);
         if (e >= 0) {
             return e;
@@ -165,6 +223,8 @@ public final class GlyphAtlas {
         pageIds = Arrays.copyOf(pageIds, n);
         slotX = Arrays.copyOf(slotX, n);
         slotY = Arrays.copyOf(slotY, n);
+        widths = Arrays.copyOf(widths, n);
+        heights = Arrays.copyOf(heights, n);
         geometries = Arrays.copyOf(geometries, n);
         planes = Arrays.copyOf(planes, n * 4);
         uvs = Arrays.copyOf(uvs, n * 4);
@@ -249,6 +309,16 @@ public final class GlyphAtlas {
     }
 
     private void start(int e) {
+        if (isRaster(e)) {
+            if (prepareRaster(e)) {
+                if (lane == null) {
+                    install(e, rasterNow(e));
+                } else {
+                    submitRaster(e);
+                }
+            }
+            return;
+        }
         MsdfGeometry g = prepare(e);
         if (g == null) {
             return;
@@ -261,6 +331,12 @@ public final class GlyphAtlas {
     }
 
     private void startNow(int e) {
+        if (isRaster(e)) {
+            if (prepareRaster(e)) {
+                install(e, rasterNow(e));
+            }
+            return;
+        }
         MsdfGeometry g = prepare(e);
         if (g != null) {
             install(e, generate(outline, g));
@@ -298,6 +374,110 @@ public final class GlyphAtlas {
         return g;
     }
 
+    /** Reserves a raster glyph's box from its outline's bounds at its size; false if it is done already (empty). */
+    private boolean prepareRaster(int e) {
+        FontFace face = faces[e];
+        if (!face.outline(rasterGlyph(e), outline) || outline.isEmpty()) {
+            markEmpty(e);
+            return false;
+        }
+        outline.bounds(bounds);
+        float size = size64(e) / 64f;
+        float shift = offset(e);
+        int left = (int) Math.floor(bounds[0] * size + shift) - RASTER_PAD;
+        int bottom = (int) Math.floor(bounds[1] * size) - RASTER_PAD;
+        int right = (int) Math.ceil(bounds[2] * size + shift) + RASTER_PAD;
+        int top = (int) Math.ceil(bounds[3] * size) + RASTER_PAD;
+        if (!reserve(e, right - left, top - bottom)) {
+            return false;
+        }
+        geometries[e] = null;
+        int o = e * 4;
+        planes[o] = left;
+        planes[o + 1] = bottom;
+        planes[o + 2] = right;
+        planes[o + 3] = top;
+        states[e] = GENERATING;
+        return true;
+    }
+
+    private boolean isRaster(int e) {
+        return (keys[e] >>> 32 & MAX_SIZE_64) != 0;
+    }
+
+    private int size64(int e) {
+        return (int) (keys[e] >>> 32 & MAX_SIZE_64);
+    }
+
+    private int rasterGlyph(int e) {
+        return (int) keys[e] & MAX_RASTER_GLYPH;
+    }
+
+    /** A raster entry's pen offset right of its whole pixel, pixels. */
+    private float offset(int e) {
+        return ((int) keys[e] >>> 24) / (float) RASTER_PHASES;
+    }
+
+    /** Entry {@code e}'s coverage now, on this thread. */
+    private byte[] rasterNow(int e) {
+        int o = e * 4;
+        return raster(faces[e], rasterGlyph(e), size64(e), offset(e), (int) planes[o], (int) planes[o + 3],
+            widths[e], heights[e]);
+    }
+
+    /**
+     * A raster glyph's coverage as RGBA texels of its {@code w x h} box, whose top left is {@code left} pixels right
+     * of the pen and {@code top} above the baseline: the rasterizer's bitmap placed by its offset, clipped to the box;
+     * null if the glyph has no ink or rasterizing failed. Runs on a job's thread: reads only its arguments.
+     */
+    @AllowAllocation("a bitmap per new raster glyph")
+    private byte[] raster(FontFace face, int glyph, int size64, float shift, int left, int top, int w, int h) {
+        GlyphRasterizer.Coverage c;
+        try {
+            c = rasterizer.rasterize(face, glyph, size64 / 64f, shift);
+        } catch (RuntimeException ex) {
+            return null; // a broken glyph draws nothing rather than stopping the UI
+        }
+        if (c == null) {
+            return null;
+        }
+        byte[] out = new byte[w * h * 4];
+        for (int y = 0; y < c.height(); y++) {
+            int row = top - c.top() + y;
+            if (row < 0 || row >= h) {
+                continue;
+            }
+            for (int x = 0; x < c.width(); x++) {
+                int col = c.left() - left + x;
+                if (col >= 0 && col < w) {
+                    byte v = c.pixels()[y * c.width() + x];
+                    int t = (row * w + col) * 4;
+                    out[t] = v;
+                    out[t + 1] = v;
+                    out[t + 2] = v;
+                    out[t + 3] = v;
+                }
+            }
+        }
+        return out;
+    }
+
+    @AllowAllocation("one job per new glyph")
+    private void submitRaster(int e) {
+        int jobEpoch = epoch;
+        FontFace face = faces[e];
+        int glyph = rasterGlyph(e);
+        int size64 = size64(e);
+        float shift = offset(e);
+        int o = e * 4;
+        int left = (int) planes[o];
+        int top = (int) planes[o + 3];
+        int w = widths[e];
+        int h = heights[e];
+        generating++;
+        lane.execute(() -> done.add(new Done(e, jobEpoch, raster(face, glyph, size64, shift, left, top, w, h))));
+    }
+
     private void markEmpty(int e) {
         states[e] = EMPTY;
         completions++;
@@ -319,8 +499,22 @@ public final class GlyphAtlas {
     }
 
     private boolean reserve(int e, MsdfGeometry g) {
-        int w = g.width() + GUTTER;
-        int h = g.height() + GUTTER;
+        if (!reserve(e, g.width(), g.height())) {
+            return false;
+        }
+        geometries[e] = g;
+        int o = e * 4;
+        planes[o] = g.planeLeft();
+        planes[o + 1] = g.planeBottom();
+        planes[o + 2] = g.planeRight();
+        planes[o + 3] = g.planeTop();
+        return true;
+    }
+
+    /** Reserves a {@code width x height} texel place for entry {@code e}; false (and empty) if no page holds it. */
+    private boolean reserve(int e, int width, int height) {
+        int w = width + GUTTER;
+        int h = height + GUTTER;
         if (w > pageSize || h > pageSize) {
             markEmpty(e); // larger than a page: the em size is too large for the page size
             return false;
@@ -333,17 +527,14 @@ public final class GlyphAtlas {
         pageIds[e] = page.id();
         slotX[e] = packer.x();
         slotY[e] = packer.y();
-        geometries[e] = g;
+        widths[e] = width;
+        heights[e] = height;
         int o = e * 4;
-        planes[o] = g.planeLeft();
-        planes[o + 1] = g.planeBottom();
-        planes[o + 2] = g.planeRight();
-        planes[o + 3] = g.planeTop();
         float inv = 1f / pageSize;
         uvs[o] = slotX[e] * inv;
         uvs[o + 1] = slotY[e] * inv;
-        uvs[o + 2] = (slotX[e] + g.width()) * inv;
-        uvs[o + 3] = (slotY[e] + g.height()) * inv;
+        uvs[o + 2] = (slotX[e] + width) * inv;
+        uvs[o + 3] = (slotY[e] + height) * inv;
         return true;
     }
 
@@ -353,20 +544,19 @@ public final class GlyphAtlas {
             return;
         }
         copy(e, pixels);
-        if (cache != null && cache.matches(emSize, pixelRange)) {
+        if (cache != null && geometries[e] != null && cache.matches(emSize, pixelRange)) {
             cache.put(faces[e].source().key(), (int) keys[e], geometries[e], pixels);
         }
     }
 
     private void copy(int e, byte[] pixels) {
-        MsdfGeometry g = geometries[e];
         UiTexture page = textures.get(pageIds[e]);
         byte[] dst = page.pixels();
-        int row = g.width() * 4;
-        for (int y = 0; y < g.height(); y++) {
+        int row = widths[e] * 4;
+        for (int y = 0; y < heights[e]; y++) {
             System.arraycopy(pixels, y * row, dst, ((slotY[e] + y) * pageSize + slotX[e]) * 4, row);
         }
-        page.markDirty(slotX[e], slotY[e], g.width(), g.height());
+        page.markDirty(slotX[e], slotY[e], widths[e], heights[e]);
         states[e] = READY;
         completions++;
     }
@@ -381,7 +571,20 @@ public final class GlyphAtlas {
         return pageIds[e];
     }
 
-    /** Entry {@code e}'s bitmap edges in ems from the pen position, y up: 0 left, 1 bottom, 2 right, 3 top. */
+    /** Whether entry {@code e} is a hinted raster glyph (its {@link #plane}s are whole pixels). */
+    public boolean raster(int e) {
+        return isRaster(e);
+    }
+
+    /** The raster glyphs' rasterizer, or null. */
+    public GlyphRasterizer rasterizer() {
+        return rasterizer;
+    }
+
+    /**
+     * Entry {@code e}'s bitmap edges from the pen position, y up: 0 left, 1 bottom, 2 right, 3 top; in ems for an
+     * MTSDF glyph, in whole pixels for a {@link #raster} one.
+     */
     public float plane(int e, int edge) {
         return planes[e * 4 + edge];
     }

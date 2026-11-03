@@ -1,16 +1,24 @@
 package com.truesim.ui.text;
 
 /**
- * Renders a glyph at one pixel size into 8-bit coverage, hinted where the backend can (FreeType): the alternative to
- * MTSDF for small text that the open decision UI16 weighs. Used from one thread at a time.
+ * Renders a glyph at one pixel size into 8-bit coverage, hinted where the backend can (FreeType): the glyph atlas's
+ * small text (UI16, {@link AtlasSettings#smallText()}). Thread-safe: the atlas calls it from its jobs.
  */
 public interface GlyphRasterizer {
 
     /**
-     * Glyph {@code glyph} of {@code face} at {@code sizePx} pixels per em: coverage, one byte per pixel, rows top to
-     * bottom, with the bitmap's offset from the pen position. Null if the glyph has no ink.
+     * Glyph {@code glyph} of {@code face} at {@code sizePx} pixels per em (to 1/64 pixel): coverage, one byte per
+     * pixel, rows top to bottom, with the bitmap's offset from the pen position. Null if the glyph has no ink.
      */
-    Coverage rasterize(FontFace face, int glyph, int sizePx);
+    default Coverage rasterize(FontFace face, int glyph, float sizePx) {
+        return rasterize(face, glyph, sizePx, 0);
+    }
+
+    /**
+     * As {@link #rasterize(FontFace, int, float)}, the glyph moved {@code offsetX} pixels right (0 to 1) before it is
+     * rendered: subpixel positioning; the bitmap's offset stays in whole pixels from the unmoved pen.
+     */
+    Coverage rasterize(FontFace face, int glyph, float sizePx, float offsetX);
 
     /**
      * A coverage bitmap.
