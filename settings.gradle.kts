@@ -31,6 +31,8 @@ project(":ui-fonts").projectDir = file("fonts")
 project(":ui-fonts-cjk").projectDir = file("fonts-cjk")
 project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
+include("ui-fonts-emoji") // colour emoji, optional for its size
+project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {

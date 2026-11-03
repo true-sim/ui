@@ -87,8 +87,8 @@ public final class BundledFonts {
     @AllowAllocation("fonts are registered at start-up")
     public static void lastResort(FontRegistry registry) {
         List<String> chain = new ArrayList<>(SANS);
-        chain.addAll(List.of("Noto Sans SC", "Noto Sans JP", "Microsoft YaHei", "Segoe UI Emoji", "Noto Emoji",
-            "Segoe UI Symbol"));
+        chain.addAll(List.of("Noto Sans SC", "Noto Sans JP", "Microsoft YaHei", "Noto Color Emoji", "Segoe UI Emoji",
+            "Noto Emoji", "Segoe UI Symbol"));
         registry.lastResort(chain.toArray(new String[0]));
     }
 

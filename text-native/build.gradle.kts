@@ -18,6 +18,7 @@ dependencies {
     // stb_rect_pack only competes with our skyline packer in the benchmark; ours won, so stb stays out of main
     testImplementation("org.lwjgl:lwjgl-stb")
     testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the same goldens on every machine
+    testImplementation(project(":ui-fonts-emoji")) // colour bitmaps (CBDT) through FreeType
     for (natives in lwjglNatives) {
         runtimeOnly("org.lwjgl:lwjgl::$natives")
         runtimeOnly("org.lwjgl:lwjgl-freetype::$natives")
