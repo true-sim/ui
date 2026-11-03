@@ -1,4 +1,4 @@
-# UI toolkit: research and design (draft)
+# UI toolkit: design and build status
 
 A UI toolkit for true-sim: HUDs, menus, settings screens, in-world and VR panels, editor tools, charts, 3D gizmos, a
 developer console and generated inspectors. It keeps what makes jMonkeyEngine's Lemur pleasant (versioned data, value
@@ -6,7 +6,7 @@ renderers, component stacks, styles by element id and style name, one event mode
 it slow or dated (scene-graph node per element, per-event allocation, throttled picking, no virtualization beyond the
 visible window, Groovy styles, bitmap fonts, no state selectors).
 
-Nothing here is built. Decisions are numbered UI1 to UI31 (section 9); sections 4 to 7 are written for the recommended
+Group A1 (stages 0 to 3) is built, with the parts left listed in "Build status" at the end; later groups are not. Decisions are numbered UI1 to UI31 (section 9); sections 4 to 7 are written for the recommended
 options and say where an option changes them. Research for this draft: Lemur's source (cited per file), the public
 documentation of the toolkits in section 3, and a reading of the true-sim repositories: engine `CLAUDE.md`,
 `docs/application-api.md` (§1 to §7), `docs/frame-graph-v2.md` (§4.8), `docs/pitfalls.md` (headings), engine
@@ -1411,7 +1411,7 @@ PRs:
   `ui-text-native`, `ui-testkit`;
 - `engine`: `engine-input`, `engine-ui`, the presenter's UI composition hook, the IME rectangle in `engine-platform`.
 
-**Stage 0: input actions** (engine `engine-input`, `engine-ui/UiActions`)
+**Stage 0: input actions** (engine `engine-input`, `engine-ui/UiActions`) — **Built** (engine-input, PR 386; `UiActions` and the `UiCommand` mapping in engine-ui)
 - Scope:
   - the subset of D55 to D87: actions, groups with switches, bindings as settings, contexts with text capture,
     players, repeat and threshold filters, tap-and-hold, chords;
@@ -1423,7 +1423,7 @@ PRs:
 - Done: a test application rebinds `ui.navigation.accept` through settings; text capture blocks game actions; a game
   switches `ui.gizmo` off in one call.
 
-**Stage 1: rendering core and text** (ui: draw-list format, `ui-text`, `ui-text-native`; engine: `engine-ui`
+**Stage 1: rendering core and text** — **Built** (see Build status) (ui: draw-list format, `ui-text`, `ui-text-native`; engine: `engine-ui`
 renderer)
 - Scope:
   - primitives: SDF box (four radii, border, shadow, gradients), nine-slice, image, line, arc;
@@ -1446,7 +1446,7 @@ renderer)
   - HDR white measures at `display.paperWhite`;
   - the build-time and run-time atlases are byte-identical for the same glyphs.
 
-**Stage 2: elements, layout, Java styles, binding, value renderers, animation** (ui: `ui-core`, `ui-layout`,
+**Stage 2: elements, layout, Java styles, binding, value renderers, animation** — **Partly built** (see Build status) (ui: `ui-core`, `ui-layout`,
 `ui-style` Java side; common-state)
 - Scope:
   - `UiStore` and `Element` facades;
@@ -1468,7 +1468,7 @@ renderer)
   - effect channel replacement and reversal.
 - Done: the HUD rebuilt from elements meets the CPU targets (0.05 ms idle, 0.3 ms with 10% changing).
 
-**Stage 3: the `.tss` language and the default theme** (ui: `ui-style`)
+**Stage 3: the `.tss` language and the default theme** — **Built** (see Build status) (ui: `ui-style`)
 - Scope:
   - lexer, parser and evaluator: variables, maps, nesting with `&`, mixins with arguments, `@use` partials, `@extend`
     and placeholders, `@if` and `@each`, functions, unit arithmetic, colour functions;
@@ -1696,3 +1696,55 @@ PRs:
 - **Open:** UI16 small text (MTSDF only vs hinted raster below a size), after stage 1's visual check.
 - **Rules that apply throughout:** no external libraries beyond the JDK, true-sim's repositories and LWJGL's bindings;
   tunables are settings; only correct techniques are kept; never add latency; nothing allocated per frame.
+
+## Build status
+
+### Group A1 (2026-11-03): built, local branches, not yet in CI
+
+Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text-native`, `ui-controls`,
+`ui-testkit`) and the engine branch `ui-a1` (`engine-ui`, the composition hook in `engine-render`). `ui-controls` was
+started in A1 because the frame that resolves styles, lays out, shapes and records needs all four modules below it.
+
+| Stage | Status | Where |
+|---|---|---|
+| 0 input actions | Built: the action system (engine PR 386); `UiActions` with keyboard/mouse and gamepad defaults (section 10), `UiCommands` (edges and repeats as `UiCommand`s, `ui.confirmButton` per UI29, text capture), `MousePointer` | engine `input`, `ui` |
+| 1 rendering core and text | Built: draw list (`DrawList`, `Primitive`: box, shadow, glyph, image, nine-slice, line), dirty-word tracking, `GpuUiRenderer` (vertex pulling, bindless textures, clip table, dirty-range uploads), `Keys.UI` composited after the tone curve at paper white; FreeType, HarfBuzz, BiDi, itemisation, line breaking, msdfgen MTSDF atlases on job threads and the build-time baker (byte-identical) | `ui-core`, `ui-text`, `ui-text-native`, engine `ui`, `render` |
+| 2 elements, layout, Java styles | Built: `UiStore`/`Element`, layouts (stack, flex, grid, border, anchors, overlay; Yoga as the oracle), `StyleKey`/`StyleSheet` Java builders, selectors with states and facts, the resolution cache, the semantics tree, the frame (`Ui`). Not built: binding, lenses, converters, validators, the `ValueRenderer` registry, tweens, effect channels and transitions (parsed and resolved, not animated) | `ui-core`, `ui-layout`, `ui-style`, `ui-controls` |
+| 3 `.tss` and the default theme | Built: the language (variables, maps, nesting, mixins, `@use` partials, extend, `@if`/`@each`, functions, unit maths, colour functions), errors with file/line/column/rule/trace, live tokens and token sets, hot reload through a file watch, `default-theme.tss` and `test-theme.tss` | `ui-style` |
+
+**Decisions settled by benchmark** (standing rule: one clear winner stays):
+- UI14 layout: our own layout, 7 to 16 times faster than Yoga in every case (500-element HUD, 10% changing: 48 µs
+  against 425 µs; full relayout 112 against 810 µs). Yoga stays a test oracle; no Yoga-backed flex.
+- UI15 batching: an adaptive uber pipeline (one draw per layer; runs of 256+ primitives of one kind use that kind's
+  shader) is the default; HUD 0.10 ms against 0.16 ms per kind. `UBER` and `PER_KIND` stay for benchmarks only.
+- Atlas packing: our own skyline (0.20 µs per rectangle) against stb_rect_pack (0.22 µs), same page count; ours stays.
+- Style resolution: indexed and cached against a linear scan (19 ms per reload of 2,000 rules); the cache stays.
+
+**Section 11 targets, measured** (Ryzen 9 9950X3D, RX 9070 XT, without JaCoCo):
+
+| Target | Budget | Measured |
+|---|---|---|
+| HUD (506 elements, 4,896 glyphs) unchanged, CPU | ≤ 0.05 ms | 0.0001 ms p99 (`HudBenchmarkTest`) |
+| HUD with 10% changing (50 counters a frame), CPU | ≤ 0.3 ms | 0.11 ms median, 0.18 ms p99 |
+| HUD (500 elements, 5,000 glyphs) at 4K, GPU | ≤ 0.15 ms | 0.10 ms (`UiBenchmark`) |
+| 100,000 glyphs, GPU | ≤ 0.4 ms | 0.29 ms alone; 0.44 ms over a full-screen translucent backdrop (above) |
+| Reload of a 2,000-rule sheet, re-resolved | ≤ 5 ms once | 3.0 to 4.8 ms median (`ReloadBenchmarkTest`) |
+| Reshape of a 200-character label | ≤ 50 µs | 9.6 µs Latin, 28 µs mixed Latin, Arabic and CJK with BiDi |
+| Unchanged frame upload | 0 bytes | 0 bytes; a changed counter a few hundred bytes |
+| Steady-state allocation | 0 bytes | 0 (allocation tests: idle and 10% changing frames, layout, recording, input mapping) |
+
+**Left from A1:**
+- The `Ui` engine plugin (key, settings registration, frame-start wiring); the demo wires the pieces in a test.
+- Stage 2's binding, lenses, converters, validators, value renderers, tweens, effect channels and style transitions;
+  `scale` from styles is resolved but not drawn (no per-element transforms yet).
+- `common-state`'s `VersionedTree` and `VersionedRingBuffer` (needed by tree views and charts, groups B and C).
+- SVG icons through NanoSVG; colour emoji (COLR draws as a silhouette); atlas page eviction.
+- The IME rectangle in `engine-platform`; touch, pen and XR pointer sources.
+- 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
+- A multi-range dirty list: one range per list spans all changed elements of a frame.
+- Shaping goldens are pinned to Windows 11 fonts and skip elsewhere; Linux CI needs goldens of its own fonts. No font
+  ships with the toolkit (a font to ship is the user's choice).
+- **UI16 (open):** at 10 to 12 px MTSDF text is softer and lighter than FreeType's hinted raster; at 14 px acceptable;
+  32 px and up crisp. Screenshots: `ui16-small-mtsdf-vs-hinted.png` (ui-text-native's screenshot test). A hinted
+  raster path below about 13 px looks worthwhile; the user decides.
+- Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
