@@ -179,6 +179,7 @@ class ContainersTest {
             hidden += t.overflowing(i) ? 1 : 0;
         }
         assertThat(hidden).isPositive();
+        assertThat(com.truesim.ui.testkit.LayoutSanity.check(f.ui)).isEmpty();
         f.click(t.tab(0).button().element()); // hidden: not picked
         assertThat(t.selected()).isEqualTo(8);
         f.click(t.overflowButton().element());
