@@ -21,3 +21,11 @@ tasks.test {
         extensions.configure<JacocoTaskExtension> { isEnabled = false }
     }
 }
+
+// Allocation tests must not depend on what the JIT happens to scalar-replace: FontRegistry.chain's lookup key (24 bytes
+// a reshape) allocated on Linux CI and was removed by escape analysis on Windows (true-sim/ui CI run 41706850516), and
+// LWJGL's HarfBuzz calls allocate a segment each unless inlined. Without escape analysis such allocations show on
+// every machine.
+tasks.withType<Test>().configureEach {
+    jvmArgs("-XX:-DoEscapeAnalysis")
+}

@@ -46,8 +46,31 @@ public final class FontRegistry {
         }
     }
 
-    private record ChainKey(List<String> families, int weight, boolean italic) {
+    /** A chain's arguments; one probe is reused for lookups, so a hit allocates nothing whatever the JIT inlines. */
+    private static final class ChainKey {
+        List<String> families;
+        int weight;
+        boolean italic;
+
+        ChainKey set(List<String> newFamilies, int newWeight, boolean newItalic) {
+            families = newFamilies;
+            weight = newWeight;
+            italic = newItalic;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof ChainKey k && weight == k.weight && italic == k.italic && families.equals(k.families);
+        }
+
+        @Override
+        public int hashCode() {
+            return (families.hashCode() * 31 + weight) * 2 + (italic ? 1 : 0);
+        }
     }
+
+    private final ChainKey probe = new ChainKey();
 
     /** An empty registry whose faces {@code backend} opens. */
     public FontRegistry(TextBackend backend) {
@@ -186,15 +209,14 @@ public final class FontRegistry {
      * changes. {@code families} is kept, so pass an immutable list.
      */
     public FontChain chain(List<String> families, int weight, boolean italic) {
-        ChainKey key = new ChainKey(families, weight, italic);
-        FontChain chain = chains.get(key);
+        FontChain chain = chains.get(probe.set(families, weight, italic));
         if (chain == null) {
             List<FontFace> faces = new ArrayList<>();
             for (String family : families) {
                 addMatch(faces, family, weight, italic);
             }
             chain = new FontChain(this, faces.toArray(new FontFace[0]), weight, italic);
-            chains.put(key, chain);
+            chains.put(new ChainKey().set(families, weight, italic), chain);
         }
         return chain;
     }

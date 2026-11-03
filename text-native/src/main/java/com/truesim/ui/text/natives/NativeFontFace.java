@@ -131,12 +131,12 @@ public final class NativeFontFace implements FontFace, AutoCloseable {
     /** Coverage from the UI thread (the scratch word is not shared with other threads). */
     @Override
     public boolean covers(int codepoint) {
-        return nhb_font_get_nominal_glyph(hbFont, codepoint, scratch) != 0;
+        return HarfBuzzCalls.nominalGlyph(hbFont, codepoint, scratch) != 0;
     }
 
     /** The nominal glyph of {@code codepoint} (before shaping), or 0; from the UI thread. */
     public int glyph(int codepoint) {
-        return nhb_font_get_nominal_glyph(hbFont, codepoint, scratch) != 0 ? MemoryUtil.memGetInt(scratch) : 0;
+        return HarfBuzzCalls.nominalGlyph(hbFont, codepoint, scratch) != 0 ? MemoryUtil.memGetInt(scratch) : 0;
     }
 
     /**

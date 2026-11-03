@@ -79,18 +79,19 @@ public final class HarfBuzzShaper implements TextShaper, AutoCloseable {
         for (int i = from; i < to; i++) {
             MemoryUtil.memPutShort(text + 2L * (i - from), (short) chars[i]);
         }
-        hb_buffer_clear_contents(buffer);
-        nhb_buffer_add_utf16(buffer, text, to - from, start - from, end - start);
-        hb_buffer_set_direction(buffer, rightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+        // through HarfBuzzCalls: LWJGL's own calls allocate unless the JIT inlines them
+        HarfBuzzCalls.clearContents(buffer);
+        HarfBuzzCalls.addUtf16(buffer, text, to - from, start - from, end - start);
+        HarfBuzzCalls.setDirection(buffer, rightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         if (language != null) {
-            hb_buffer_set_language(buffer, language(language));
+            HarfBuzzCalls.setLanguage(buffer, language(language));
         }
-        hb_buffer_guess_segment_properties(buffer); // the script, from the run's characters
-        nhb_shape(f.hbFont(), buffer, features == null ? 0 : features.address(),
+        HarfBuzzCalls.guessSegmentProperties(buffer); // the script, from the run's characters
+        HarfBuzzCalls.shape(f.hbFont(), buffer, features == null ? 0 : features.address(),
             features == null ? 0 : features.remaining());
-        int n = hb_buffer_get_length(buffer);
-        long infos = nhb_buffer_get_glyph_infos(buffer, 0);
-        long positions = nhb_buffer_get_glyph_positions(buffer, 0);
+        int n = HarfBuzzCalls.length(buffer);
+        long infos = HarfBuzzCalls.glyphInfos(buffer);
+        long positions = HarfBuzzCalls.glyphPositions(buffer);
         float scale = sizePx / f.unitsPerEm();
         for (int i = 0; i < n; i++) {
             long info = infos + (long) i * hb_glyph_info_t.SIZEOF;

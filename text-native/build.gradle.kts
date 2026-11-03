@@ -79,3 +79,8 @@ tasks.test {
         extensions.configure<JacocoTaskExtension> { isEnabled = false } // measure the code, not its coverage probes
     }
 }
+
+// Allocation tests without escape analysis: what the JIT scalar-replaces differs between machines (see ui-controls).
+tasks.withType<Test>().configureEach {
+    jvmArgs("-XX:-DoEscapeAnalysis")
+}
