@@ -47,6 +47,7 @@ import com.truesim.ui.text.TextSystem;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.LongConsumer;
 
 /**
  * One retained UI: its elements, style resolution, layout, text and drawing, updated once a frame. The frame does
@@ -85,6 +86,7 @@ public final class Ui {
     private static final int NONE = 0;
     private static final int TEXT = 1;
     private static final int IMAGE = 2;
+    private static final int PAINTED = 3;
 
     private static final com.truesim.ui.layout.LayoutKind[] KINDS = com.truesim.ui.layout.LayoutKind.values();
     private static final com.truesim.ui.layout.Direction[] DIRECTIONS = com.truesim.ui.layout.Direction.values();
@@ -110,6 +112,10 @@ public final class Ui {
 
     // per slot
     private int[] content = new int[0];
+    private Painter[] painters = new Painter[0];
+    private boolean[] parts = new boolean[0];
+    private LongConsumer[] frameListeners = new LongConsumer[0];
+    private int frameListenerCount;
     private TextBlock[] blocks = new TextBlock[0];
     private StringBuilder[] strings = new StringBuilder[0];
     private long[] drawnTextVersion = new long[0];
@@ -211,8 +217,77 @@ public final class Ui {
         }
         ensure();
         content[e.slot()] = NONE;
+        painters[e.slot()] = null;
+        parts[e.slot()] = false;
         applied[e.slot()] = null; // a reused slot applies its style again
         return e;
+    }
+
+    /**
+     * Makes {@code painter} draw {@code element}'s content (a control's own drawing: text with a caret, a chart): it
+     * measures the content for layout and records it after the element's box. Mark it with {@link #repaint} when its
+     * look changed, {@link #remeasure} when its size may have.
+     */
+    public void paint(Element element, Painter painter) {
+        int slot = element.slot();
+        content[slot] = painter == null ? NONE : PAINTED;
+        painters[slot] = painter;
+        layout.measured(slot, painter != null);
+        store.markDirty(slot, UiStore.DIRTY_LAYOUT | UiStore.DIRTY_DRAW);
+    }
+
+    /** Records {@code element} again this frame (its painter's look changed). */
+    public void repaint(Element element) {
+        store.markDirty(element.slot(), UiStore.DIRTY_DRAW);
+    }
+
+    /** Measures and records {@code element} again this frame (its painter's content changed size). */
+    public void remeasure(Element element) {
+        store.markDirty(element.slot(), UiStore.DIRTY_LAYOUT | UiStore.DIRTY_DRAW);
+    }
+
+    /**
+     * A style part of {@code owner}: a hidden child of {@code type} with style name {@code style} (or null) that takes
+     * no space and draws nothing, whose resolved style ({@code styles().styleOf(part.slot())}) a painter reads for a
+     * piece of its drawing (a caret, a selection, a span class), so themes style the pieces with ordinary keys and
+     * selectors ({@code textfield:focused caret}, {@code span.warning}). Set state bits on the part for state looks
+     * ({@code link:hover}). When a part's style changes, its owner measures and records again.
+     */
+    @AllowAllocation("elements are made when a UI is built")
+    public Element part(Element owner, String type, String style) {
+        Element e = element(type, style);
+        parts[e.slot()] = true;
+        layout.visible(e.slot(), false);
+        owner.add(e);
+        return e;
+    }
+
+    /** Whether {@code element} is a {@linkplain #part style part}. */
+    public boolean isPart(Element element) {
+        return parts[element.slot()];
+    }
+
+    /**
+     * Calls {@code listener} with the UI clock's time each {@link #update}, after input and before styles, layout and
+     * recording (a caret's blink, an animation a control drives). It must not allocate.
+     */
+    @AllowAllocation("listeners are added when a UI is built")
+    public void onFrame(LongConsumer listener) {
+        if (frameListenerCount == frameListeners.length) {
+            frameListeners = Arrays.copyOf(frameListeners, Math.max(4, frameListenerCount * 2));
+        }
+        frameListeners[frameListenerCount++] = listener;
+    }
+
+    /** Stops calling {@code listener}. */
+    public void removeOnFrame(LongConsumer listener) {
+        for (int i = 0; i < frameListenerCount; i++) {
+            if (frameListeners[i] == listener) {
+                System.arraycopy(frameListeners, i + 1, frameListeners, i, frameListenerCount - i - 1);
+                frameListeners[--frameListenerCount] = null;
+                return;
+            }
+        }
     }
 
     /** A new label (type {@code label}) showing {@code initial}. */
@@ -290,6 +365,7 @@ public final class Ui {
             }
         }
         content[slot] = NONE;
+        painters[slot] = null;
         rebuildAll();
     }
 
@@ -331,6 +407,8 @@ public final class Ui {
         int n = store.capacity();
         if (content.length < n) {
             content = Arrays.copyOf(content, n);
+            painters = Arrays.copyOf(painters, n);
+            parts = Arrays.copyOf(parts, n);
             blocks = Arrays.copyOf(blocks, n);
             strings = Arrays.copyOf(strings, n);
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
@@ -377,6 +455,10 @@ public final class Ui {
             interaction.process(input, nanos);
             ensure();
         }
+        for (int i = 0; i < frameListenerCount; i++) {
+            frameListeners[i].accept(nanos);
+        }
+        ensure();
         attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
@@ -418,6 +500,15 @@ public final class Ui {
                 apply(slot, style);
                 restyled(slot, before, style);
                 store.markDirty(slot, UiStore.DIRTY_DRAW | UiStore.DIRTY_TEXT);
+                if (content[slot] == PAINTED) {
+                    store.markDirty(slot, UiStore.DIRTY_LAYOUT); // its painter may measure fonts or sizes
+                }
+                if (parts[slot]) {
+                    int owner = store.parent(slot);
+                    if (owner != UiStore.NONE) {
+                        store.markDirty(owner, UiStore.DIRTY_LAYOUT | UiStore.DIRTY_DRAW);
+                    }
+                }
             }
             if ((store.dirty(slot) & UiStore.DIRTY_STRUCTURE) != 0) {
                 int li = layerStack.indexOf(slot);
@@ -637,6 +728,9 @@ public final class Ui {
             UiTexture t = images.get(resolver.styleOf(slot).get(Styles.IMAGE).name());
             return t == null ? Measure.size(0, 0) : Measure.size(t.width(), t.height());
         }
+        if (content[slot] == PAINTED) {
+            return painters[slot].measure(slot, width, widthMode, height, heightMode);
+        }
         return Measure.size(0, 0);
     }
 
@@ -657,29 +751,32 @@ public final class Ui {
         clipOwner[slot] = owner;
         clipOf[slot] = owner == UiStore.NONE ? DrawList.NO_CLIP : ownClip[owner];
         int start = list.size();
+        ownClip[slot] = DrawList.NO_CLIP; // its clip is made below: the count leaves it out
         list.begin(start, 0); // count only
         rec = list;
         recordPrimitives(slot);
         list.end();
         int needed = list.needed();
-        // text grows by a few glyphs (a counter's digits) and focusable elements by a focus ring without a rebuild
+        // text grows by a few glyphs (a counter's digits), painted content by its painter's spare and focusable
+        // elements by a focus ring without a rebuild
         int capacity = needed + (content[slot] == TEXT ? Math.max(4, needed / 4) : 0)
+            + (content[slot] == PAINTED ? painters[slot].spare(needed) : 0)
             + (interaction.focusable(store.element(slot)) ? 1 : 0);
         if (capacity > 0) {
             start = list.allocate(capacity);
         }
         store.range(slot, start, capacity);
-        if (needed > 0) {
-            record(slot, list);
-        }
         int childOwner = owner;
         ownClip[slot] = DrawList.NO_CLIP;
-        if (resolver.styleOf(slot).get(Styles.CLIP)) {
+        if (resolver.styleOf(slot).get(Styles.CLIP)) { // before recording: painted content clips to it
             clipBox(slot, owner);
             int o = slot * 4;
             ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
                 clipRadius(slot));
             childOwner = slot;
+        }
+        if (needed > 0) {
+            record(slot, list);
         }
         for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
             allocate(c, list, childOwner);
@@ -752,8 +849,8 @@ public final class Ui {
     }
 
     private void recordPrimitives(int slot) {
-        if (store.isRoot(slot) && !resolver.styleOf(slot).isSet(Styles.BACKGROUND)) {
-            return;
+        if (store.isRoot(slot) && !resolver.styleOf(slot).isSet(Styles.BACKGROUND) || parts[slot]) {
+            return; // a style part draws nothing: its owner's painter reads its style
         }
         ResolvedStyle s = resolver.styleOf(slot);
         float scale = layout.scale();
@@ -833,6 +930,11 @@ public final class Ui {
             drawnTextVersion[slot] = b.version();
         } else if (content[slot] == IMAGE) {
             recordImage(s.get(Styles.IMAGE), opacity, cx0, cy0, cx1, cy1);
+        } else if (content[slot] == PAINTED) {
+            if (ownClip[slot] != DrawList.NO_CLIP) {
+                rec.clip(ownClip[slot]);
+            }
+            painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, opacity);
         }
     }
 
