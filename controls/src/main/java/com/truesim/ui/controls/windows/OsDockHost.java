@@ -20,8 +20,17 @@ import java.util.List;
  * window at the pointer, which follows the pointer until released; its tab dragged over a dock space of any window
  * docks it there (the window closes when its last panel leaves); more tabs dock into it, split and tab as in the main
  * area; closing it re-docks its panels where they last were in the main area. The layout saves each window's monitor,
- * place, size, maximised state and tree ({@link DockLayout.Window}); restored on a missing monitor, a window goes to
- * the primary one, kept inside its usable area.
+ * place, size, maximised state, paper white and tree ({@link DockLayout.Window}); restored on a missing monitor, a
+ * window goes to the primary one, kept inside its usable area.
+ *
+ * <p><b>Paper white per window.</b> Each window, the main one too, may have a paper white of its own
+ * ({@link #paperWhite(int, float)}: a window on a dimmer or brighter HDR display); without one it follows the one
+ * every window follows (the engine's {@code display.paperWhite} setting). The layout saves it beside the window's
+ * place ({@code main paper-white} for the main window).
+ *
+ * <p><b>Translucent while dragged.</b> A window following a drag is drawn at its {@code dock-window}'s
+ * {@code drag-opacity} ({@link WindowStyles#DRAG_OPACITY}) through {@link OsWindows#opacity}, so the dock targets
+ * under it show; opaque again on drop. Where the system refuses, it stays opaque.
  *
  * <p><b>One UI, several windows.</b> Every window shows a region of the same {@link Ui}: its content (a
  * {@code dock-window} holding the area's {@code dock-space}) lies on a layer of its own ({@code dock-window-<n>}, z
@@ -70,6 +79,8 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
         int h;
         float uiPerScreen = 1;
         float laidScale = -1;
+        float paperWhite = Float.NaN;
+        float opacity = 1;
 
         Window(int slot, Element root) {
             this.slot = slot;
@@ -135,6 +146,16 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
         /** UI pixels per screen coordinate in it: its pixel density times the main window's scale over its own. */
         public float uiPerScreen() {
             return uiPerScreen;
+        }
+
+        /** Its own paper white in nits, or NaN: it follows the one every window follows. */
+        public float paperWhite() {
+            return paperWhite;
+        }
+
+        /** The opacity it was last asked to show at: below 1 while it follows a drag. */
+        public float opacity() {
+            return opacity;
         }
 
         @Override
@@ -228,6 +249,40 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
     /** The window following a drag now, or null. */
     public Window followingWindow() {
         return following;
+    }
+
+    /**
+     * Gives window {@code id} ({@link OsWindows#MAIN}: the main window) paper white {@code nits} of its own (NaN: it
+     * follows the one every window follows again), and saves the layout once settled. Unknown windows are ignored.
+     */
+    public void paperWhite(int id, float nits) {
+        if (!Float.isNaN(nits) && !(nits > 0 && nits < Float.POSITIVE_INFINITY)) {
+            throw new IllegalArgumentException("a paper white is a positive number of nits: " + nits);
+        }
+        Window w = id == OsWindows.MAIN ? mainWindow : window(id);
+        if (w == null || Float.compare(w.paperWhite, nits) == 0) {
+            return;
+        }
+        w.paperWhite = nits;
+        os.paperWhite(w.id, nits);
+        unsaved = true; // saved once it keeps still, so a slider's drag saves once
+        changedFrame = ui.frames();
+    }
+
+    /** Window {@code id}'s own paper white ({@link OsWindows#MAIN}: the main window's), or NaN: none, or unknown. */
+    public float paperWhite(int id) {
+        Window w = id == OsWindows.MAIN ? mainWindow : window(id);
+        return w == null ? Float.NaN : w.paperWhite;
+    }
+
+    @Override
+    public float mainPaperWhite() {
+        return mainWindow.paperWhite;
+    }
+
+    @Override
+    public void mainPaperWhite(float nits) {
+        paperWhite(OsWindows.MAIN, nits);
     }
 
     /** UI pixels per screen coordinate in the main window. */
@@ -485,6 +540,9 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
     @Override
     public void follow(DockArea area, float gx, float gy) {
         Window w = window(area);
+        if (following != null && following != w) {
+            opacity(following, 1); // dropped: opaque again
+        }
         following = w;
         grabX = gx;
         grabY = gy;
@@ -494,6 +552,7 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
             }
             os.raise(w.id);
             front(w);
+            opacity(w, dragOpacity(w));
         } else {
             unsaved = true; // saved once it keeps still
             changedFrame = ui.frames();
@@ -530,12 +589,12 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
         int mx = on == null ? 0 : on.x();
         int my = on == null ? 0 : on.y();
         return new DockLayout.Window(area.id(), on == null ? "" : on.key().replace('"', '\''), rect[0] - mx,
-            rect[1] - my, rect[2], rect[3], os.maximized(w.id), root);
+            rect[1] - my, rect[2], rect[3], os.maximized(w.id), root, w.paperWhite);
     }
 
     /**
      * Opens a window as {@code saved} says: on its monitor (the primary one if it is missing) at its place, kept
-     * inside the monitor's usable area, then maximised if it was.
+     * inside the monitor's usable area, then maximised if it was, at its own paper white if it had one.
      */
     @Override
     @AllowAllocation("layouts are restored on user action")
@@ -570,7 +629,13 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
             y = Math.min(Math.max(y, on.usableY()), on.usableY() + on.usableHeight() - h);
         }
         String id = space.findArea(saved.id()) == null ? saved.id() : nextId();
-        return open(id, "", x, y, w, h, saved.maximized());
+        DockArea area = open(id, "", x, y, w, h, saved.maximized());
+        Window opened = window(area);
+        if (!Float.isNaN(saved.paperWhite())) {
+            opened.paperWhite = saved.paperWhite();
+            os.paperWhite(opened.id, opened.paperWhite);
+        }
+        return area;
     }
 
     // ================================================================ the frame
@@ -588,12 +653,26 @@ public final class OsDockHost implements DockHost, Ui.FrameListener, Viewports {
             if (space.dragged() == null) {
                 follow(null, 0, 0);
             } else {
+                opacity(following, dragOpacity(following)); // as styled now (a theme may change meanwhile)
                 track(following);
             }
         }
         if (unsaved && following == null && ui.frames() - changedFrame > SAVE_AFTER) {
             unsaved = false;
             space.save();
+        }
+    }
+
+    /** {@code w}'s {@code drag-opacity}, from its {@code dock-window}'s style. */
+    private float dragOpacity(Window w) {
+        return ui.styles().styleOf(w.root.slot()).getFloat(WindowStyles.DRAG_OPACITY);
+    }
+
+    /** Asks the system to show {@code w} at {@code opacity}, if that is not what it was last asked. */
+    private void opacity(Window w, float opacity) {
+        if (opacity != w.opacity) {
+            w.opacity = opacity;
+            os.opacity(w.id, opacity);
         }
     }
 

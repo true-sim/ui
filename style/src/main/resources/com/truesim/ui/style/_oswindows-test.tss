@@ -8,6 +8,7 @@ dock-window {
   padding: 6px;
   background: box($hot);
   border: 5px $lime;
+  drag-opacity: 0.45;
 
   > dock-space { grow: 1; basis: 0px; }
 }

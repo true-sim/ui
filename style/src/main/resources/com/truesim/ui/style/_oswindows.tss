@@ -8,6 +8,7 @@ dock-window {
   padding: 0px;
   background: box(var(--bg));
   border: 1px var(--edge);
+  drag-opacity: 0.6; // the OS window following a drag, where the system can make windows see-through
 
   > dock-space { grow: 1; basis: 0px; }
 }

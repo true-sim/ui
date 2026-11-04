@@ -23,6 +23,8 @@ final class FakeOsWindows implements OsWindows {
         boolean closed;
         float pixelRatio = 1;
         float contentScale = 1;
+        float paperWhite = Float.NaN;
+        float opacity = 1;
 
         Win(int id, String title, int x, int y, int w, int h) {
             this.id = id;
@@ -42,6 +44,8 @@ final class FakeOsWindows implements OsWindows {
     boolean globalCursor = true;
     int nextId = 100;
     int raised;
+    boolean translucency = true; // false: the system refuses window opacity (Wayland, offscreen)
+    int opacityCalls;
 
     /** A desktop of one 1920 x 1080 primary monitor (task bar 40 high), the main window at 100, 100, w x h. */
     FakeOsWindows(int mainWidth, int mainHeight) {
@@ -147,5 +151,26 @@ final class FakeOsWindows implements OsWindows {
     public float contentScale(int window) {
         Win w = windows.get(window);
         return w == null ? 1 : w.contentScale;
+    }
+
+    @Override
+    public boolean paperWhite(int window, float nits) {
+        Win w = windows.get(window);
+        if (w == null) {
+            return false;
+        }
+        w.paperWhite = nits;
+        return true;
+    }
+
+    @Override
+    public boolean opacity(int window, float opacity) {
+        opacityCalls++;
+        Win w = windows.get(window);
+        if (w == null || !translucency) {
+            return false;
+        }
+        w.opacity = opacity;
+        return true;
     }
 }

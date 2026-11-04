@@ -13,18 +13,20 @@ import java.util.List;
  * <pre>
  * dock split(row; 0.25 0.75; tabs(0; scene hierarchy) split.editor(column; 0.7 0.3; tabs(1; viewport game) tabs(0; console)))
  * floating inspector 40 60 320 480
- * window w1 "DELL U2720Q #2" 120 80 640 480 maximized tabs(0; console)
+ * window w1 "DELL U2720Q #2" 120 80 640 480 maximized paper-white 240 tabs(0; console)
+ * main paper-white 160
  * </pre>
  *
  * Grammar: {@code dock <node>} or {@code dock none}; a node is {@code split[.style](row|column; ratio...; node...)} or
  * {@code tabs[.style](active; id...)}; then {@code floating <id> <x> <y> <width> <height>} lines (panel units) and
- * {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] <node>} lines: an OS window's dock area
- * ({@link OsDockHost}), on the monitor of that key (empty: unknown), at {@code x, y} from the monitor's top left,
- * {@code width x height}, in screen coordinates. Ids and style names hold no white space nor {@code # , ( ) ;}; a
- * monitor key no {@code "}; {@code #} outside quotes starts a comment.
+ * {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] [paper-white <nits>] <node>} lines: an OS
+ * window's dock area ({@link OsDockHost}), on the monitor of that key (empty: unknown), at {@code x, y} from the
+ * monitor's top left, {@code width x height}, in screen coordinates, with its own paper white if it has one; and a
+ * {@code main paper-white <nits>} line when the main window has one of its own. Ids and style names hold no white
+ * space nor {@code # , ( ) ;}; a monitor key no {@code "}; {@code #} outside quotes starts a comment.
  */
 @AllowAllocation("layouts are saved and restored on user action")
-public record DockLayout(Node root, List<Floating> floating, List<Window> windows) {
+public record DockLayout(Node root, List<Floating> floating, List<Window> windows, float mainPaperWhite) {
 
     /** A node of the tree. */
     public sealed interface Node permits Split, Tabs {
@@ -72,11 +74,13 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
     /**
      * An OS window holding a dock area of its own ({@code root}, never empty): its {@code id}, the key of the monitor
      * it is on ({@code ""}: unknown), its place {@code x, y} from that monitor's top left and its size, in screen
-     * coordinates, and whether it is maximised.
+     * coordinates, whether it is maximised, and its own paper white in nits (NaN: it follows the one every window
+     * follows).
      */
     public record Window(String id, String monitor, float x, float y, float width, float height, boolean maximized,
-        Node root) {
+        Node root, float paperWhite) {
         public Window {
+            checkPaperWhite(paperWhite);
             WindowLayout.checkId(id);
             monitor = monitor == null ? "" : monitor;
             if (monitor.indexOf('"') >= 0 || monitor.indexOf('\n') >= 0) {
@@ -86,11 +90,29 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
                 throw new IllegalArgumentException("a window holds a dock area");
             }
         }
+
+        /** A window following the paper white every window follows. */
+        public Window(String id, String monitor, float x, float y, float width, float height, boolean maximized,
+            Node root) {
+            this(id, monitor, x, y, width, height, maximized, root, Float.NaN);
+        }
     }
 
     public DockLayout {
         floating = List.copyOf(floating);
         windows = windows == null ? List.of() : List.copyOf(windows);
+        checkPaperWhite(mainPaperWhite);
+    }
+
+    /** A layout whose main window follows the paper white every window follows. */
+    public DockLayout(Node root, List<Floating> floating, List<Window> windows) {
+        this(root, floating, windows, Float.NaN);
+    }
+
+    private static void checkPaperWhite(float nits) {
+        if (!Float.isNaN(nits) && !(nits > 0 && nits < Float.POSITIVE_INFINITY)) {
+            throw new IllegalArgumentException("a paper white is a positive number of nits: " + nits);
+        }
     }
 
     /** A layout of a tree and floating panels, without OS windows. */
@@ -126,8 +148,14 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
             if (w.maximized()) {
                 out.append("maximized ");
             }
+            if (!Float.isNaN(w.paperWhite())) {
+                WindowLayout.number(out.append("paper-white "), w.paperWhite()).append(' ');
+            }
             write(out, w.root());
             out.append('\n');
+        }
+        if (!Float.isNaN(mainPaperWhite)) {
+            WindowLayout.number(out.append("main paper-white "), mainPaperWhite).append('\n');
         }
         return out.toString();
     }
@@ -205,6 +233,7 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
         boolean seen = false;
         List<Floating> floating = new ArrayList<>();
         List<Window> windows = new ArrayList<>();
+        float mainPaperWhite = Float.NaN;
         String[] lines = text.split("\n", -1);
         for (int i = 0; i < lines.length; i++) {
             String line = strip(lines[i]);
@@ -233,14 +262,21 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
                         Float.parseFloat(f[4]), Float.parseFloat(f[5])));
                 } else if (line.startsWith("window ")) {
                     windows.add(window(line));
+                } else if (line.startsWith("main ")) {
+                    String[] m = line.split("\\s+");
+                    if (m.length != 3 || !m[1].equals("paper-white")) {
+                        throw new IllegalArgumentException("expected: main paper-white <nits>");
+                    }
+                    mainPaperWhite = new Reader(line, 0).number(m[2]);
+                    checkPaperWhite(mainPaperWhite);
                 } else {
-                    throw new IllegalArgumentException("expected dock or floating (or window)");
+                    throw new IllegalArgumentException("expected dock or floating (or window, main)");
                 }
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("dock layout line " + (i + 1) + ": " + e.getMessage(), e);
             }
         }
-        return new DockLayout(root, floating, windows);
+        return new DockLayout(root, floating, windows, mainPaperWhite);
     }
 
     /** A line without its comment: from a {@code #} outside quotes. */
@@ -257,7 +293,7 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
         return line.strip();
     }
 
-    /** Parses {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] <node>}. */
+    /** Parses {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] [paper-white <nits>] <node>}. */
     private static Window window(String line) {
         Reader r = new Reader(line, 6);
         String id = r.word();
@@ -271,9 +307,16 @@ public record DockLayout(Node root, List<Floating> floating, List<Window> window
         if (!maximized) {
             r.pos = mark;
         }
+        float paperWhite = Float.NaN;
+        mark = r.pos;
+        if (r.word(true).equals("paper-white")) {
+            paperWhite = r.number(r.word());
+        } else {
+            r.pos = mark;
+        }
         Node root = r.node();
         r.end();
-        return new Window(id, monitor, x, y, w, h, maximized, root);
+        return new Window(id, monitor, x, y, w, h, maximized, root, paperWhite);
     }
 
     /** A recursive-descent reader of one dock line. */

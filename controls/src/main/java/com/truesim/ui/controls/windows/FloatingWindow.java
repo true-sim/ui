@@ -2,6 +2,7 @@ package com.truesim.ui.controls.windows;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
+import com.truesim.ui.controls.anim.Visuals;
 import com.truesim.ui.controls.overlay.HostBox;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
@@ -37,9 +38,12 @@ import com.truesim.ui.style.value.Length;
  *
  * <p>Behaviour: dragging the title bar moves it, snapping to the host's edges and other windows' edges within
  * {@code ui.window.snapDistance}; a double click on it maximises or restores; dragging an edge or corner resizes it,
- * snapping too; a press anywhere raises and activates it. Modal windows show over a dimming {@code backdrop} on the
- * modal layer, trap focus and close on {@code CANCEL}. {@link #keyboardMove()} and {@link #keyboardResize()} let the
- * arrow keys or the d-pad move or resize it until {@code ACCEPT} (or {@code CANCEL}, which puts it back).
+ * snapping too; a press anywhere raises and activates it. While dragged by its title bar it draws at its
+ * {@code drag-opacity} ({@link WindowStyles#DRAG_OPACITY}, times its style's opacity), so what lies under it (a dock
+ * space's drop targets, windows to snap to) shows; it is opaque again when let go. Modal windows show over a dimming
+ * {@code backdrop} on the modal layer, trap focus and close on {@code CANCEL}. {@link #keyboardMove()} and
+ * {@link #keyboardResize()} let the arrow keys or the d-pad move or resize it until {@code ACCEPT} (or
+ * {@code CANCEL}, which puts it back).
  */
 public final class FloatingWindow {
 
@@ -677,6 +681,7 @@ public final class FloatingWindow {
                         y = (e.pressY() - hostTop) / s - (e.pressY() - layout.y(root.slot())) / s;
                     }
                     rememberStart();
+                    translucent(true);
                     move(e, s);
                 }
                 case DRAG -> {
@@ -689,6 +694,7 @@ public final class FloatingWindow {
                     if (moving) {
                         moving = false;
                         e.consume();
+                        translucent(false);
                         boolean docked = manager.windowDropped(FloatingWindow.this, e.x(), e.y(), e.modifiers());
                         if (!docked) {
                             changed();
@@ -697,6 +703,18 @@ public final class FloatingWindow {
                 }
                 default -> {
                 }
+            }
+        }
+
+        /** Draws the window at its {@code drag-opacity} while moved ({@code on}), else at its style's opacity. */
+        private void translucent(boolean on) {
+            int r = root.slot();
+            ResolvedStyle style = ui.styles().styleOf(r);
+            float drag = style.getFloat(WindowStyles.DRAG_OPACITY);
+            if (on && drag < 1) {
+                ui.visuals().opacity(r, style.getFloat(Styles.OPACITY) * drag);
+            } else if (!on && ui.visuals().has(r, Visuals.OPACITY)) {
+                ui.visuals().clear(r, Visuals.OPACITY);
             }
         }
 

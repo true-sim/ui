@@ -38,6 +38,7 @@ window {
   min-width: 222px;
   min-height: 133px;
   resize-handle: 14px;
+  drag-opacity: 0.35;
   &:focus-visible { focus-ring: 7px $sun; }
 }
 

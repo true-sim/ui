@@ -99,4 +99,14 @@ public interface DockHost {
     default DockArea restoreArea(DockSpace space, DockLayout.Window saved) {
         return null;
     }
+
+    /** The main window's own paper white, for a saved layout ({@link DockLayout#mainPaperWhite()}); NaN: none. */
+    default float mainPaperWhite() {
+        return Float.NaN;
+    }
+
+    /** Gives the main window paper white {@code nits} from a restored layout (NaN: none of its own). */
+    default void mainPaperWhite(float nits) {
+        // nothing by default
+    }
 }

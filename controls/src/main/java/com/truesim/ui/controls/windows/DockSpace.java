@@ -1251,7 +1251,8 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 }
             }
         }
-        return new DockLayout(main.tree == null ? null : describe(main.tree), floating, windows);
+        return new DockLayout(main.tree == null ? null : describe(main.tree), floating, windows,
+            host == null ? Float.NaN : host.mainPaperWhite());
     }
 
     @AllowAllocation("layouts are saved on user action")
@@ -1299,6 +1300,9 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 main.tree.parent = null;
             }
             rebuild(); // the windows of the areas left close
+            if (host != null) {
+                host.mainPaperWhite(description.mainPaperWhite());
+            }
             if (host != null && host.areas() && !description.windows().isEmpty()) {
                 for (DockLayout.Window w : description.windows()) {
                     DockArea area = host.restoreArea(this, w);
