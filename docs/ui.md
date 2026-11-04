@@ -1622,7 +1622,8 @@ PRs:
 - `engine`: generated inspectors for materials, nodes and settings; the SLF4J sink; the accessibility bridge;
 - `build-logic`: wiring for the annotation processor, if needed.
 
-**Stage 13: property builder and inspectors, including collections**
+**Stage 13: property builder and inspectors, including collections** — **Built in the ui** (A3 props; the engine's
+inspectors left)
 - Scope:
   - the metadata model, merged from the Slang-generated material records, `Setting`s and annotations;
   - the annotation processor, with the reflection fallback;
@@ -1747,6 +1748,82 @@ one PR per repository per group, CI and release once per group.
   tunables are settings; only correct techniques are kept; never add latency; nothing allocated per frame.
 
 ## Build status
+
+### Group A3, props (2026-11-04): local branch a3-props
+
+Stage 2's binding and stage 13's property builder (design 4.2, 5.11; UI17 to UI20), without the engine's inspectors:
+new modules `ui-props` and `ui-props-processor`.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Binding | `Binding<M,C>`: two-way between a model end and a control end (`Bindable`: a value with a version; adapters for `VersionedValue`, `VersionedDouble`/`Int`/`Long`/`Boolean`, and `Bindable.through(whole, lens)` for a field of a record in another bindable). UI to model on edit (converted, validated, written), model to UI by version, both compared once a frame (two loads, no allocation when nothing changed); a refused value marks the bound element `:invalid` with a message and stays shown while other fields of the record change. `Converter<M,C>` (identity, `of`, `inverse`, `then`, `degrees`), `Validator<T>` (null or a message; `of`, `range`, `and`), `Lens<R,F>` (`of`, `then`, `identity`, `element(i)`, `entry(k)`). `Ui.bindings()` polls them at the start of each update, before the frame listeners, so neither direction waits a frame | `ui-core` `bind`, `Ui` |
+| Metadata | `PropertyModel<T>` (ordered `Property<T,V>`s, the type's annotations, a factory, a sealed type's permitted subtypes, its source), `Property<T,V>` (a `Lens`: name, declared type, element and key types of collections, getter, wither or setter, annotations as typed facts, label), `Annotations`; 30 annotations (`@Label @Tooltip @Range @Step @Unit @Color(hdr) @Angle @Slider @Field @Multiline @Password @EnumStyle @Hidden @ReadOnly @Group @Order @Foldout @ShowIf @Validate @AssetType`, `@ListStyle @Addable @Removable @Reorderable @MinSize @MaxSize @Unique @ElementLabel @Factory`, `@Inspectable`); `Hints` makes any annotation in code (the engine's sources, the generated classes); `AnnotationHandler` gives custom annotations facts, an editor and a validator | `ui-props` |
+| Sources | `PropertySource` (priority, `model(type)`), merged per type by `PropertyModels` (cached): a higher source's properties come first and win per annotation type, a lower one's extra properties follow, accessors from the one that can write. `annotated()` (priority 0): the generated class, else reflection | `PropertyModels`, `PropertySource` |
+| Processor | `PropertiesProcessor` (JDK only, by annotation name): for each record or class with a property annotation, `@Inspectable`, or a sealed parent of one, writes `<Type>Properties` (nested names joined by `_`): a `Property` constant per property with direct getter and wither (canonical constructor) or setter calls, element and key types, its runtime annotations through `Hints` (custom ones too: every value kind, arrays, nested annotations), `MODEL` (factory: `DEFAULTS`, a no-argument constructor, else defaults; subtypes), and direct static accessors. Private and generic types are skipped with a note (reflection serves them). Wired with plain Gradle (`testFixturesAnnotationProcessor`, `testAnnotationProcessor`) | `ui-props-processor` |
+| Reflection | The fallback: records by their components (accessor `MethodHandle`s, the canonical constructor spread), classes by field order with public getters (`getX`, `isX`) and setters or public fields, superclasses first; annotations of component, field and accessors; generic element types | `ReflectionModels`, `Defaults` |
+| Pipeline (UI17) | `PropertyBuilder.forType(T).replace(Steps.X, step).remove(key)...build(controls, holder)`: FILTER (`@Hidden`, `@ShowIf` re-evaluated when the value changes), ORDER, GROUP, EDITOR (code > style `editor` > annotations and handlers > type > fallback), LAYOUT (code > style `props-layout` > default), BIND (lens into the root holder, validators from `@Range`, `@Validate`, sizes, uniqueness, handlers). Elements `props.panel[model][layout]`, `props.row[type][kind][annotation...][property][group][model][label]` with `label.prop-label` and the editor. Styles set the layout, editor, `label-placement`, `visible`, `order` per row; read after styles resolve (a theme switch rebuilds what changed in the same frame); a row's styles are re-read only when its resolved style changed, and nothing is rebuilt unless a chosen value did. Code overrides (`layout`, `editor(property, name)`, `visible`, `collection`) beat styles | `PropertyBuilder`, `Steps`, `PropertyPanel`, `PropertyRow` |
+| Editors | `number` (NumberField; range, step, decimals, `@Unit`), `slider` (with the value beside it), `angle` (degrees over radians), `checkbox`, `text`/`multiline`/`password` (written on Enter or leaving; the field's own `:invalid` while typing), `dropdown`/`radio`/`segmented` (`@EnumStyle`, `@Label` on constants), `color` (ColorPicker over a draw-list colour `long` or an 8-bit sRGB `int`), `asset` (a field with fact `asset=<kind>`), `record` (a nested panel in a collapsible, through the lens chain), `collection`, `readonly`; registered by name, per type and per annotation | `Editors`, `EditorFactory`, `PropertyEditor` |
+| Layouts | `form` (titled groups), `grid` (groups as tile grids), `inspector` (groups as collapsibles kept across rebuilds), `compact`, `row` (a table row) | `Layouts`, `LayoutStrategy` |
+| Collections (UI18) | `CollectionEditor` for lists, sets, maps and arrays of records, sealed types and simple values: `collection[property][element][type][kind]` with a header (count, operations) over a kind's view; kinds by style `collection` (> `@ListStyle` > type: map, chips for sets of enums or strings, foldouts for sealed or interface elements, else table): `table` (rows of nested `row` panels under column labels; above `virtualize-above` a `TableView` editing cells in place through a mirror list), `foldouts` (collapsible nested panels; above the threshold a master-detail list), `master-detail` (`ListView`, rows dragged to reorder, the selection's panel), `chips` (tags, enum constants added from a menu, text typed), `compact` (a summary and a dialog with a master-detail editor), `map` (key and value editors, keys unique); kinds registered by code are selectable by style | `CollectionEditor`, `CollectionKind`, `CollectionViews` |
+| Operations | add (`@Factory`, `DEFAULTS`, constructor, defaults; a type chooser dialog over a sealed type's subtypes), remove, reorder (up and down, drags in lists), duplicate (a deep copy through the metadata), clear, a context menu per item (with `contextAction`s); shown by style `ops` (> `@Addable/@Removable/@Reorderable`), `ops-placement` (each item's end, or on hover with the bar's own `:hover`; views that select keep item operations in the header on the selection), `confirm`; buttons `button.props-op#<op>` with icons `image#op-<op>` and text `op-label`. `@MinSize`, `@MaxSize`, `@Unique` and map keys disable what would break them (`reason`, the tooltip with `tooltips(...)`) and refuse writes (`:invalid`, `message`) | `CollectionEditor`, `CollectionOps` |
+| Edits and undo | Every write reports an `Edit` (path `waypoints[1].speed`, operation, root before and after, `undo`/`redo` into the holder) to `onEdit` listeners; a pointer-held gesture (a drag, a slider) is one edit, reported when released. Immutable updates through lens chains (`CollectionOps`: new lists, sets, maps, arrays) give a new root sharing everything off the path | `Edit`, `PropertyPanel`, `CollectionOps` |
+| Themes | `_props.tss` and `_props-test.tss` (one `@use` in each theme); the test theme picks inspector panels and asks before clear and remove. `PropsStyles` (the keys) lives in ui-controls so the themes compile without ui-props | `ui-style`, `controls.props` |
+| Controls hooks | `Control.dispose()`, `ScrollView.dispose()`, `TextEditor.dispose()` (views and fields destroyed without it stop by themselves); `Ui.removeFrameListener` during the listeners' pass takes effect at once without skipping another | `ui-controls` |
+| Gallery | `PropsGallery` (testFixtures of ui-props): a squad record with groups, every editor, a nested record, and a collection of each kind; in `GallerySanityTest` (both themes) and previewed by `PropsPreviewTest` | `ui-props`, `ui-controls` tests |
+
+#### Decisions
+
+- *UI19, both techniques kept* (measured below): generated models build faster cold (61 to 67 ms against 80 to 92 ms
+  for the gallery's ten types in a fresh JVM) and warm (3.8 against about 60 µs a type) and write 7 to 9 times
+  faster (6 to 8 against 55 to 58 ns a `with`); reads are close (1.5 to 3.8 against 4.1 to 4.3 ns). Reflection stays
+  as the fallback for types compiled without the processor. Most of the cold cost is the JDK's first proxy and
+  lambda machinery (the first type: about 38 ms against 55 ms), not the models.
+- *Annotations as annotation instances* (`Hints` makes them with a proxy, equal to the JDK's): custom annotations and
+  handlers work the same for annotated types and external sources.
+- *Bindings poll before the frame listeners*, in `Ui`, not through `Controls`: no frame of delay in either direction.
+- *Style choices re-read after layout* (`afterLayout`), so a theme switch shows the new editors and kinds in the frame
+  it applies; only when the element's resolved style changed, and nothing is rebuilt unless a chosen value did (hover
+  restyles allocate nothing).
+- *Hidden rows stay in the tree* (`layout.visible(false)`): their style rules (`visible: true`) keep applying.
+- *`virtualize-above` is a style key*, as design 5.11 has it (a presentational threshold per collection), not a
+  tunable.
+
+#### Tests
+
+ui-core `BindingTest` (both directions, an edit and a model change in one frame, validators and `:invalid`,
+converters and conversion failures, primitive holders, lenses of mutable objects, collection lenses, 40 bindings
+polled without allocating). ui-props: `ModelsTest` (generated and reflected models agree on every property, value
+and annotation; beans; merging by priority; hints; defaults; collection operations and deep copies), `PipelineTest`
+(edits and model changes both ways for every editor kind, each step replaced and removed, styles choosing layout,
+editors, visibility, order and label placement, code beating styles, a theme switch, every layout, handlers and
+`@Validate`, gesture-coalesced edits and undo), `CollectionsTest` (a theme alone switches `List<Waypoint>` from
+table to master-detail and hides duplicate; the sealed-type add chooser; min, max, unique and map keys; nested edits
+in lists giving the expected new root and undo round trips; confirm; hover placement; chips, compact, context menus
+with code actions; virtualized tables and foldouts, a cell edit writing back), `UnitsTest`, `GalleryTest`
+(LayoutSanity, both themes), `PropsAllocationTest` (idle and hover frames over the gallery allocate nothing),
+`ModelBenchmarkTest` (UI19, `TRUESIM_BENCHMARK=true`). ui-props-processor: `PropertiesProcessorTest` (sources
+compiled in process with `-Werror`: every annotation value kind and escape, beans, sealed hierarchies, skipped types,
+the unnamed package; the written models load and work). ui-controls: `GallerySanityTest.propsGallery` (both themes),
+`PropsPreviewTest`.
+
+#### Benchmarks
+
+UI19 (`ModelBenchmarkTest`, Windows, other agents building: noisy): first builds of ten types in a fresh JVM, 5 runs
+each: generated 61.4 / 63.9 / 65.0 / 63.0 / 67.4 ms, reflection 84.8 / 83.3 / 81.8 / 79.9 / 91.6 ms; built again
+3.8 µs against 59 to 73 µs a type. Access on `Squad` (warm, median of 15): get 1.5 to 3.8 ns generated, 4.1 to 4.3
+ns reflection; with 6.4 to 8.0 ns against 55 to 58 ns.
+
+#### Left
+
+- The engine's inspectors (design 5.11): `PropertySource`s for `Setting`s (the settings screen) and for the Slang
+  material records, and node components through the D46 stores; their GPU screenshots.
+- A foldout list above `virtualize-above` shows as a master-detail list (nested panels of any height are not
+  recycled); a map is never virtualized.
+- The generated classes build annotations through `Hints` proxies; writing an implementing class per annotation would
+  cut the cold first build further (most of it is the JDK's first proxy).
+- An unsaved typed value in a text editor shown while the collection around it is rebuilt (add, remove) is lost.
 
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
@@ -1966,8 +2043,9 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 
 **Left from A1:**
 - ~~The `Ui` engine plugin~~: built in A2 (`UiPlugin`).
-- Stage 2's binding, lenses, converters and effect channels (A2 built value renderers and editors, validators of
-  text, tweens, style transitions and `scale` drawn by per-range transforms).
+- Stage 2's ~~binding, lenses, converters~~ (built in A3, props: `ui-core` `bind`) and effect channels (A2 built
+  value renderers and editors, validators of text, tweens, style transitions and `scale` drawn by per-range
+  transforms).
 - ~~`common-state`'s `VersionedTree` and `VersionedRingBuffer`~~: built after A2 (`VersionedTree`,
   `VersionedDoubleRing`/`VersionedFloatRing`, below).
 - SVG icons through NanoSVG; atlas page eviction (colour emoji: built in A2, CBDT).
