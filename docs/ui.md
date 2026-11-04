@@ -1796,7 +1796,7 @@ The seven areas below were built in parallel on their own branches from `a3-rema
 
 - Every row of engine `docs/benchmarks-ui.md` is within budget on a quiet machine (2026-11-04, after the follow-ups
   below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
-  0.17 ms p50, 0.26 ms p99).
+  0.13 ms p50, 0.21 ms p99; engine-bench `-Ponly=console` runs one part).
 - Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
   and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
   in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
@@ -1937,6 +1937,7 @@ The benchmark rows that missed (engine `docs/benchmarks-ui.md`).
 | Lines and envelopes over vertices | `Primitive.PATH` and `COLUMNS` draw a range of the list's vertex table (`DrawList.VERTEX_FLOATS` 4: a path's x, y, length; a column's first, last, lowest, highest y), expanded on the GPU: joins (miter with a limit, bevel, round), caps, dashes by length (4 entries), each pixel drawn once at joins; columns stroked as before or filled a quad per 4 columns. Streaming rewrites only changed vertices (compare before write). The streaming chart went from 7,529 primitives (13,216 filled) to 2 or 3 | ui-core, `Canvas`, `LineSeries`, `line-join` miter/bevel, `line-miter-limit`; engine `draw.slang` |
 | Folded backdrop | A full-image box at the bottom of a layer is the pass's clear (its corners and border drawn along the edges): 100,000 glyphs over a backdrop 0.46 to 0.31 ms | engine `GpuUiRenderer` |
 | `ShapeCache` | Every `TextSystem` shapes through a cache of printable Latin runs (`ui.text.shapeCache`, 4,096 runs; 0 off), two generations (a full one ages, runs shown again move up: no frame where everything shapes again) | ui-text |
+| Log rows | A row's time is two labels, `log-time` (seconds) and `log-millis`, in `log-clock`: both repeat, so the shape cache finds them; a flooded frame no longer shapes a new time per row (0.17 to 0.13 ms p50) | ui-console `LogView`, `_console*.tss` |
 | Timing | engine-bench times CPU frames back to back and GPU frames in a run of their own (a GPU wait between UI frames inflated CPU times; engine `docs/pitfalls.md`) | engine `bench` |
 
 ### Group A3, render (2026-11-04): local branch a3-render
