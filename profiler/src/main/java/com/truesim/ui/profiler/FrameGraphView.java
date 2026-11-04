@@ -19,8 +19,8 @@ import com.truesim.ui.core.Role;
  * of each line over the frames kept, and the hitches among them, every {@link ProfilerTunables#STATS_INTERVAL}.
  *
  * <p>Elements: {@code frame-graph} (the panel), its stats label and a {@code chart.frame-graph}. A frame with no new
- * data costs a version check; a new frame appends to the chart's rings (the chart re-records its plot). Allocates
- * nothing per frame.
+ * data costs a version check; a new frame appends to the chart's rings, and the chart streams its lines (new vertices
+ * appended, scrolled by a drawn offset; 7.9 us a frame of CPU). Allocates nothing per frame.
  *
  * <pre>{@code
  * FrameTimes times = new FrameTimes(ui.store().clock(), 600);

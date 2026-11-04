@@ -78,6 +78,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
     private final Element root;
     private final Element plot;
     private final Element overlay;
+    private final Element stream; // in the plot: the streamed series, scrolled by a drawn offset (see Streaming)
     // style parts
     private final Element gridPart;
     private final Element gridMinorPart;
@@ -191,6 +192,24 @@ public final class Chart implements Ui.FrameListener, UiListener {
     private final FramePainter framePainter = new FramePainter();
     private final PlotPainter plotPainter = new PlotPainter();
     private final OverlayPainter overlayPainter = new OverlayPainter();
+    private final StreamPainter streamPainter = new StreamPainter();
+    private final Canvas streamCanvas = new Canvas();
+    // streaming: series on a following X axis drawn by the stream element, scrolled by its drawn offset
+    private Axis streamAxis; // the following X axis the stream scrolls with, or null: nothing streams
+    private long membership = -1; // which series stream: a stamp, so a change repaints plot and stream
+    private boolean streamRebuild = true; // the stream's vertices are written again from an anchor
+    private double anchorF0; // the stream axis's mapping when anchored: vertex x = anchorP0 + (x - anchorF0) * anchorK
+    private float anchorP0;
+    private double anchorK;
+    private float anchorOx = Float.NaN; // the plot's place when anchored
+    private float anchorOy = Float.NaN;
+    private long anchorStyles;
+    private float anchorScale;
+    private double lastMin = Double.NaN; // the stream axis's range last frame: a pure shift keeps its span
+    private double lastMax = Double.NaN;
+    private long otherRanges; // the versions of every other axis
+    int anchors; // how many times the stream was anchored (tests)
+    float streamOffset; // the stream's drawn offset in pixels (tests)
 
     /**
      * A chart in {@code ui} announced as {@code name}, with one X axis ({@code x}, bottom, linear) and one Y axis
@@ -206,12 +225,15 @@ public final class Chart implements Ui.FrameListener, UiListener {
         l.kind(root.slot(), LayoutKind.ANCHORS);
         plot = ui.element("chart-plot", null);
         overlay = ui.element("chart-overlay", null);
+        stream = ui.element("chart-stream", null);
         root.add(plot).add(overlay);
-        for (Element e : new Element[] {plot, overlay}) {
-            ui.codeLayout(e, Ui.CODE_PLACEMENT);
+        plot.add(stream);
+        for (Element e : new Element[] {plot, overlay, stream}) {
+            ui.codeLayout(e, e == plot ? Ui.CODE_PLACEMENT | Ui.CODE_KIND : Ui.CODE_PLACEMENT);
             l.anchors(e.slot(), 0, 0, 1, 1);
             ui.interaction().pickable(e, PointerEvents.NONE);
         }
+        l.kind(plot.slot(), LayoutKind.ANCHORS);
         ui.interaction().pickable(root, PointerEvents.ALL);
         ui.interaction().focusable(root, true);
         gridPart = ui.part(root, "chart-grid", null);
@@ -238,6 +260,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
         ui.paint(root, framePainter);
         ui.paint(plot, plotPainter);
         ui.paint(overlay, overlayPainter);
+        ui.paint(stream, streamPainter);
         ui.interaction().on(root, EventType.ENTER.bit() | EventType.MOVE.bit() | EventType.PRESS.bit()
             | EventType.RELEASE.bit()
             | EventType.WHEEL.bit() | EventType.CLICK.bit() | EventType.EXIT.bit() | EventType.COMMAND.bit(), this);
@@ -564,6 +587,11 @@ public final class Chart implements Ui.FrameListener, UiListener {
 
     // ---------------------------------------------------------------- what series read
 
+    /** The stream axis (the following X axis streamed series scroll with), or null. */
+    Axis streamAxis() {
+        return streamAxis;
+    }
+
     /** The resolved style of {@code part}. */
     ResolvedStyle styleOf(Element part) {
         return ui.styles().styleOf(part.slot());
@@ -686,8 +714,23 @@ public final class Chart implements Ui.FrameListener, UiListener {
             return; // not shown: no work
         }
         boolean data = false;
+        boolean streamData = false;
         for (int i = 0; i < series.size(); i++) {
-            data |= series.get(i).poll();
+            Series si = series.get(i);
+            if (si.poll()) {
+                if (si.streamed) {
+                    streamData = true;
+                } else {
+                    data = true;
+                }
+            }
+        }
+        if (streamData) {
+            ui.repaint(stream);
+            if (overlayFollowsData()) {
+                legendStale = true;
+                ui.repaint(overlay);
+            }
         }
         for (int i = 0; i < tools.size(); i++) {
             if (tools.get(i).poll()) {
@@ -705,7 +748,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
             ui.repaint(plot);
             ui.repaint(overlay);
         }
-        if (data || fitPending) {
+        if (data || streamData || fitPending) {
             follow(fitPending);
         }
         long ranges = 0;
@@ -714,10 +757,27 @@ public final class Chart implements Ui.FrameListener, UiListener {
         }
         if (ranges != rangeStamp) {
             rangeStamp = ranges;
-            ui.repaint(root);
-            ui.repaint(plot);
-            ui.repaint(overlay);
+            if (scrolledOnly()) {
+                // the stream axis moved by a pure shift: its ticks (when shown), what is drawn by it outside the
+                // stream, and the stream's drawn offset follow; nothing else records again
+                if (streamAxis.enabled()) {
+                    ui.repaint(root);
+                }
+                if (plotFollowsScroll()) {
+                    ui.repaint(plot);
+                }
+                if (overlayFollowsData() || !tools.isEmpty() || !annotations.isEmpty()) {
+                    ui.repaint(overlay);
+                }
+            } else {
+                streamRebuild = true;
+                ui.repaint(root);
+                ui.repaint(plot);
+                ui.repaint(overlay);
+                ui.repaint(stream);
+            }
         }
+        rememberRanges();
         if (crosshair.version() != crosshairSeen) {
             crosshairSeen = crosshair.version();
             ui.repaint(overlay);
@@ -885,7 +945,12 @@ public final class Chart implements Ui.FrameListener, UiListener {
         height = h;
         scale = s;
         boolean reserved = legendMeasure(); // an outside legend's room, which the plot gives up
-        if (sized || restyled || layoutDirty || reserved || rangesMoved()) {
+        boolean moved = rangesMoved();
+        boolean shiftOnly = moved && !sized && !restyled && !layoutDirty && !reserved && shiftedOnly();
+        if (shiftOnly && streamAxis != null && streamAxis.enabled()) {
+            arrange(false); // the stream axis's ticks follow the shift (labels are reused by their text)
+            ui.repaint(root);
+        } else if (!shiftOnly && (sized || restyled || layoutDirty || reserved || moved)) {
             styleStamp = styles;
             layoutDirty = false;
             legendStale = true;
@@ -893,10 +958,142 @@ public final class Chart implements Ui.FrameListener, UiListener {
             ui.repaint(root);
             ui.repaint(plot);
             ui.repaint(overlay);
+            ui.repaint(stream);
+            streamRebuild = true;
         }
+        stream();
         legendPlace();
         hover();
         changed = false;
+    }
+
+    // ---------------------------------------------------------------- streaming
+
+    /**
+     * Decides what streams this frame and where the stream draws. Series on the first following, linear X axis that
+     * can stream ({@link Series#streams}: lines without fills, steps, markers or dashes, few enough samples to draw
+     * each, polylines broken at most a few times; vertical infinite lines) are drawn by the stream element: their
+     * vertices are written once, at the axis's mapping when anchored, and new samples append; as the axis follows,
+     * the element's drawn offset moves (one transform table entry), and the plot, axes and overlay record nothing
+     * again. The anchor is taken again when anything else changes: the span, the Y ranges, the plot's place, styles.
+     */
+    private void stream() {
+        Axis a = null;
+        for (int i = 0; i < axes.size(); i++) {
+            Axis ax = axes.get(i);
+            if (!ax.vertical() && ax.follow() && !ax.paused && ax.scale() == Scale.LINEAR) {
+                a = ax;
+                break;
+            }
+        }
+        long members = 1;
+        for (int i = 0; i < series.size(); i++) {
+            Series si = series.get(i);
+            boolean on = a != null && si.xAxis() == a && si.enabled() && si.streams();
+            si.streamed = on;
+            members = members * 31 + (on ? 1 : 2);
+        }
+        members = members * 31 + (a == null ? 0 : System.identityHashCode(a));
+        if (members != membership || a != streamAxis) {
+            membership = members;
+            streamAxis = a;
+            streamRebuild = true;
+            ui.repaint(plot);
+            ui.repaint(stream);
+            ui.repaint(overlay);
+        }
+        if (a == null) {
+            ui.visuals().translate(stream, 0, 0);
+            return;
+        }
+        long styles = styleStamp();
+        if (a.pixelsPerUnit() != anchorK || styles != anchorStyles || scale != anchorScale) {
+            streamRebuild = true;
+        }
+        float tx = a.toPixel(anchorF0) - anchorP0;
+        if (streamRebuild || !(Math.abs(tx) < 16_384)) {
+            streamRebuild = true;
+            anchors++;
+            anchorF0 = a.fromPixel(a.startPixel());
+            anchorP0 = a.startPixel();
+            anchorK = a.pixelsPerUnit();
+            anchorStyles = styles;
+            anchorScale = scale;
+            tx = 0;
+            ui.repaint(stream);
+        }
+        streamOffset = tx;
+        ui.visuals().translate(stream, tx / (scale > 0 ? scale : 1), 0);
+    }
+
+    /** The streamed series' vertex x of {@code v} (content-box pixels at the anchor's mapping). */
+    float streamX(double v) {
+        return (float) (anchorP0 + (v - anchorF0) * anchorK);
+    }
+
+    /** Whether the stream's vertices are being written again from the anchor this recording. */
+    boolean streamRebuild() {
+        return streamRebuild;
+    }
+
+    /** Whether the overlay shows what depends on the data: highlights, a crosshair, a legend placed by the data. */
+    private boolean overlayFollowsData() {
+        return hovering || crosshairShown || hitCount > 0 || legendWhere == LegendPosition.BEST
+            || mode != Mode.NONE;
+    }
+
+    /** Whether the plot draws anything by the stream axis (other than horizontal lines across it). */
+    private boolean plotFollowsScroll() {
+        for (int i = 0; i < series.size(); i++) {
+            Series si = series.get(i);
+            if (si.enabled() && !si.streamed && si.xAxis() == streamAxis
+                && !(si instanceof InfiniteLines lines && !lines.vertical())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether, since the last frame, only the stream axis's range moved, keeping its span. */
+    private boolean scrolledOnly() {
+        if (streamAxis == null || streamRebuild) {
+            return false;
+        }
+        long others = 0;
+        for (int i = 0; i < axes.size(); i++) {
+            Axis ax = axes.get(i);
+            if (ax != streamAxis) {
+                others = others * 31 + ax.range().version();
+            }
+        }
+        double span = streamAxis.range().max() - streamAxis.range().min();
+        double before = lastMax - lastMin;
+        return others == otherRanges && Math.abs(span - before) <= Math.abs(before) * 1e-12;
+    }
+
+    /** As {@link #scrolledOnly}, for the layout pass (the axes' mappings are synced already). */
+    private boolean shiftedOnly() {
+        return scrolledOnly() || streamAxis != null && !streamRebuild && otherRangesNow() == otherRanges
+            && Math.abs(streamAxis.pixelsPerUnit() - anchorK) <= Math.abs(anchorK) * 1e-12;
+    }
+
+    private long otherRangesNow() {
+        long others = 0;
+        for (int i = 0; i < axes.size(); i++) {
+            Axis ax = axes.get(i);
+            if (ax != streamAxis) {
+                others = others * 31 + ax.range().version();
+            }
+        }
+        return others;
+    }
+
+    private void rememberRanges() {
+        if (streamAxis != null) {
+            lastMin = streamAxis.range().min();
+            lastMax = streamAxis.range().max();
+        }
+        otherRanges = otherRangesNow();
     }
 
     private boolean rangesMoved() {
@@ -2139,11 +2336,50 @@ public final class Chart implements Ui.FrameListener, UiListener {
             digitalSlot = 0;
             for (int i = 0; i < series.size(); i++) {
                 Series s = series.get(i);
-                if (s.enabled()) {
+                if (s.enabled() && !s.streamed) {
                     s.paint(c);
                 }
             }
             dataChanged = false;
+            c.end();
+        }
+    }
+
+    /** The streamed series, at the anchor's mapping (the element's drawn offset scrolls them). */
+    private final class StreamPainter implements Painter {
+
+        private final Canvas.Vertices vertices = new Canvas.Vertices();
+
+        @Override
+        public long measure(int slot, float w, int widthMode, float h, int heightMode) {
+            return Measure.size(0, 0);
+        }
+
+        @Override
+        public int spare(int recorded) {
+            return recorded / 2 + 64;
+        }
+
+        @Override
+        public void paint(int slot, DrawList list, float x0, float y0, float x1, float y1, float opacity) {
+            // the chart's content box, not this element's (snapped to whole pixels, its corner may be a fraction off)
+            float ox = contentX;
+            float oy = contentY;
+            if (ox != anchorOx || oy != anchorOy) {
+                streamRebuild = true; // the plot moved: vertices hold its place
+                anchorOx = ox;
+                anchorOy = oy;
+            }
+            Canvas c = streamCanvas;
+            // culled vertically only: what scrolls in from the right was drawn at the anchor already
+            c.begin(list, ox, oy, -1e6f, plotY0, 1e6f, plotY1, opacity, scale, vertices);
+            for (int i = 0; i < series.size(); i++) {
+                Series s = series.get(i);
+                if (s.streamed) {
+                    s.paintStream(c);
+                }
+            }
+            streamRebuild = false;
             c.end();
         }
     }

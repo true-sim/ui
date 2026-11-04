@@ -1794,9 +1794,18 @@ frames allocate, the frame graph alone allocation-free), `ProfilerInteractionTes
 the zoom limit, span selection and double click, zones past the cap merged, the table's columns and rows, hovering,
 counters per group, an empty recording, edges). Branch coverage 0.8.
 
-**Left**: the frame graph's chart costs 25 to 45 us of CPU a frame (its plot recorded again each frame; the data
-path itself 0.14 us): above the 10 us aimed at for the drawing (engine `docs/benchmarks-profiler.md`). Zone labels
-are names only (durations show in the status line).
+**Streaming charts** (ui-charts, for the frame graph, any following chart): lines on the first following linear X
+axis that draw each sample (no fill, steps, markers or dashes; at most 32 gaps in view) and vertical infinite lines
+there are drawn by a `chart-stream` element in the plot. Their vertices are written once, at the axis's mapping when
+the stream was anchored, into a block of each line's own; new samples append, and as the axis follows, the element's
+drawn offset moves (one transform table entry): the plot, the hidden or shown axes' layout and the overlay record
+nothing again (a shown X axis's ticks still move, their labels reused by text). A new anchor is taken when the span,
+a Y range, the plot's place or the styles change. The frame graph view's CPU per frame went from 25 to 45 us to
+7.9 us (engine `docs/benchmarks-profiler.md`); the chart benchmarks stay as they were (1M samples streaming, drawn as
+envelopes, do not stream: 0.37 ms frame median). Tested by `StreamTest` (only the stream records; every vertex draws
+where the axes map its sample, after appends, a Y change, a pause and a resume; allocation-free).
+
+**Left**: zone labels are names only (durations show in the status line).
 
 ### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
 
