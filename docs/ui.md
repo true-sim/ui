@@ -1748,6 +1748,96 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3, render (2026-11-04): local branch a3-render
+
+The draw list's transform table and dirty ranges, CSS's automatic minimum size of flex items, SVG icons and atlas
+page eviction. Engine branch `ui-rest-render` (engine-ui's renderer and shader).
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Automatic minimum size | A flex item whose main-axis minimum is auto and which does not clip its content (`Layout.clipsContent`, set from the `clip` style) shrinks no further than its min-content size (measured under an at-most constraint of 0: text its longest word, a container its items' minimums), or its specified size if smaller, within its maximum, never below its padding; a basis below it (`flex: 1`) grows from it. An explicit minimum wins; clipping and scrolling items keep 0. Measured only when an item is to be smaller than its hypothetical size, and kept per item until its layout changes. A wrapping container is never narrower than its widest item | `ui-layout` `FlexLayout`, `Layout`, `Ui.apply` |
+| Transform table | Each primitive's word 15 (`Primitive.TRANSFORM`, was reserved) names an entry of its list's transform table (`DrawList.TRANSFORM_FLOATS` 8 floats, 32 bytes: scale, offset x, y, opacity, four reserved; entry 0 the identity). A primitive draws at `scale * (p + clip offset) + offset`, its sizes times the scale, its colours' alpha times the opacity. An element that composes opacity, scale or a drawn offset over its subtree (`Visuals.composes`: a set override or a style value other than 1) owns an entry its subtree shares; an animation rewrites that entry (`DrawList.setTransform`, compared) and no primitive. The first change that makes an element an owner records its subtree once; it stays an owner until its layer is rebuilt | `DrawList`, `Primitive`, `Ui`, `Visuals.TransformListener` |
+| Clips follow transforms | A clip names the entry of its owner (`CLIP_FLOATS` 8: the transform index at float 7, `setClipTransform`): its rectangle and radius are drawn by it, so a scaled or moved subtree is cut where it draws; an ancestor's cut drawn by another entry is mapped into the clip's space when clips move | `DrawList`, `Ui.clipBox` |
+| Reading back | `DrawList.drawnX/Y`, `drawnScale`, `drawnOpacity`, `drawnClip`, and `baked()`: a copy with every transform and clip offset applied (CPU previews, `LayoutSanity`, `DrawListDump`, `SoftwareGlyphRenderer`). `LayoutSanity` transforms clipping ancestors' boxes too. Picking still reads the layout (drawn offsets and scales are not seen by it, as before) | `DrawList`, `ui-testkit`, `ui-text` |
+| Dirty ranges | `DirtyRanges`: a few sorted, disjoint ranges per table (primitives and transform entries), merged within `ui.draw.dirtyMergeGap` (16 primitives) and at most `ui.draw.dirtyRanges` (16; past it the closest two merge); `dirtyFrom/To` stay the span. The engine uploads each range apart | `ui-core` `DirtyRanges`, `DrawList`, engine `GpuUiRenderer` |
+| Engine | `ui/primitive.slang`: `TRANSFORM` (was `RESERVED`), `CLIP_FLOATS`, `TRANSFORM_FLOATS` (checked against `Primitive` and `DrawList`); `ui/draw.slang`: the push constants carry the layer's transform table (`transforms`, `clipFloats` gone), vertices placed by the entry, coverage worked out in the primitive's own coordinates with distances scaled to pixels (box, shadow, glyph range, weight and outline, line width), colour times opacity; entry 0 needs no memory read. `GpuUiRenderer` keeps a transform buffer per layer and uploads every dirty range of primitives and entries | engine `ui` |
+| SVG icons | `SvgIcon` parses an icon's filled shapes (`path` with every command, arcs as cubics; `rect` with radii, `circle`, `ellipse`, `polygon`, `polyline`; `g`; every `transform`) into a `GlyphOutline` in ems; `IconFace` makes them glyphs of the text atlas (MTSDF, generated, packed and evicted like text, never cached on disk). `UiImages.addSvg`, `loadSvg`, or `icons/<name>.svg` found on the classpath when a style names `icons/<name>` (a registered image or built-in icon of the name stays a texture); the UI draws them as glyph primitives tinted by the style's image colour, fitted like images and measured at their size. Our own parser: lwjgl-nanovg is not in the local repositories and downloading is not allowed | `ui-text` `SvgIcon`, `IconFace`, `controls` `UiImages`, `Ui` |
+| Atlas page eviction | At most `ui.text.atlas.maxPages` (8) MTSDF and raster pages: a new page past it clears the least recently used page (by the last frame a glyph of it was looked up or installed) that no draw list draws (`GlyphAtlas.pageGuard`, the UI's scan of its lists, run only then) and that has no glyph generating; with none, the atlas grows past the budget. Evicted glyphs keep their entries as `EVICTED`; `generation()` grows, text looks its glyphs up again, which queues them again. Colour pages are not evicted | `GlyphAtlas`, `AtlasSettings`, `TextBlock`, `Ui` |
+| Workarounds removed | The test theme's fixed heights of date cells and badges (labels no longer shrink under their text). Kept, as real sizing: the gallery's minimum-size panels and the test theme's step numbers (fixed-size boxes whose text would overflow anyway) | `_basic-test.tss` |
+
+#### The draw-list format change (for branches that record primitives)
+
+- Word 15 of a primitive is its transform index (`Primitive.TRANSFORM`); `DrawList.begin` resets it to 0
+  (`useTransform` sets it). Code that records with `DrawList`'s methods needs no change.
+- `DrawList.CLIP_FLOATS` is 8 (was 7): float 7 is the clip's transform index. Code reading `clips()` by
+  `CLIP_FLOATS` keeps working; code reading positions should use `drawnX/Y`/`drawnClip` or `baked()`.
+- The UI no longer fades colours by opacity nor bakes scales and offsets: `Painter.paint`'s `opacity` is always 1
+  (the entry fades what a painter records), `TextBlock.record` gets the unfaded colour.
+- `DrawList.transform(scale, x, y)` still bakes a transform while recording (the UI uses it for the clip's content
+  space only).
+
+#### Decisions
+
+- *An entry per composing element, shared by its subtree*, not one per element: a fading window rewrites one entry;
+  elements that never animate stay on entry 0. Becoming an owner records the subtree once (its primitives name the
+  new entry); the entry stays until the layer is rebuilt, so a hover that fades in and out records once.
+- *Opacity in the entry*, multiplied in the shader after coverage (premultiplied output), identical to fading the
+  colours (goldens, which print primitives as they draw, are unchanged by it).
+- *Scroll before transform*: the clip offset is added to a primitive's own coordinates, the entry applied after, so a
+  scaled panel's scroll pane scrolls by scaled pixels (it moved by unscaled ones before).
+- *The automatic minimum only where it can matter*: measured lazily when an item is to shrink below its hypothetical
+  size, cached until its layout changes; Yoga's semantics are `min-width: 0`, which the oracle now sets.
+- *An SVG parser of our own* (filled shapes, no strokes or CSS) rather than NanoSVG, which would need a download.
+- *Eviction never drops a drawn glyph*: the page guard asks the UI's draw lists; past the budget with every page
+  drawn, the atlas grows rather than flicker.
+
+#### Tests
+
+ui: `DirtyRangesTest` (merging, the most ranges, random coverage, allocation-free); `DrawListTest`
+(`primitivesDrawByTheirTransformEntryWhichAnAnimationRewritesAlone`, `theTransformTableGrows`,
+`changesFarApartAreSeparateDirtyRanges`); `AnimatorTest.aScaledClippingPanelClipsItsContentWhereItDraws` (an
+animation dirties no primitive and no clip, the clip scales and moves with its owner, `LayoutSanity` sane) and the
+transform test reading drawn values; `FlexLayoutTest.itemsShrinkNoFurtherThanTheirMinContentUnlessTheyClipOrHaveAMinimum`,
+`textShrinksToItsLongestWordAndARowToItsItemsMinimums`, `aWrappingContainerIsNeverNarrowerThanItsWidestItem`;
+`SizingTest` and `YogaOracleTest` adapted (1,304 of 2,000 trees, 9,255 elements compared, as before);
+`SvgIconTest` (view box, every path command, shapes and transforms, sizes, errors, a ring's distance field);
+`GlyphAtlasTest.pastItsPageBudgetTheLeastRecentlyUsedPageNoTextDrawsIsEvicted`,
+`iconsAreGlyphsOfTheirFaceAndNeverCached`; `SvgIconsTest` (three self-written SVG resources drawn as tinted glyphs,
+fitted, measured; files, code, missing names). Engine: `UiRendererTest.aScaledAndMovedSubtreeDrawsAndClipsWhereItsTransformEntryPutsIt`
+(GPU read-back and screenshot `transformed-clipped.png`), `changesFarApartUploadApart`, an animated entry in the
+allocation test; the constants test covers `TRANSFORM_FLOATS`.
+
+Goldens regenerated: the basic gallery (both themes): the spinner and progress bar animate by entries, so the
+gallery settles (no element records) a few frames earlier and their phase differs; in the test theme, labels in
+fixed-size cells keep their height and centre a pixel or two higher. Draw-list dumps print primitives as they draw
+(`baked()`), so other goldens did not change.
+
+#### Benchmarks (Ryzen 9 9950X3D, RX 9070 XT, without JaCoCo; other agents were building: noisy)
+
+| Case | Before | After |
+|---|---|---|
+| HUD (506 elements, 4,896 glyphs), idle, CPU | 0.0001 ms p99 | 0.0001 ms p99 |
+| HUD, 10% changing, CPU (`HudBenchmarkTest`) | 0.24 to 0.25 ms median, 0.28 to 0.36 p99 | 0.27 ms median, 0.33 to 0.39 p99 |
+| HUD, four cards fading (animated opacity), CPU | 0.025 ms median, 323,892 bytes a frame | 0.0002 ms median, 128 bytes a frame |
+| HUD, two counters far apart changing | 412,603 bytes a frame | 503 bytes a frame |
+| Renderer submit, 50 of 500 elements changing (`UiBenchmark`) | 8.5 us, 408,256 bytes a frame | 5.3 us, 292,096 bytes a frame |
+| HUD at 4K, GPU, adaptive | 0.103 ms | 0.104 ms |
+| 100,000 glyphs, GPU, adaptive: alone / over a translucent backdrop | 0.303 / 0.451 ms | 0.307 / 0.461 ms |
+| Layout, HUD 500 elements 10% changing (`LayoutBenchmark`) | 50.6 us p50 | 55.5 us p50 |
+| Layout, form 500 rows, 10% changing | 60.9 us p50 | 64.2 us p50 |
+
+#### Left
+
+- The 100,000-glyph-over-a-backdrop case is still 0.45 to 0.46 ms against 0.4 ms (not worked on).
+- The 10% changing HUD (CPU) and the layout's HUD may be 5 to 10% slower (dirty ranges, the automatic minimum's
+  extra measure of changed items); to re-measure on a quiet machine.
+- SVG: strokes, CSS, gradients and `use` are not read; `fill-rule="evenodd"` needs holes wound the other way. Icons
+  draw only through a text system with an atlas (a UI without text shows nothing for them).
+- Picking does not follow drawn transforms (as before): a scaled element is hit at its layout box.
+- An element that once composed keeps its entry until its layer is rebuilt (a small table, never cleaned up sooner).
+
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
 Two options of docking's windows: a paper white per window, and windows see-through while dragged.
@@ -1822,9 +1912,9 @@ two phases (no frame of latency for the game's changes), built-in icons and touc
 
 #### Left
 
-- Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
+- ~~Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
   label's text overflows its box rather than the row overflowing. The galleries use minimum sizes; a layout change is
-  its own step (the Yoga oracle tests pin the current behaviour).
+  its own step (the Yoga oracle tests pin the current behaviour).~~ Built: see "Group A3, render".
 - `LayoutSanity` tolerates italic overhang by a share of the ink's height; it does not check text against elision
   (no element elides yet) nor overlaps across layers (pop-ups are meant to cover).
 - Touch handles are not magnified (no loupe) and do not scroll a field while dragged past its edge.
@@ -1920,8 +2010,8 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
 - From the branches: ~~incremental shaping of very long paragraphs~~ (built: below), ~~touch selection handles~~,
   spell checking,
   grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
-  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
-  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  `keyboardResize` and `focusNext` (windows); ~~a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms~~ (built: "Group A3, render"), mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
   the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
   records by their
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
@@ -1970,10 +2060,11 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
   text, tweens, style transitions and `scale` drawn by per-range transforms).
 - ~~`common-state`'s `VersionedTree` and `VersionedRingBuffer`~~: built after A2 (`VersionedTree`,
   `VersionedDoubleRing`/`VersionedFloatRing`, below).
-- SVG icons through NanoSVG; atlas page eviction (colour emoji: built in A2, CBDT).
+- ~~SVG icons through NanoSVG; atlas page eviction~~ (built in "Group A3, render", SVG by a parser of our own;
+  colour emoji: built in A2, CBDT).
 - Touch, pen and XR pointer sources (the IME rectangle: built in A2).
 - 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
-- A multi-range dirty list: one range per list spans all changed elements of a frame.
+- ~~A multi-range dirty list: one range per list spans all changed elements of a frame.~~ Built: "Group A3, render".
 - ~~Colour emoji without a bundled font~~: Noto Color Emoji is bundled in A2 (`ui-fonts-emoji`).
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
 
