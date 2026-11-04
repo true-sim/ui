@@ -3,14 +3,19 @@ package com.truesim.ui.controls;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.draw.UiTexture;
 import com.truesim.ui.core.draw.UiTextures;
+import com.truesim.ui.text.IconFace;
+import com.truesim.ui.text.SvgIcon;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import javax.imageio.ImageIO;
 
 /**
@@ -18,11 +23,20 @@ import javax.imageio.ImageIO;
  * {@link UiTexture} of its own, registered by name when loaded (an asset type later, D16). Lookups are by name at
  * style application, never per frame. The toolkit's own chrome icons ({@link BuiltinIcons}) are there without
  * registering anything.
+ *
+ * <p><b>SVG icons</b> ({@link #addSvg}, {@link #loadSvg}, or an {@code .svg} resource of the name found on the
+ * classpath: {@code image: "icons/gear"} finds {@code icons/gear.svg}) are not textures: their filled shapes
+ * ({@link SvgIcon}) are glyphs of an {@link IconFace} in the text atlas, MTSDF like text, crisp at any size and tinted
+ * by the style's image colour like text. A registered image or a built-in icon of the same name comes first.
  */
 public final class UiImages {
 
     private final UiTextures textures;
     private final Map<String, UiTexture> byName = new HashMap<>();
+    private final IconFace icons = new IconFace();
+    private final Map<String, Integer> iconByName = new HashMap<>();
+    private final Set<String> noIcon = new HashSet<>(); // names whose .svg resource was looked for and not found
+    private ClassLoader resources = UiImages.class.getClassLoader();
 
     /** Images made in {@code textures}. */
     @AllowAllocation("one per UI")
@@ -83,6 +97,73 @@ public final class UiImages {
             }
         }
         return t;
+    }
+
+    /** Registers the SVG document {@code svg} as icon {@code name}; returns its glyph in {@link #iconFace()}. */
+    @AllowAllocation("icons are loaded, not made per frame")
+    public int addSvg(String name, String svg) {
+        int glyph = icons.add(SvgIcon.parse(svg));
+        iconByName.put(name, glyph);
+        noIcon.remove(name);
+        return glyph;
+    }
+
+    /** Loads an SVG file as icon {@code name}. */
+    @AllowAllocation("icons are loaded, not made per frame")
+    public int loadSvg(String name, Path file) {
+        try {
+            return addSvg(name, Files.readString(file, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Where {@code <name>.svg} resources are looked for (this class's loader by default). */
+    public void svgResources(ClassLoader loader) {
+        resources = loader;
+        noIcon.clear();
+    }
+
+    /**
+     * The glyph of SVG icon {@code name} in {@link #iconFace()}, or -1: a registered one, else the classpath resource
+     * {@code name + ".svg"}, loaded the first time (a name without one is remembered, so a miss costs a lookup).
+     * A registered image or built-in icon of that name is not an SVG icon.
+     */
+    public int icon(String name) {
+        if (name == null || name.isEmpty()) {
+            return -1;
+        }
+        Integer glyph = iconByName.get(name);
+        if (glyph != null) {
+            return glyph;
+        }
+        if (byName.containsKey(name) || noIcon.contains(name) || BuiltinIcons.find(name) >= 0) {
+            return -1;
+        }
+        return loadResource(name);
+    }
+
+    @AllowAllocation("an SVG resource is read once, the first time a style names it")
+    private int loadResource(String name) {
+        try (InputStream in = resources == null ? null : resources.getResourceAsStream(name + ".svg")) {
+            if (in == null) {
+                noIcon.add(name);
+                return -1;
+            }
+            return addSvg(name, new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** SVG icon {@code glyph}'s shapes and size. */
+    public SvgIcon svg(int glyph) {
+        return icons.icon(glyph);
+    }
+
+    /** The face whose glyphs the SVG icons are, for the text atlas. */
+    public IconFace iconFace() {
+        return icons;
     }
 
     @AllowAllocation("a built-in icon is rendered once, the first time a style names it")

@@ -187,6 +187,42 @@ class AnimatorTest {
     }
 
     @Test
+    void aScaledClippingPanelClipsItsContentWhereItDraws() {
+        Rig r = new Rig();
+        Element outer = r.panel(null);
+        Element clipper = r.ui.panel(null);
+        outer.add(clipper);
+        r.ui.styles().inline(clipper.slot(), com.truesim.ui.style.InlineStyle.builder()
+            .set(com.truesim.ui.style.Styles.CLIP, true).build());
+        Element inner = r.ui.panel(null); // 100 wide like its parent: passes it by its offset
+        clipper.add(inner);
+        r.frame(16);
+        DrawList list = r.ui.layers()[0];
+        int at = r.ui.store().rangeStart(inner.slot());
+        int clip = Primitive.clip(list.header(at));
+        assertThat(clip).isNotZero();
+        float[] c = new float[5];
+        list.drawnClip(clip, c);
+        float x = r.ui.layout().x(clipper.slot());
+        assertThat(c[2] - c[0]).isEqualTo(100, offset(0.01f));
+        r.ui.visuals().scale(outer, 2); // first time: an entry, the subtree records once
+        r.frame(16);
+        list.clean();
+        r.ui.visuals().scale(outer, 3); // then the entry alone
+        r.ui.visuals().translate(outer, 5, 0);
+        r.frame(16);
+        assertThat(list.dirtyRanges().isEmpty()).isTrue();
+        assertThat(list.clipsDirty()).as("the clip is drawn by the entry: unchanged").isFalse();
+        list.drawnClip(clip, c);
+        float cx = x + 50;
+        assertThat(c[0]).as("the clip moved and scaled with its owner").isEqualTo(cx + 3 * (x - cx) + 5,
+            offset(0.01f));
+        assertThat(c[2] - c[0]).isEqualTo(300, offset(0.01f));
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(c[0], offset(0.01f));
+        com.truesim.ui.testkit.LayoutSanity.assertSane(r.ui, "a scaled clipping panel");
+    }
+
+    @Test
     void transformsAndOpacityApplyToTheSubtree() {
         Rig r = new Rig();
         Element outer = r.ui.panel(null);

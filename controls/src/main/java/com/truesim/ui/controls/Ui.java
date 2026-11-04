@@ -10,6 +10,7 @@ import com.truesim.ui.core.Role;
 import com.truesim.ui.core.Tunable;
 import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.draw.DrawList;
+import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.draw.UiTexture;
 import com.truesim.ui.core.draw.UiTextures;
@@ -43,6 +44,7 @@ import com.truesim.ui.style.value.Shadow;
 import com.truesim.ui.style.value.TextOutline;
 import com.truesim.ui.style.value.Track;
 import com.truesim.ui.text.GlyphAtlas;
+import com.truesim.ui.text.SvgIcon;
 import com.truesim.ui.text.TextAlign;
 import com.truesim.ui.text.TextBlock;
 import com.truesim.ui.text.TextSystem;
@@ -178,6 +180,8 @@ public final class Ui {
     private int[] entrySlots = new int[16]; // the slots holding entries (some stale after a rebuild)
     private int entrySlotCount;
     private boolean transformsDirty;
+    private int[] iconWaiting = new int[8]; // elements whose SVG icon's glyph is not generated yet
+    private int iconWaitCount;
     private int[] clipEntry = new int[0]; // per clip owner: the entry its clip rectangle is in
 
     // per slot
@@ -248,6 +252,9 @@ public final class Ui {
         this.animator = new Animator(store, visuals);
         visuals.restyler(this::restyleLayout);
         visuals.transformListener(this::transformChanged);
+        if (text != null && text.atlas() != null) {
+            text.atlas().pageGuard(this::drawsPage); // drawn glyphs are never evicted
+        }
         ensure();
         store.semantics(store.rootSlot(), Role.GROUP, null);
     }
@@ -654,6 +661,12 @@ public final class Ui {
             if (atlas.completions() != seenCompletions || technique != seenTechnique) {
                 seenCompletions = atlas.completions();
                 seenTechnique = technique;
+                for (int i = 0; i < iconWaitCount; i++) { // icons waiting for their glyph record again
+                    if (store.alive(iconWaiting[i])) {
+                        store.markDirty(iconWaiting[i], UiStore.DIRTY_DRAW);
+                    }
+                }
+                iconWaitCount = 0;
                 for (int i = 0; i < textSlotCount; i++) {
                     int slot = textSlots[i];
                     if (blocks[slot].version() != drawnTextVersion[slot]) {
@@ -1024,7 +1037,13 @@ public final class Ui {
             return Measure.size(b.width() / scale, b.height() / scale);
         }
         if (content[slot] == IMAGE) {
-            UiTexture t = images.get(resolver.styleOf(slot).get(Styles.IMAGE).name());
+            String name = resolver.styleOf(slot).get(Styles.IMAGE).name();
+            int icon = text == null || text.atlas() == null ? -1 : images.icon(name);
+            if (icon >= 0) {
+                SvgIcon svg = images.svg(icon);
+                return Measure.size(svg.width(), svg.height());
+            }
+            UiTexture t = images.get(name);
             return t == null ? Measure.size(0, 0) : Measure.size(t.width(), t.height());
         }
         if (content[slot] == PAINTED) {
@@ -1330,7 +1349,7 @@ public final class Ui {
                 outline.color().rgba(), 0);
             drawnTextVersion[slot] = b.version();
         } else if (content[slot] == IMAGE) {
-            recordImage(s.get(Styles.IMAGE), cx0, cy0, cx1, cy1);
+            recordImage(slot, s.get(Styles.IMAGE), cx0, cy0, cx1, cy1);
         } else if (content[slot] == PAINTED) {
             painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, 1); // the entry fades it
         }
@@ -1363,6 +1382,7 @@ public final class Ui {
         visuals.compose(slot);
         list.setTransform(e, visuals.composedScale(), visuals.composedX(), visuals.composedY(),
             visuals.composedOpacity());
+        clipsMoved = true; // clips in its subtree are drawn by the new entry
         if (!entryListed[slot]) {
             entryListed[slot] = true;
             if (entrySlotCount == entrySlots.length) {
@@ -1436,7 +1456,13 @@ public final class Ui {
         }
     }
 
-    private void recordImage(ImageSpec spec, float x0, float y0, float x1, float y1) {
+    private void recordImage(int slot, ImageSpec spec, float x0, float y0, float x1, float y1) {
+        GlyphAtlas iconAtlas = text == null ? null : text.atlas();
+        int icon = iconAtlas == null ? -1 : images.icon(spec.name());
+        if (icon >= 0) {
+            recordIcon(slot, iconAtlas, icon, spec, x0, y0, x1, y1);
+            return;
+        }
         UiTexture t = images.get(spec.name());
         if (t == null || x1 <= x0 || y1 <= y0) {
             return;
@@ -1462,6 +1488,63 @@ public final class Ui {
             float oy = y0 + (h - dh) * 0.5f;
             rec.image(ox, oy, ox + dw, oy + dh, 0, 0, 1, 1, t.id(), tint);
         }
+    }
+
+    /**
+     * An SVG icon ({@link UiImages#icon}): a glyph of the atlas's icon face, fitted as an image (cover and fill as
+     * contain: a distance field keeps its proportions), tinted like text. Until its glyph is generated it draws
+     * nothing and records again when the atlas completes glyphs.
+     */
+    private void recordIcon(int slot, GlyphAtlas atlas, int icon, ImageSpec spec, float x0, float y0, float x1,
+        float y1) {
+        if (x1 <= x0 || y1 <= y0) {
+            return;
+        }
+        SvgIcon svg = images.svg(icon);
+        float w = x1 - x0;
+        float h = y1 - y0;
+        float iw = svg.width() * layout.scale();
+        float ih = svg.height() * layout.scale();
+        ImageFit fit = spec.fit();
+        float k = fit == ImageFit.NONE ? 1 : fit == ImageFit.SCALE_DOWN ? Math.min(1, Math.min(w / iw, h / ih))
+            : Math.min(w / iw, h / ih);
+        float dw = iw * k;
+        float dh = ih * k;
+        float px = x0 + (w - dw) * 0.5f;
+        float py = y0 + (h - dh) * 0.5f + dh; // the icon's baseline: its bottom
+        int e = atlas.entry(images.iconFace(), icon);
+        float gs = dh; // pixels per em: the icon is 1 em high
+        if (atlas.state(e) == GlyphAtlas.READY) {
+            rec.glyph(px + atlas.plane(e, 0) * gs, py - atlas.plane(e, 3) * gs, px + atlas.plane(e, 2) * gs,
+                py - atlas.plane(e, 1) * gs, atlas.uv(e, 0), atlas.uv(e, 1), atlas.uv(e, 2), atlas.uv(e, 3),
+                atlas.texture(e), atlas.pixelRange() * gs / atlas.emSize(), spec.tint().rgba(), 0, 0, 0);
+        } else {
+            rec.glyph(px, py, px, py, 0, 0, 0, 0, atlas.page(0).id(), 0, 0, 0, 0, 0); // its place, empty
+            if (atlas.state(e) != GlyphAtlas.EMPTY) {
+                waitForIcon(slot);
+            }
+        }
+    }
+
+    private void waitForIcon(int slot) {
+        if (iconWaitCount == iconWaiting.length) {
+            iconWaiting = Arrays.copyOf(iconWaiting, iconWaitCount * 2);
+        }
+        iconWaiting[iconWaitCount++] = slot;
+    }
+
+    /** Whether some layer draws a glyph from texture {@code id}: an atlas page that must not be evicted. */
+    private boolean drawsPage(int id) {
+        for (int li = 0; li < layerStack.count(); li++) {
+            DrawList list = layerStack.at(li).drawList();
+            for (int i = 0; i < list.size(); i++) {
+                int h = list.header(i);
+                if (Primitive.kind(h) == Primitive.GLYPH && list.intAt(i, Primitive.TEXTURE) == id) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------- access
