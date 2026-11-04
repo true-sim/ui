@@ -1,5 +1,6 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Painter;
 import com.truesim.ui.controls.Ui;
@@ -186,7 +187,7 @@ public final class ViewCube implements Painter, Ui.FrameListener {
             }
             project(dx, dy, dz, pa);
             int nonZero = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
-            double d = Math.hypot(pa[0] - x, pa[1] - y) * (nonZero == 1 ? 1.6 : 1);
+            double d = Maths.hypot(pa[0] - x, pa[1] - y) * (nonZero == 1 ? 1.6 : 1);
             if (d < bestDistance) {
                 bestDistance = d;
                 best = t;
@@ -308,7 +309,7 @@ public final class ViewCube implements Painter, Ui.FrameListener {
                     float ax = pa[0];
                     float ay = pa[1];
                     corner(a, sign, u, -1, v, -1 + 2.0 / lines, pa);
-                    width = (float) Math.hypot(pa[0] - ax, pa[1] - ay); // abutting: no overlaps to show
+                    width = (float) Maths.hypot(pa[0] - ax, pa[1] - ay); // abutting: no overlaps to show
                     corner(a, sign, u, -1, v, t, pa);
                 }
                 list.line(pa[0], pa[1], pb[0], pb[1], width, fill);

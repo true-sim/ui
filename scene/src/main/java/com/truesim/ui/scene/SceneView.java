@@ -1,5 +1,7 @@
 package com.truesim.ui.scene;
 
+import com.truesim.common.math.Maths;
+
 /**
  * A camera as the UI sees it: where a 3D view is on the screen (its viewport, in UI pixels) and the camera that draws
  * it (position in doubles, orientation, perspective or orthographic projection). The engine sets it every frame from
@@ -12,7 +14,7 @@ package com.truesim.ui.scene;
  * exact as one at it (D37). Nothing here allocates.
  *
  * <pre>{@code
- * SceneView main = new SceneView().perspective(Math.toRadians(60), 0.1, 10_000).viewport(0, 0, 1920, 1080);
+ * SceneView main = new SceneView().perspective(Maths.toRadians(60), 0.1, 10_000).viewport(0, 0, 1920, 1080);
  * main.pose(cx, cy, cz, qx, qy, qz, qw);   // each frame, from the camera node's world transform
  * }</pre>
  */
@@ -26,8 +28,8 @@ public final class SceneView {
     private double qz;
     private double qw = 1;
     private boolean orthographic;
-    private double fovY = Math.toRadians(60);
-    private double tanHalf = Math.tan(fovY / 2);
+    private double fovY = Maths.toRadians(60);
+    private double tanHalf = Maths.tan(fovY / 2);
     private double halfHeight = 1;
     private double near = 0.1;
     private double far = 10_000;
@@ -65,7 +67,7 @@ public final class SceneView {
         }
         orthographic = false;
         fovY = verticalFov;
-        tanHalf = Math.tan(verticalFov / 2);
+        tanHalf = Maths.tan(verticalFov / 2);
         near = nearDistance;
         far = farDistance;
         version++;

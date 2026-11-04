@@ -1,5 +1,6 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
 import static com.truesim.ui.gizmo.GizmoMath.closestOnLine;
 import static com.truesim.ui.gizmo.GizmoMath.dot;
 import static com.truesim.ui.gizmo.GizmoMath.rayPlane;
@@ -209,9 +210,9 @@ public final class GizmoSolver {
             }
             case ROTATE_X, ROTATE_Y, ROTATE_Z -> {
                 double[] a = axis[handle.axis()];
-                GizmoMath.axisAngle(a[0], a[1], a[2], Math.toRadians(value), delta.rotation, 0);
+                GizmoMath.axisAngle(a[0], a[1], a[2], Maths.toRadians(value), delta.rotation, 0);
             }
-            case ROTATE_VIEW -> GizmoMath.axisAngle(-forward[0], -forward[1], -forward[2], Math.toRadians(value),
+            case ROTATE_VIEW -> GizmoMath.axisAngle(-forward[0], -forward[1], -forward[2], Maths.toRadians(value),
                 delta.rotation, 0);
             case SCALE_X, SCALE_Y, SCALE_Z -> delta.scale[handle.axis()] = value;
             case SCALE_UNIFORM -> {
@@ -308,7 +309,7 @@ public final class GizmoSolver {
             nz = (up[2] * mx + right[2] * my) / angle;
             angle = snap(angle, step);
             GizmoMath.axisAngle(nx, ny, nz, angle, delta.rotation, 0);
-            delta.value = Math.toDegrees(angle);
+            delta.value = Maths.toDegrees(angle);
             return true;
         }
         if (handle == GizmoHandle.ROTATE_VIEW) {
@@ -329,7 +330,7 @@ public final class GizmoSolver {
             double ay = startY - centerY;
             double bx = x - centerX;
             double by = y - centerY;
-            double screenAngle = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+            double screenAngle = Maths.atan2(ax * by - ay * bx, ax * bx + ay * by);
             double towards = -dot(nx, ny, nz, forward[0], forward[1], forward[2]);
             angle = towards >= 0 ? -screenAngle : screenAngle;
         } else {
@@ -349,11 +350,11 @@ public final class GizmoSolver {
             double cx = sy * ez - sz * ey;
             double cy = sz * ex - sx * ez;
             double cz = sx * ey - sy * ex;
-            angle = Math.atan2(dot(nx, ny, nz, cx, cy, cz), dot(sx, sy, sz, ex, ey, ez));
+            angle = Maths.atan2(dot(nx, ny, nz, cx, cy, cz), dot(sx, sy, sz, ex, ey, ez));
         }
         angle = snap(angle, step);
         GizmoMath.axisAngle(nx, ny, nz, angle, delta.rotation, 0);
-        delta.value = Math.toDegrees(angle);
+        delta.value = Maths.toDegrees(angle);
         return true;
     }
 
@@ -361,8 +362,8 @@ public final class GizmoSolver {
         double step, GizmoDelta delta) {
         double f;
         if (screen) {
-            double a = Math.hypot(startX - centerX, startY - centerY);
-            double b = Math.hypot(x - centerX, y - centerY);
+            double a = Maths.hypot(startX - centerX, startY - centerY);
+            double b = Maths.hypot(x - centerX, y - centerY);
             if (a < 1) {
                 // grabbed at the very centre: the distance moved right and up, against the ball's radius
                 f = 1 + ((x - startX) - (y - startY)) / radiusPx;

@@ -1,5 +1,7 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
+
 /**
  * Vector and quaternion arithmetic in doubles on plain arrays (D37): what gizmos solve drags with, allocation-free.
  * Vectors are three doubles and quaternions four (x, y, z, w) at an offset of an array.
@@ -51,11 +53,11 @@ final class GizmoMath {
 
     /** Writes the rotation by {@code angle} radians about unit axis {@code (x, y, z)} into {@code out[o..o+3]}. */
     static void axisAngle(double x, double y, double z, double angle, double[] out, int o) {
-        double s = Math.sin(angle / 2);
+        double s = Maths.sin(angle / 2);
         out[o] = x * s;
         out[o + 1] = y * s;
         out[o + 2] = z * s;
-        out[o + 3] = Math.cos(angle / 2);
+        out[o + 3] = Maths.cos(angle / 2);
     }
 
     /** Normalises the quaternion at {@code out[o]}. */

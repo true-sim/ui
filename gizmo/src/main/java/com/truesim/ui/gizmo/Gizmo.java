@@ -1,5 +1,6 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.math.geometry.Aabb;
 import com.truesim.scene.core.NodeHandle;
@@ -536,7 +537,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             // right and up across the direction, up as near the world's +Y as can be
             double rx = -shapes.forward[2];
             double rz = shapes.forward[0];
-            double rl = Math.hypot(rx, rz);
+            double rl = Maths.hypot(rx, rz);
             if (rl < 1e-9) {
                 rx = 1;
                 rz = 0;
@@ -548,7 +549,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             shapes.up[0] = shapes.right[1] * shapes.forward[2] - shapes.right[2] * shapes.forward[1];
             shapes.up[1] = shapes.right[2] * shapes.forward[0] - shapes.right[0] * shapes.forward[2];
             shapes.up[2] = shapes.right[0] * shapes.forward[1] - shapes.right[1] * shapes.forward[0];
-            double angular = Math.tan(Math.toRadians(XR_ANGULAR_SIZE.get()) / 2) * 2;
+            double angular = Maths.tan(Maths.toRadians(XR_ANGULAR_SIZE.get()) / 2) * 2;
             shapes.size = distance * angular;
             shapes.boundsHandle = shapes.size * 0.06;
         }
@@ -647,7 +648,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         } else {
             double distance = GizmoMath.length(shapes.origin[0] - pointerRay[0], shapes.origin[1] - pointerRay[1],
                 shapes.origin[2] - pointerRay[2]);
-            tolerance = distance * Math.tan(Math.toRadians(XR_PICK_ANGLE.get()));
+            tolerance = distance * Maths.tan(Maths.toRadians(XR_PICK_ANGLE.get()));
         }
         boolean hit = shapes.pick(pointerRay[0], pointerRay[1], pointerRay[2], pointerRay[3], pointerRay[4],
             pointerRay[5], tolerance);
@@ -844,7 +845,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             changed = solver.typed(value, delta);
         } else {
             changed = solver.drag(ray[0], ray[1], ray[2], ray[3], ray[4], ray[5], x, y, snapping,
-                SNAP_TRANSLATE.get(), Math.toRadians(SNAP_ROTATE.get()), SNAP_SCALE.get(), delta);
+                SNAP_TRANSLATE.get(), Maths.toRadians(SNAP_ROTATE.get()), SNAP_SCALE.get(), delta);
         }
         if (changed) {
             delta.individual = pivot == GizmoPivot.INDIVIDUAL;
@@ -1016,7 +1017,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
                 if (view.project(p[0], p[1], p[2], sa) && view.project(q[0], q[1], q[2], sb)) {
                     float dx = sb[0] - sa[0];
                     float dy = sb[1] - sa[1];
-                    float l = (float) Math.hypot(dx, dy);
+                    float l = (float) Maths.hypot(dx, dy);
                     if (l > 0.5f) {
                         float nx = -dy / l * tip / 2;
                         float ny = dx / l * tip / 2;
@@ -1098,7 +1099,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
                     double ey = p[1] + av[1] * (hi - lo) / lines * s;
                     double ez = p[2] + av[2] * (hi - lo) / lines * s;
                     if (view.project(ex, ey, ez, sb)) {
-                        w = (float) Math.hypot(sb[0] - sa[0], sb[1] - sa[1]); // abutting: translucent overlaps show
+                        w = (float) Maths.hypot(sb[0] - sa[0], sb[1] - sa[1]); // abutting: translucent overlaps show
                     }
                 }
             }
@@ -1176,7 +1177,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     static void triangle(DrawList list, float ax, float ay, float bx, float by, float cx, float cy, long color) {
         float mx = (bx + cx) / 2;
         float my = (by + cy) / 2;
-        float height = (float) Math.hypot(ax - mx, ay - my);
+        float height = (float) Maths.hypot(ax - mx, ay - my);
         int steps = Math.max(2, Math.min(32, (int) Math.ceil(height / 1.5f)));
         float width = height / steps; // abutting: a translucent (faded) tip shows no overlaps
         for (int k = 0; k < steps; k++) {

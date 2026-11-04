@@ -1,5 +1,6 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
 import static com.truesim.ui.gizmo.GizmoMath.dot;
 
 /**
@@ -166,8 +167,8 @@ final class GizmoShapes {
         double vy = n[2] * ux - n[0] * uz;
         double vz = n[0] * uy - n[1] * ux;
         double angle = 2 * Math.PI * i / RING_SEGMENTS;
-        double cos = Math.cos(angle) * r * size;
-        double sin = Math.sin(angle) * r * size;
+        double cos = Maths.cos(angle) * r * size;
+        double sin = Maths.sin(angle) * r * size;
         out[0] = origin[0] + ux * cos + vx * sin;
         out[1] = origin[1] + uy * cos + vy * sin;
         out[2] = origin[2] + uz * cos + vz * sin;

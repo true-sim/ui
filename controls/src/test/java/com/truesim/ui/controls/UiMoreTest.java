@@ -63,8 +63,9 @@ class UiMoreTest {
         assertThatThrownBy(() -> ui.images().load("b", bad)).isInstanceOf(UncheckedIOException.class);
         assertThatThrownBy(() -> ui.images().load("c", dir.resolve("missing.png")))
             .isInstanceOf(UncheckedIOException.class);
-        assertThat(ui.tunables()).hasSize(39); // 11 of the frame, 5 of text editing, 7 of the basic controls,
-        // 9 of scrolling and lists, 7 of tooltips, hover cards and windows (UiTunablesTest: all of them)
+        assertThat(ui.tunables()).hasSize(39 + 11); // 11 of the frame, 5 of text editing, 7 of the basic controls,
+        // 9 of scrolling and lists, 7 of tooltips, hover cards and windows (UiTunablesTest: all of them); 11 of
+        // ui-scene and ui-gizmo, whose TunableHolder services this test class path has (the scene gallery)
         assertThat(ui.textSystem()).isNull();
     }
 

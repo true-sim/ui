@@ -1,5 +1,6 @@
 package com.truesim.ui.gizmo;
 
+import com.truesim.common.math.Maths;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.scene.core.NodeHandle;
 import com.truesim.scene.core.SceneGraph;
@@ -231,9 +232,9 @@ public final class GizmoGrab {
                 double cz = ux * vy - uy * vx;
                 double cos = GizmoMath.dot(ux, uy, uz, vx, vy, vz);
                 double sin = GizmoMath.length(cx, cy, cz);
-                double angle = Math.atan2(sin, cos);
+                double angle = Maths.atan2(sin, cos);
                 if (snapping) {
-                    angle = GizmoMath.snap(angle, Math.toRadians(Gizmo.SNAP_ROTATE.get()));
+                    angle = GizmoMath.snap(angle, Maths.toRadians(Gizmo.SNAP_ROTATE.get()));
                 }
                 if (sin > GizmoMath.EPSILON) {
                     GizmoMath.axisAngle(cx / sin, cy / sin, cz / sin, angle, delta.rotation, 0);
