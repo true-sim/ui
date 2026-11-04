@@ -118,6 +118,63 @@ class ShapeCacheTest {
         assertThat(cache.misses()).isEqualTo(8);
     }
 
+    /**
+     * Runs colliding in one probe chain (their home slots forced equal; the layout otherwise depends on the face's
+     * identity hash, which differs between machines): a generation dying in the middle of a chain must not hide the
+     * live runs after it. Failed before dead slots were deleted with a backward shift (Linux CI, not Windows).
+     */
+    @Test
+    void runsOfOneProbeChainStayFoundWhenAGenerationInTheMiddleDies() {
+        cache.homeBits(0); // every run's home slot is the same
+        ShapeCache.ENTRIES.set(4);
+        for (int i = 0; i < 4; i++) {
+            shape("w" + i, 0, 2, face, 14, false); // the chain: w0 w1 w2 w3
+        }
+        shape("w4", 0, 2, face, 14, false); // a new generation; w0 to w3 the previous one
+        shape("w0", 0, 2, face, 14, false); // w0 moves into the current one
+        shape("w5", 0, 2, face, 14, false);
+        shape("w6", 0, 2, face, 14, false); // the current one full: w4 w0 w5 w6
+        shape("w7", 0, 2, face, 14, false); // w1 to w3 die: their slots sit between w0 and w4 w5 w6
+        assertThat(shaper.calls).isEqualTo(8);
+        shape("w6", 0, 2, face, 14, false);
+        shape("w5", 0, 2, face, 14, false);
+        shape("w4", 0, 2, face, 14, false);
+        assertThat(shaper.calls).as("live runs behind the dead ones in the chain are found").isEqualTo(8);
+    }
+
+    /** Random runs over few home slots, against a model of the two generations: hits and misses exactly as it says. */
+    @Test
+    void randomRunsHitAndMissAsTheTwoGenerationsSay() {
+        java.util.Random random = new java.util.Random(7);
+        for (int bits = 0; bits <= 3; bits++) {
+            ShapeCache c = new ShapeCache(shaper);
+            c.homeBits(bits);
+            ShapeCache.ENTRIES.set(8);
+            int[] generationOf = new int[40];
+            int generation = 2;
+            int count = 0;
+            for (int step = 0; step < 4000; step++) {
+                int key = random.nextInt(random.nextBoolean() ? 12 : 40);
+                boolean hit = generationOf[key] >= generation - 1;
+                if (!hit || generationOf[key] != generation) { // a miss, or moved up from the previous generation
+                    if (count + 1 > 8) {
+                        generation++;
+                        count = 0;
+                    }
+                    generationOf[key] = generation;
+                    count++;
+                }
+                int before = shaper.calls;
+                String text = "k" + (10 + key);
+                ShapedGlyphs out = new ShapedGlyphs();
+                c.shape(text.toCharArray(), text.length(), 0, text.length(), face, 14, false, null, out);
+                assertThat(shaper.calls - before).as("step %d, key %d, home bits %d", step, key, bits)
+                    .isEqualTo(hit ? 0 : 1);
+                assertThat(out.size()).isEqualTo(text.length());
+            }
+        }
+    }
+
     @Test
     void whenFullTheCurrentGenerationAgesAndWhatIsShownAgainStaysAndOffItShapesEverything() {
         ShapeCache.ENTRIES.set(4);

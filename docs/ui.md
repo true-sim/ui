@@ -1936,9 +1936,20 @@ The benchmark rows that missed (engine `docs/benchmarks-ui.md`).
 |---|---|---|
 | Lines and envelopes over vertices | `Primitive.PATH` and `COLUMNS` draw a range of the list's vertex table (`DrawList.VERTEX_FLOATS` 4: a path's x, y, length; a column's first, last, lowest, highest y), expanded on the GPU: joins (miter with a limit, bevel, round), caps, dashes by length (4 entries), each pixel drawn once at joins; columns stroked as before or filled a quad per 4 columns. Streaming rewrites only changed vertices (compare before write). The streaming chart went from 7,529 primitives (13,216 filled) to 2 or 3 | ui-core, `Canvas`, `LineSeries`, `line-join` miter/bevel, `line-miter-limit`; engine `draw.slang` |
 | Folded backdrop | A full-image box at the bottom of a layer is the pass's clear (its corners and border drawn along the edges): 100,000 glyphs over a backdrop 0.46 to 0.31 ms | engine `GpuUiRenderer` |
-| `ShapeCache` | Every `TextSystem` shapes through a cache of printable Latin runs (`ui.text.shapeCache`, 4,096 runs; 0 off), two generations (a full one ages, runs shown again move up: no frame where everything shapes again) | ui-text |
+| `ShapeCache` | Every `TextSystem` shapes through a cache of printable Latin runs (`ui.text.shapeCache`, 4,096 runs; 0 off), two generations (a full one ages, runs shown again move up: no frame where everything shapes again); a generation's turnover deletes the dying slots with a backward shift (see the note below) | ui-text |
 | Log rows | A row's time is two labels, `log-time` (seconds) and `log-millis`, in `log-clock`: both repeat, so the shape cache finds them; a flooded frame no longer shapes a new time per row (0.17 to 0.13 ms p50) | ui-console `LogView`, `_console*.tss` |
 | Timing | engine-bench times CPU frames back to back and GPU frames in a run of their own (a GPU wait between UI frames inflated CPU times; engine `docs/pitfalls.md`) | engine `bench` |
+
+*Lesson (CI, 2026-11-04):* an open-addressing table whose entries die by generation must not leave dead slots in
+probe chains when lookups stop at them: the first version of the two-generation `ShapeCache` treated a slot of a dead
+generation as empty, so live runs placed after it in the chain were not found (shaped again and kept twice). It passed
+on Windows and failed on Linux because the slot layout depends on `System.identityHashCode` of the face. Fixed by
+deleting the dying generation's slots at the turnover with backward-shift deletion (amortized constant, nothing
+allocated); `ShapeCacheTest` forces the collision (`homeBits(0)`: every run's home slot the same) and checks random
+runs over few home slots against a model of the generations. The other open-addressing tables of the UI were checked:
+`LongIntMap` (text, style) and the console's logger table never delete, `WordSet` rebuilds on removal, `Imm` keeps
+tombstones and rebuilds when they and live ids fill half the table, and the glyph atlas marks evicted glyphs instead
+of removing them.
 
 ### Group A3, render (2026-11-04): local branch a3-render
 

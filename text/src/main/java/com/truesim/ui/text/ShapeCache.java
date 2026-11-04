@@ -67,6 +67,8 @@ public final class ShapeCache implements TextShaper {
     private int glyphsUsed;
     private long hits;
     private long misses;
+    private int homeMask = -1; // tests: fewer home slots, so runs collide
+    private int kept = -1; // the slot moving up while a turnover shifts slots
 
     /** Caches what {@code shaper} shapes. */
     @AllowAllocation("made once per text system")
@@ -122,13 +124,13 @@ public final class ShapeCache implements TextShaper {
         }
         int key = (rightToLeft ? 1 : 0) | (letter(text, runStart, runEnd) ? 2 : 0);
         int hash = hash(text, start, end, face, sizePx, key);
-        int slot = hash & mask;
+        int slot = home(hash);
         while (slotGeneration[slot] >= generation - 1) {
             if (hashes[slot] == hash && faces[slot] == face && sizes[slot] == sizePx && bits[slot] == key
                 && charCount[slot] == n && Objects.equals(languages[slot], language) && same(text, start, slot)) {
                 hits++;
                 if (slotGeneration[slot] != generation) {
-                    promote(slot); // shown again: into the current generation
+                    slot = promote(slot); // shown again: into the current generation (a turnover may move it)
                 }
                 int g = glyphAt[slot];
                 for (int i = 0; i < glyphCount[slot]; i++) {
@@ -147,8 +149,8 @@ public final class ShapeCache implements TextShaper {
             return; // larger than a pool: not kept
         }
         if (count + 1 > entries || charsUsed + n > charsHalf || glyphsUsed + made > glyphsHalf) {
-            nextGeneration();
-            slot = hash & mask;
+            nextGeneration(-1);
+            slot = home(hash);
             while (slotGeneration[slot] >= generation - 1) {
                 slot = slot + 1 & mask;
             }
@@ -180,20 +182,78 @@ public final class ShapeCache implements TextShaper {
         count++;
     }
 
-    /** The current generation becomes the previous one; the one before it dies (its pool half is reused). */
-    private void nextGeneration() {
+    /** Tests: home slots from the hash's lowest {@code bits} bits only, so runs collide in long probe chains. */
+    void homeBits(int bits) {
+        homeMask = (1 << bits) - 1;
+    }
+
+    private int home(int hash) {
+        return hash & mask & homeMask;
+    }
+
+    /**
+     * The current generation becomes the previous one; the one before it dies: its pool half is reused and its slots
+     * are deleted with a backward shift, so no probe chain is cut by a dead slot (a lookup stops at the first empty
+     * slot: a dead one left in a chain would hide the live runs after it, which then were shaped and kept twice).
+     * {@code keep} (or -1) is a slot of the previous generation moving up; where the shifting leaves it is returned.
+     * O(slots) once a generation of {@code ENTRIES} runs: amortized constant, nothing allocated.
+     */
+    private int nextGeneration(int keep) {
         generation++;
         count = 0;
         charsUsed = 0;
         glyphsUsed = 0;
+        if (keep >= 0) {
+            slotGeneration[keep] = generation; // not dying
+        }
+        kept = keep;
+        for (int i = 0; i < slotGeneration.length; i++) {
+            while (slotGeneration[i] != 0 && slotGeneration[i] < generation - 1) {
+                delete(i); // what shifts into i is looked at again
+            }
+        }
+        return kept;
     }
 
-    /** Moves a run of the previous generation into the current one (its characters and glyphs into its pool half). */
-    private void promote(int slot) {
+    /** Empties slot {@code i}, shifting later runs of its chain back so every run stays reachable from its home. */
+    private void delete(int i) {
+        int hole = i;
+        slotGeneration[hole] = 0;
+        for (int j = hole + 1 & mask; slotGeneration[j] != 0; j = j + 1 & mask) {
+            int h = home(hashes[j]);
+            boolean stays = hole <= j ? hole < h && h <= j : hole < h || h <= j; // its home between the hole and it
+            if (stays) {
+                continue;
+            }
+            slotGeneration[hole] = slotGeneration[j];
+            hashes[hole] = hashes[j];
+            faces[hole] = faces[j];
+            sizes[hole] = sizes[j];
+            bits[hole] = bits[j];
+            languages[hole] = languages[j];
+            charAt[hole] = charAt[j];
+            charCount[hole] = charCount[j];
+            glyphAt[hole] = glyphAt[j];
+            glyphCount[hole] = glyphCount[j];
+            if (kept == j) {
+                kept = hole;
+            }
+            slotGeneration[j] = 0;
+            hole = j;
+        }
+        faces[hole] = null;
+        languages[hole] = null;
+    }
+
+    /**
+     * Moves a run of the previous generation into the current one (its characters and glyphs into its pool half);
+     * returns its slot, which a turnover may have moved.
+     */
+    private int promote(int slot) {
         int n = charCount[slot];
         int made = glyphCount[slot];
         if (count + 1 > entries || charsUsed + n > charsHalf || glyphsUsed + made > glyphsHalf) {
-            nextGeneration(); // the slot's generation is now the one before the previous: copy before it is reused
+            slot = nextGeneration(slot); // its data is in the dying half, which is reused: copied at once below
         }
         int charBase = (generation & 1) * charsHalf;
         int glyphBase = (generation & 1) * glyphsHalf;
@@ -212,6 +272,7 @@ public final class ShapeCache implements TextShaper {
         glyphsUsed += made;
         slotGeneration[slot] = generation;
         count++;
+        return slot;
     }
 
     /** Printable Basic Latin to Latin Extended-B: no shaper shapes these by their context. */
