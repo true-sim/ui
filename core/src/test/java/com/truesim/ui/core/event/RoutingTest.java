@@ -65,6 +65,31 @@ class RoutingTest {
     }
 
     @Test
+    void theFrontMostElementTakingPressesKeepsThePressFromAConsumerBelowItInAnotherLayer() {
+        // a button on a bar over a chart that pans on press (consuming it), the chart in a lower layer: the button is
+        // drawn on top, so it gets the pointer and its click (the engine's UI gallery: the nav bar over the charts)
+        Rig r = new Rig();
+        Element chart = r.button(r.root(), "chart", 0, 0, 400, 400);
+        r.ia.on(chart, EventType.PRESS, UiEvent::consume);
+        Element bar = r.box(r.layers.get(com.truesim.ui.core.Layers.OVERLAY).root(), "bar", 0, 300, 400, 50);
+        Element button = r.button(bar, "button", 10, 310, 80, 30);
+        r.mouse(20, 320, Pointer.PRIMARY);
+        r.frame();
+        assertThat(r.take(EventType.PRESS)).containsExactly("PRESS button");
+        assertThat(r.ia.captured(0)).isEqualTo(button);
+        r.mouse(20, 320, 0);
+        r.frame();
+        assertThat(r.take(EventType.CLICK)).containsExactly("CLICK button");
+        assertThat(chart.is(UiState.PRESSED)).isFalse();
+        // beside the bar the chart takes it
+        r.mouse(200, 100, Pointer.PRIMARY);
+        r.frame();
+        assertThat(r.ia.captured(0)).isEqualTo(chart);
+        r.mouse(200, 100, 0);
+        r.frame();
+    }
+
+    @Test
     void aPressCapturesThePointerAndAClickNeedsTheReleaseOverThePressedElement() {
         Rig r = new Rig();
         Element a = r.button(r.root(), "a", 0, 0, 50, 50);
