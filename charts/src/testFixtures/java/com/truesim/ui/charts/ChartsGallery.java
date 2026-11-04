@@ -371,14 +371,21 @@ public final class ChartsGallery {
 
     private static long nanos = 1_000_000_000L;
 
+    /** Whether every glyph asked for is in the atlas. */
+    static boolean quiet(Ui ui) {
+        return ui.textSystem() == null || ui.textSystem().atlas().pending() == 0;
+    }
+
     /** Frames until the atlas has every glyph and nothing records. */
     public static void settle(Ui ui, int width, int height) {
         UiInput input = new UiInput(4);
+        int quiet = 0;
         for (int i = 0; i < 400; i++) {
             input.beginFrame();
             ui.update(width, height, input, nanos += 16_000_000L);
-            if (i > 10 && (ui.textSystem() == null || ui.textSystem().atlas().pending() == 0) && ui.recorded() == 0) {
-                return;
+            if (i > 10 && quiet(ui) && ui.recorded() == 0
+                && ++quiet >= 3) {
+                return; // quiet for a few frames: a glyph finishing mid-frame records on the next one
             }
         }
     }
@@ -395,12 +402,14 @@ public final class ChartsGallery {
         float px = (linkedA.plotLeft() + linkedA.plotRight()) * 0.45f;
         float x = linkedA.contentX() + px;
         float y = linkedA.contentY() + linkedA.y().toPixel(Math.sin(linkedA.x().fromPixel(px))); // on the sine
+        int quiet = 0;
         for (int i = 0; i < 400; i++) { // the pointer stays: frames until the tooltip's glyphs are in
             input.beginFrame();
             input.pointer(0, com.truesim.ui.core.input.Pointer.Kind.MOUSE).moveTo(x + Math.min(i, 2), y).buttons(0);
             ui.update(width, height, input, nanos += 16_000_000L);
-            if (i > 10 && (ui.textSystem() == null || ui.textSystem().atlas().pending() == 0) && ui.recorded() == 0) {
-                return;
+            if (i > 10 && quiet(ui) && ui.recorded() == 0
+                && ++quiet >= 3) {
+                return; // quiet for a few frames: a glyph finishing mid-frame records on the next one
             }
         }
     }

@@ -98,10 +98,12 @@ final class Rig {
 
     /** Frames until nothing records and every glyph is in the atlas. */
     Rig settle() {
+        int quiet = 0;
         for (int i = 0; i < 300; i++) {
             run();
-            if ((ui.textSystem() == null || ui.textSystem().atlas().pending() == 0) && ui.recorded() == 0) {
-                return this;
+            if (ChartsGallery.quiet(ui) && ui.recorded() == 0
+                && ++quiet >= 3) {
+                return this; // a glyph finishing mid-frame records on the next frame
             }
         }
         return this;
