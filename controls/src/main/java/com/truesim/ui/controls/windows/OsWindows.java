@@ -65,4 +65,22 @@ public interface OsWindows {
      * SDL's window display scale): the UI keeps its size in points across monitors through it.
      */
     float contentScale(int window);
+
+    /**
+     * Shows window {@code window}'s content ({@link #MAIN} too) at {@code nits} paper white on an HDR display (how
+     * bright the UI's white is); NaN: the paper white every window follows again. False if the windows cannot (the
+     * default: nothing is done).
+     */
+    default boolean paperWhite(int window, float nits) {
+        return false;
+    }
+
+    /**
+     * Draws window {@code window} at {@code opacity} (0 to 1; 1 opaque) over what is behind it: a window following a
+     * drag is see-through so the dock targets under it show. False where the system refuses (the default; Wayland
+     * without the protocol, SDL's offscreen driver): it stays opaque.
+     */
+    default boolean opacity(int window, float opacity) {
+        return false;
+    }
 }

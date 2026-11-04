@@ -339,4 +339,46 @@ class WindowTest {
         assertThat(windows.at(0)).isSameAs(a);
         assertThat(a.toString()).contains("a open");
     }
+
+    @Test
+    void whileMovedByItsTitleBarAWindowIsSeeThroughAndOpaqueAgainWhenLetGoOrCancelled() {
+        Fx f = new Fx();
+        WindowManager windows = new WindowManager(f.overlays);
+        FloatingWindow a = window(f, windows, "a", 100, 100, 300, 200).open();
+        f.run();
+        int r = a.root().slot();
+        com.truesim.ui.controls.anim.Visuals visuals = f.ui.visuals();
+        assertThat(visuals.has(r, com.truesim.ui.controls.anim.Visuals.OPACITY)).isFalse();
+        f.dragTo(titleX(f, a), titleY(f, a), titleX(f, a) + 50, titleY(f, a) + 30);
+        assertThat(visuals.opacity(r)).as("the default theme's drag-opacity").isEqualTo(0.6f);
+        f.release();
+        assertThat(visuals.has(r, com.truesim.ui.controls.anim.Visuals.OPACITY)).as("opaque again").isFalse();
+        assertThat(visuals.opacity(r)).isEqualTo(1);
+        // cancelled (the drag's own cancel): opaque again too
+        f.dragTo(titleX(f, a), titleY(f, a), titleX(f, a) + 20, titleY(f, a));
+        assertThat(visuals.opacity(r)).isEqualTo(0.6f);
+        for (int p = 0; p < com.truesim.ui.core.input.UiInput.MAX_POINTERS; p++) {
+            f.ui.interaction().cancelDrag(p);
+        }
+        f.run();
+        assertThat(visuals.has(r, com.truesim.ui.controls.anim.Visuals.OPACITY)).isFalse();
+        f.release();
+        // the test theme's value; the window's own opacity multiplies it
+        f.ui.styles().sheet(Fx.garish());
+        f.run();
+        f.dragTo(titleX(f, a), titleY(f, a), titleX(f, a) + 20, titleY(f, a));
+        assertThat(visuals.opacity(r)).isEqualTo(0.35f);
+        f.release();
+        // drag-opacity 1 turns it off: no override at all
+        com.truesim.ui.style.tss.SourceLoader themes = com.truesim.ui.style.tss.SourceLoader.classpath(
+            getClass().getClassLoader(), com.truesim.ui.style.tss.Tss.THEMES);
+        f.ui.styles().sheet(com.truesim.ui.style.tss.Tss.compile(path -> path.equals("off.tss")
+            ? "@import \"default-theme\";\nwindow { drag-opacity: 1; opacity: 0.9; }\n" : themes.read(path),
+            "off.tss").sheet());
+        f.run();
+        f.dragTo(titleX(f, a), titleY(f, a), titleX(f, a) + 20, titleY(f, a));
+        assertThat(visuals.has(r, com.truesim.ui.controls.anim.Visuals.OPACITY)).isFalse();
+        assertThat(visuals.opacity(r)).isCloseTo(0.9f, org.assertj.core.api.Assertions.within(1e-6f));
+        f.release();
+    }
 }

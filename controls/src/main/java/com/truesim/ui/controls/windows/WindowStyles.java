@@ -25,6 +25,13 @@ public final class WindowStyles implements StyleKeyHolder {
     /** The smallest a docked pane gets when a splitter is dragged, in panel units (read from the dock space). */
     public static final StyleKey<Float> DOCK_MIN_PANE = StyleKey.number("dock-min-pane", 48, 0, 10_000);
 
+    /**
+     * The opacity a window is drawn at while it is dragged (read from a floating {@code window} and a
+     * {@code dock-window}), so the dock targets under it show; 1 turns it off. Floating windows multiply their
+     * subtree's opacity by it; OS windows ask the system ({@link OsWindows#opacity}) and stay opaque where it refuses.
+     */
+    public static final StyleKey<Float> DRAG_OPACITY = StyleKey.number("drag-opacity", 1, 0.05f, 1);
+
     /** For the service loader: creating it registers the keys. */
     public WindowStyles() {
     }

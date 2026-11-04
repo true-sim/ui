@@ -1748,6 +1748,44 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
+
+Two options of docking's windows: a paper white per window, and windows see-through while dragged.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Paper white per window | `OsDockHost.paperWhite(id, nits)` gives a window (`OsWindows.MAIN`: the main one) a paper white of its own; NaN follows the one every window follows again (the engine's `display.paperWhite`, which stays the default). `OsWindows.paperWhite` hands it to the engine. The layout saves it beside the window's place: `window <id> "<monitor>" <x> <y> <w> <h> [maximized] [paper-white <nits>] <node>`, and `main paper-white <nits>` for the main window (`DockLayout.mainPaperWhite`, `DockHost.mainPaperWhite`); saved once settled, like a move | `OsDockHost`, `OsWindows`, `DockLayout`, `DockHost`, `DockSpace` |
+| Engine | Each OS window's presenter target reads a view of the graph's settings of its own (`EngineSettings.inheriting("ui.window<id>")`: a scoped view that reads its parent's value of every setting it holds none of, and hears its parent's changes); `UiOsWindows.paperWhite` sets `display.paperWhite` in that view's game layer, clamped to the setting's range, so the player's saved settings never hold it (the layout does). The main window's target gets such a view on its first paper white (`Presenter.Target.displaySettings`). `DisplayTransform` reads the settings its target hands it (`OutputTransform.transform(..., settings)`), the graph's by default | engine `settings`, `graph`, `render`, `ui` |
+| Translucent while dragged | `drag-opacity` (`WindowStyles.DRAG_OPACITY`, 0.05 to 1; 1 is off, the fallback): a floating `window` moved by its title bar draws its subtree at its style's opacity times it (a `Visuals` override set on drag start, cleared on drop or cancel, so no frame of delay); the OS window following a drag asks the system (`OsWindows.opacity`, SDL's window opacity), once when it starts following and again only if the style changes, opaque again on drop. Where the system refuses (Wayland without the protocol, SDL's offscreen driver) the window stays opaque. Default theme 0.6 on `window` and `dock-window` (dock targets show through clearly, the window's content stays readable); test theme 0.35 and 0.45 | `FloatingWindow`, `OsDockHost`, `WindowStyles`, `_windows*.tss`, `_oswindows*.tss` |
+
+#### Decisions
+
+- *A window's value in a settings view, not a constant beside the transform*: the transform keeps reading settings
+  when frames record (no rebuild, no delay), and an unset window follows the global value through the view.
+- *The game layer of the window's view*: per-window values belong to the layout, which knows the window across runs;
+  the window's settings scope (`ui.window<id>`) does not outlive the window.
+- *Every floating window, not only undocked panels*: a moved window also snaps to edges behind it; a theme that wants
+  it only for docking sets `drag-opacity` on a narrower selector.
+
+#### Tests
+
+ui: `OsDockTest.eachWindowMayHaveAPaperWhiteOfItsOwnWhichTheLayoutSavesBesideItsPlace` (two windows, one with its
+own value, the main one too; saved once settled, round trip, restored in a new space, cleared, the format and its
+errors), `aWindowFollowingADragIsSeeThroughUntilDroppedWhereTheSystemCan` (default and test theme, asked once a drag,
+opaque on drop and on cancel, a system that refuses); `WindowTest.whileMovedByItsTitleBarAWindowIsSeeThroughAndOpaqueAgainWhenLetGoOrCancelled`.
+Engine: `EngineSettingsTest.anInheritingViewFollowsItsParentUntilItHoldsAValueOfItsOwn`;
+`UiCompositionTest.aWindowWithItsOwnPaperWhiteShowsTheUiAtItWhileOthersFollowTheGlobalOne` (HDR10 white measured
+at the window's value, unmoved by the global one, the global one again when cleared); `OsWindowsPartsTest` and
+`OsWindowsTest` (each window's target reads its own view, the main window's on its first value, clamping, the
+layout line; opacity checked only where SDL accepts it, as `SDL_SetWindowOpacity` reports).
+
+#### Left
+
+- The UI's brightness (`ui.brightness`) is still one for all windows (the same view would carry it).
+- Wayland and the offscreen driver: dragged OS windows stay opaque.
+
 ### Group A2 fixes (2026-11-04): local branches `a2-fixes` (ui) and `ui-a2-fixes` (engine), not yet in CI
 
 The defects the GPU screenshots of the A2 galleries showed, a check that finds their kinds in any UI, the frame in
@@ -2057,7 +2095,7 @@ follows the cursor, both render, the close button docks it back, screenshots `ui
   window tracks the pointer's place in the UI (when the cursor leaves every window it is not known), and saved
   positions are not restored.
 - Paper white and the UI's brightness are the graph's settings, one for all windows; each window's encoding is its
-  own.
+  own. (Paper white per window: see "Window options".)
 - Windows stack by the OS focus as the host saw it; overlapping windows of other applications are not known.
 - Pop-ups of content in a window flip within its region; a centred dialog shows in the main window.
 - An OS window is not made a child of the main one (stays on top, no task bar entry): SDL's parent windows behave

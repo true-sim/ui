@@ -59,6 +59,7 @@ window {
   min-height: 96px;
   resize-handle: 8px;
   focus-ring-offset: 0px;
+  drag-opacity: 0.6; // see-through while moved by its title bar: drop targets and snap edges under it show
 
   &:focus-visible { focus-ring: 2px var(--accent); }
 }

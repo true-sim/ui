@@ -417,4 +417,110 @@ class OsDockTest {
         assertThat(test.get(Styles.PADDING)).isNotEqualTo(def.get(Styles.PADDING));
         assertThat(r.f.h(r.dock.areaOf(r.console).root())).isCloseTo(w.height() - 22, within(1f));
     }
+
+    @Test
+    void eachWindowMayHaveAPaperWhiteOfItsOwnWhichTheLayoutSavesBesideItsPlace() {
+        Rig r = new Rig();
+        LayoutStore store = LayoutStore.inMemory();
+        r.dock.persistence(store, "dock");
+        OsDockHost.Window a = r.tearOut(r.console, 1300, 500);
+        OsDockHost.Window b = r.tearOut(r.game, 1300, 100);
+        r.f.run();
+        assertThat(a.paperWhite()).as("none of its own: it follows the global one").isNaN();
+        r.host.paperWhite(a.id(), 320);
+        r.host.paperWhite(OsWindows.MAIN, 160);
+        assertThat(r.os.win(a.id()).paperWhite).isEqualTo(320);
+        assertThat(r.os.win(b.id()).paperWhite).as("the other follows the global one").isNaN();
+        assertThat(r.os.main().paperWhite).isEqualTo(160);
+        assertThat(r.host.paperWhite(a.id())).isEqualTo(320);
+        assertThat(r.host.paperWhite(b.id())).isNaN();
+        assertThat(r.host.paperWhite(OsWindows.MAIN)).isEqualTo(160);
+        assertThat(r.host.paperWhite(999)).isNaN();
+        r.host.paperWhite(999, 100); // none such: nothing happens
+        assertThatThrownBy(() -> r.host.paperWhite(a.id(), 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> r.host.paperWhite(a.id(), Float.POSITIVE_INFINITY))
+            .isInstanceOf(IllegalArgumentException.class);
+        // saved beside the window's place once it settled (a slider's drag saves once)
+        r.f.frames(OsDockHost.SAVE_AFTER + 2);
+        String saved = store.load("dock");
+        assertThat(saved).contains(" paper-white 320 tabs(0; console)").contains("\nmain paper-white 160\n")
+            .containsOnlyOnce("paper-white 320");
+        assertThat(saved.lines().filter(l -> l.contains("tabs(0; game)")).findFirst().orElseThrow())
+            .doesNotContain("paper-white");
+        DockLayout parsed = DockLayout.parse(saved);
+        assertThat(parsed.toText()).isEqualTo(saved);
+        assertThat(parsed.mainPaperWhite()).isEqualTo(160);
+        // a new dock space restores the windows at their paper whites; the main window gets its own
+        Rig other = new Rig();
+        other.dock.persistence(store, "dock");
+        OsDockHost.Window restored = other.host.window(other.dock.areaOf(other.console));
+        assertThat(restored.paperWhite()).isEqualTo(320);
+        assertThat(other.os.win(restored.id()).paperWhite).isEqualTo(320);
+        assertThat(other.host.window(other.dock.areaOf(other.game)).paperWhite()).isNaN();
+        assertThat(other.os.main().paperWhite).isEqualTo(160);
+        // cleared: it follows the global one again, and the layout says nothing of it
+        other.host.paperWhite(restored.id(), Float.NaN);
+        other.host.paperWhite(OsWindows.MAIN, Float.NaN);
+        assertThat(other.os.win(restored.id()).paperWhite).isNaN();
+        assertThat(other.os.main().paperWhite).isNaN();
+        assertThat(other.dock.layout().toText()).doesNotContain("paper-white");
+        // the format: a window's after its maximised mark, the main window's on a line of its own
+        String text = "dock tabs(0; scene)\nwindow w1 \"\" 0 0 300 200 maximized paper-white 250.5 tabs(0; console)\n"
+            + "main paper-white 80\n";
+        assertThat(DockLayout.parse(text).toText()).isEqualTo(text);
+        assertThat(DockLayout.parse(text).windows().get(0).paperWhite()).isEqualTo(250.5f);
+        assertThatThrownBy(() -> DockLayout.parse("main paper-white -5")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DockLayout.parse("main brightness 5")).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("main paper-white");
+        assertThatThrownBy(() -> DockLayout.parse("main paper-white bright"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DockLayout.parse("window w1 \"\" 0 0 1 1 paper-white 0 tabs(0; a)"))
+            .isInstanceOf(IllegalArgumentException.class);
+        // a host without OS windows has no main paper white
+        assertThat(new DockSpace(r.f.overlays, null).layout().mainPaperWhite()).isNaN();
+    }
+
+    @Test
+    void aWindowFollowingADragIsSeeThroughUntilDroppedWhereTheSystemCan() {
+        Rig r = new Rig();
+        r.dragTo(r.console.tab(), 1300, 500);
+        OsDockHost.Window w = r.only();
+        FakeOsWindows.Win win = r.os.win(w.id());
+        assertThat(win.opacity).as("the default theme's drag-opacity").isEqualTo(0.6f);
+        assertThat(w.opacity()).isEqualTo(0.6f);
+        int calls = r.os.opacityCalls;
+        r.screen(1350, 520, Pointer.PRIMARY).f.run();
+        assertThat(r.os.opacityCalls).as("asked once, not every frame").isEqualTo(calls);
+        r.release();
+        assertThat(win.opacity).as("opaque once dropped").isEqualTo(1);
+        // its only tab drags it again: see-through again, opaque when the drag is cancelled
+        r.f.run();
+        float[] tab = r.onScreen(r.f.cx(r.console.tab()), r.f.cy(r.console.tab()));
+        r.dragTo(r.console.tab(), tab[0] + 200, tab[1] + 100);
+        assertThat(r.host.followingWindow()).isSameAs(w);
+        assertThat(win.opacity).isEqualTo(0.6f);
+        for (int p = 0; p < com.truesim.ui.core.input.UiInput.MAX_POINTERS; p++) {
+            r.f.ui.interaction().cancelDrag(p);
+        }
+        r.f.run();
+        assertThat(r.host.followingWindow()).isNull();
+        assertThat(win.opacity).isEqualTo(1);
+        r.release();
+        // the test theme's value
+        Rig garish = new Rig();
+        garish.f.ui.styles().sheet(Fx.garish());
+        garish.f.run().run();
+        garish.dragTo(garish.console.tab(), 1300, 500);
+        assertThat(garish.os.win(garish.only().id()).opacity).isEqualTo(0.45f);
+        garish.release();
+        // a system that refuses (Wayland, SDL's offscreen driver): asked, it stays opaque, nothing breaks
+        Rig refused = new Rig();
+        refused.os.translucency = false;
+        refused.dragTo(refused.console.tab(), 1300, 500);
+        FakeOsWindows.Win opaque = refused.os.win(refused.only().id());
+        assertThat(refused.os.opacityCalls).isEqualTo(1);
+        assertThat(opaque.opacity).isEqualTo(1);
+        refused.release();
+        assertThat(refused.host.followingWindow()).isNull();
+    }
 }
