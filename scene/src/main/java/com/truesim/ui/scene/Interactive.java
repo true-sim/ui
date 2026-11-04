@@ -1,6 +1,8 @@
 package com.truesim.ui.scene;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.scene.core.PickGeometry;
+import com.truesim.scene.core.Pickable;
 import com.truesim.ui.controls.basic.Menu;
 import com.truesim.ui.core.event.DataFormat;
 import com.truesim.ui.core.event.EventType;
@@ -11,9 +13,11 @@ import java.util.Arrays;
  * What makes a scene node take part in pointer interaction (design 4.7, UI4): its listeners, with the full interaction
  * set of UI elements (enter, exit, move, press, release, click with counts, long press, context, wheel, drag start,
  * drag, drag end, drop enter, over, leave, drop, tooltip) through the same {@link UiListener} API, how precisely it is
- * hit (its box, its mesh, or a test of its own), and the hooks the UI fills in for it: a tooltip, a context menu, a
- * drag payload, the drop formats it takes. Added to a node with {@link ScenePicking#add}: only nodes with an
- * {@code Interactive} are on the interactive layer, so nodes without one cost picking nothing.
+ * hit (its box, its mesh, or a test of its own: the scene's {@link Pickable} component, which it sets unless the node
+ * has one already), and the hooks the UI fills in for it: a tooltip, a context menu, a drag payload, the drop formats
+ * it takes. Added to a node with {@link ScenePicking#add}. Picking is the scene's ({@code ScenePicker}): only
+ * pickable nodes are tested, and a pickable node without an {@code Interactive} routes to its nearest ancestor with
+ * one (a model's parts to the model).
  *
  * <pre>{@code
  * picking.add(crate, Interactive.of(EventType.CLICK, e -> open(picking.node(e)))
@@ -32,35 +36,28 @@ import java.util.Arrays;
  */
 public final class Interactive {
 
-    /** How precisely a node is hit. */
+    /** How precisely a node is hit: the scene's {@link Pickable.Shape}. */
     public enum Shape {
         /** Its world box: free, the spatial index already tested it. */
         BOUNDS,
-        /** Its mesh's triangles ({@link PickMesh}), tested where the box is hit. */
+        /** Its mesh's triangles ({@code PickMesh}, or its renderable's mesh), tested where the box is hit. */
         MESH,
         /** A test of the game's own ({@link NarrowPhase}): a sphere, a capsule, a GPU result. */
         CUSTOM
     }
 
-    /** A node's own precise test: where a world ray hits it. */
+    /** A node's own precise test: where a world ray hits it (the scene's {@link Pickable.Test}). */
     @FunctionalInterface
-    public interface NarrowPhase {
-
-        /**
-         * How far along the world ray (in units of its direction's length) it hits {@code node}, whose box it enters at
-         * {@code boxDistance}; {@link Double#POSITIVE_INFINITY} for a miss. Must not allocate.
-         */
-        double test(long node, double boxDistance, double ox, double oy, double oz, double dx, double dy, double dz,
-            double max);
+    public interface NarrowPhase extends Pickable.Test {
     }
 
     int[] masks = new int[2];
     UiListener[] listeners = new UiListener[2];
     boolean[] capture = new boolean[2];
     int count;
-    Shape shape = Shape.BOUNDS;
-    PickMesh mesh;
-    NarrowPhase narrow;
+    Shape shape; // null: the node's own pickable, else its box
+    PickGeometry mesh;
+    Pickable.Test narrow;
     CharSequence tooltip;
     Menu contextMenu;
     DataFormat<?> dragFormat;
@@ -126,7 +123,7 @@ public final class Interactive {
         return this;
     }
 
-    /** Hit by its world box (the default); returns this. */
+    /** Hit by its world box (the default for a node not pickable already); returns this. */
     public Interactive bounds() {
         shape = Shape.BOUNDS;
         mesh = null;
@@ -134,8 +131,11 @@ public final class Interactive {
         return this;
     }
 
-    /** Hit by the triangles of {@code pickMesh}, in the node's space; returns this. */
-    public Interactive mesh(PickMesh pickMesh) {
+    /**
+     * Hit by the triangles of {@code pickMesh} (the scene's {@code PickMesh}, or a posed one), in the node's space; null:
+     * its renderable's mesh, as the scene's picker resolves it. Returns this.
+     */
+    public Interactive mesh(PickGeometry pickMesh) {
         shape = Shape.MESH;
         mesh = pickMesh;
         narrow = null;
@@ -184,14 +184,27 @@ public final class Interactive {
         return this;
     }
 
-    /** How the node is hit. */
+    /** How the node is hit: {@link Shape#BOUNDS} unless set (and then only if the node is not pickable already). */
     public Shape shapeKind() {
-        return shape;
+        return shape == null ? Shape.BOUNDS : shape;
     }
 
     /** Its mesh, or null. */
-    public PickMesh pickMesh() {
+    public PickGeometry pickMesh() {
         return mesh;
+    }
+
+    /** The scene's pickable this makes of its shape, or null when none was set (the node's own is kept). */
+    @AllowAllocation("components are made when a scene is built")
+    Pickable pickable() {
+        if (shape == null) {
+            return null;
+        }
+        return switch (shape) {
+            case BOUNDS -> Pickable.bounds();
+            case MESH -> mesh == null ? Pickable.mesh() : Pickable.mesh(mesh);
+            case CUSTOM -> Pickable.custom(narrow);
+        };
     }
 
     /** How many listeners it has. */

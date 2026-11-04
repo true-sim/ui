@@ -1,9 +1,12 @@
 package com.truesim.ui.scene;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.scene.core.ComponentStore;
 import com.truesim.scene.core.NodeHandle;
+import com.truesim.scene.core.PickHits;
+import com.truesim.scene.core.Pickable;
 import com.truesim.scene.core.SceneGraph;
-import com.truesim.scene.core.SceneLayer;
+import com.truesim.scene.core.ScenePicker;
 import com.truesim.scene.core.SpatialIndex;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.controls.overlay.Overlay;
@@ -23,8 +26,6 @@ import com.truesim.ui.core.event.UiListener;
 import com.truesim.ui.core.event.WorldPicking;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiInput;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.util.Arrays;
 import java.util.List;
 
@@ -42,11 +43,11 @@ import java.util.List;
  *   <li>{@linkplain #addHandles handles} (gizmos), which come before everything in the scene;</li>
  *   <li>{@linkplain #addPanel world panels}: the ray against each panel's plane, then the 2D hit test of the panel's
  *       own UI at the local point (a panel where nothing is hit lets the ray through, unless it is opaque);</li>
- *   <li>scene objects: {@link SpatialIndex#raycast(double, double, double, double, double, double, double, int,
- *       SpatialIndex.RayFilter, SpatialIndex.Hit) SpatialIndex.raycast} on the interactive {@link SceneLayer}, where
- *       only nodes with an {@link Interactive} are, so other nodes cost nothing beyond the box tests of the index's
- *       trees, with each node's narrow phase (its box, its mesh's triangle BVH, or a test of its own); up to
- *       {@code ui.pick.sceneHits} objects along the ray, for pass-through.</li>
+ *   <li>scene objects: the scene's engine-independent picking ({@link ScenePicker}: {@link Pickable} components, their
+ *       narrow phases, the frame's picks shared with the engine's scene interaction, so a pointer's ray is cast once a
+ *       frame), up to {@code ui.pick.sceneHits} objects along the ray, for pass-through. A pickable node hit stands
+ *       for its nearest scene-graph ancestor (or itself) with an {@link Interactive}; one with none is not the UI's
+ *       (the engine's scene interaction may route it).</li>
  * </ol>
  * Panels and objects are merged by distance and follow the screen layers' hits. Each interactive node and panel is
  * stood for by an element of its own (on a hidden layer, never drawn), so the interaction treats them as it treats
@@ -59,7 +60,7 @@ import java.util.List;
  * {@code input} (the engine updates both at the frame's start). Steady-state frames allocate nothing.
  *
  * <pre>{@code
- * ScenePicking picking = new ScenePicking(ui, scene, index, INTERACTIVE).mainView(camera);
+ * ScenePicking picking = new ScenePicking(ui, picker).mainView(camera);     // picker: the scene's ScenePicker
  * picking.add(door, Interactive.of(EventType.CLICK, e -> open(picking.node(e))));
  * // each frame
  * picking.input(input, nanos);   // pointers: screen layers, panels, gizmos, scene
@@ -79,7 +80,6 @@ public final class ScenePicking implements WorldPicking {
     /** The name of the layer the elements standing for scene nodes and panels are on. */
     public static final String LAYER = "scene";
 
-    private static final ValueLayout.OfDouble DOUBLE = ValueLayout.JAVA_DOUBLE;
     private static final int MAX = Interaction.MAX_HITS;
     private static final int HOOK_MASK = EventType.TOOLTIP.bit() | EventType.EXIT.bit() | EventType.PRESS.bit()
         | EventType.CONTEXT.bit() | EventType.DRAG_START.bit() | EventType.DROP_OVER.bit();
@@ -88,15 +88,17 @@ public final class ScenePicking implements WorldPicking {
     private final UiStore store;
     private final Interaction interaction;
     private final SceneGraph scene;
-    private final SpatialIndex index;
-    private final SceneLayer layer;
+    private final ScenePicker picker;
+    private final ComponentStore<Pickable> pickables;
     private final Layer proxyLayer;
+    private int pickLayers = -1;
 
     // the interactive nodes: a sparse set by node slot
     private int[] sparse = new int[0];
     private long[] nodes = new long[16];
     private Interactive[] components = new Interactive[16];
     private Element[] proxies = new Element[16];
+    private boolean[] ownPickable = new boolean[16];
     private int count;
     // by element slot: the node (or panel) an element stands for
     private long[] slotNode = new long[0];
@@ -133,11 +135,7 @@ public final class ScenePicking implements WorldPicking {
     private final int[] candidatePanels = new int[MAX];
     private final float[][] candidatePoints = new float[MAX][2];
     private final float[] local = new float[2];
-    private final SpatialIndex.Hit hit = new SpatialIndex.Hit();
-    private final long[] excluded = new long[8];
-    private int excludedCount;
-    private final SpatialIndex.RayFilter filter = this::narrow;
-    private long narrowTests;
+    private final PickHits sceneHits = new PickHits(8);
 
     // hooks: tooltips, context menus, drag sources, drop targets
     private final UiListener hooks = this::hook;
@@ -149,17 +147,26 @@ public final class ScenePicking implements WorldPicking {
     private long tooltipNode = NodeHandle.NONE;
 
     /**
-     * The scene bridge of {@code ui} over {@code graph} and its {@code spatialIndex}, with interactive nodes on
-     * {@code interactiveLayer}; makes itself the UI interaction's {@link WorldPicking}.
+     * The scene bridge of {@code ui} over {@code graph} and its {@code spatialIndex}, through a {@link ScenePicker} of
+     * its own; makes itself the UI interaction's {@link WorldPicking}.
      */
     @AllowAllocation("one per UI")
-    public ScenePicking(Ui ui, SceneGraph graph, SpatialIndex spatialIndex, SceneLayer interactiveLayer) {
+    public ScenePicking(Ui ui, SceneGraph graph, SpatialIndex spatialIndex) {
+        this(ui, new ScenePicker(graph, spatialIndex));
+    }
+
+    /**
+     * The scene bridge of {@code ui} picking through {@code scenePicker} (shared with the engine's scene interaction:
+     * a ray is cast once a frame); makes itself the UI interaction's {@link WorldPicking}.
+     */
+    @AllowAllocation("one per UI")
+    public ScenePicking(Ui ui, ScenePicker scenePicker) {
         this.ui = ui;
         this.store = ui.store();
         this.interaction = ui.interaction();
-        this.scene = graph;
-        this.index = spatialIndex;
-        this.layer = interactiveLayer;
+        this.picker = scenePicker;
+        this.scene = scenePicker.scene();
+        this.pickables = scene.components().store(Pickable.TYPE);
         Layer existing = ui.layerStack().find(LAYER);
         this.proxyLayer = existing != null ? existing : ui.layerStack().add(LAYER, -1000);
         proxyLayer.input(Layer.Input.NONE); // never hit on the screen: only through rays
@@ -176,9 +183,9 @@ public final class ScenePicking implements WorldPicking {
     // ================================================================ interactive nodes
 
     /**
-     * Makes {@code node} interactive as {@code interactive} describes (replacing what it had): puts it on the
-     * interactive layer and gives it an element of its own for routing. The layer change shows in picking after the
-     * scene's and the index's next update.
+     * Makes {@code node} interactive as {@code interactive} describes (replacing what it had): gives it an element of
+     * its own for routing, and makes it pickable as the interactive's shape says (a node pickable already keeps its
+     * own {@link Pickable} unless a shape was set).
      */
     @AllowAllocation("interactive nodes are added when a scene is built")
     public Element add(long node, Interactive interactive) {
@@ -196,6 +203,7 @@ public final class ScenePicking implements WorldPicking {
             nodes = Arrays.copyOf(nodes, count * 2);
             components = Arrays.copyOf(components, count * 2);
             proxies = Arrays.copyOf(proxies, count * 2);
+            ownPickable = Arrays.copyOf(ownPickable, count * 2);
         }
         Element proxy = proxy("scene-node");
         slotNode[proxy.slot()] = node;
@@ -223,11 +231,15 @@ public final class ScenePicking implements WorldPicking {
                 }
             }
         }
-        scene.setLayers(node, scene.layers(node) | layer.mask());
+        Pickable shape = interactive.pickable();
+        ownPickable[d] = shape != null || !pickables.has(node);
+        if (shape != null || !pickables.has(node)) {
+            pickables.set(node, shape != null ? shape : Pickable.bounds());
+        }
         return proxy;
     }
 
-    /** Takes {@code node}'s interaction away: off the interactive layer, its element gone. */
+    /** Takes {@code node}'s interaction away: its element gone, and the pickable it was given. */
     @AllowAllocation("taking components away re-homes the elements of descendants")
     public void remove(long node) {
         int d = dense(node);
@@ -242,11 +254,13 @@ public final class ScenePicking implements WorldPicking {
         slotNode[proxy.slot()] = NodeHandle.NONE;
         ui.destroy(proxy);
         sparse[NodeHandle.index(node)] = 0;
+        boolean own = ownPickable[d];
         int last = --count;
         if (d != last) {
             nodes[d] = nodes[last];
             components[d] = components[last];
             proxies[d] = proxies[last];
+            ownPickable[d] = ownPickable[last];
             sparse[NodeHandle.index(nodes[d])] = d + 1;
         }
         nodes[last] = NodeHandle.NONE;
@@ -255,8 +269,8 @@ public final class ScenePicking implements WorldPicking {
         if (tooltipNode == node) {
             hideTooltip();
         }
-        if (scene.contains(node)) {
-            scene.setLayers(node, scene.layers(node) & ~layer.mask());
+        if (own && scene.contains(node)) {
+            pickables.remove(node);
         }
     }
 
@@ -594,17 +608,14 @@ public final class ScenePicking implements WorldPicking {
                 found++;
             }
         }
-        excludedCount = 0;
-        int depth = Math.min((int) SCENE_HITS.get(), excluded.length);
-        for (int k = 0; k < depth && found < MAX; k++) {
-            if (!index.raycast(ray[0], ray[1], ray[2], ray[3], ray[4], ray[5], reach, layer.mask(), filter, hit)) {
-                break;
-            }
-            excluded[excludedCount++] = hit.node();
-            int d = dense(hit.node());
-            if (d >= 0) {
+        int depth = Math.min((int) SCENE_HITS.get(), sceneHits.capacity());
+        PickHits hits3d = depth == sceneHits.capacity() ? sceneHits : depthHits(depth);
+        int picked = picker.pick(ray[0], ray[1], ray[2], ray[3], ray[4], ray[5], reach, pickLayers, hits3d);
+        for (int k = 0; k < picked && found < MAX; k++) {
+            int d = interactiveOf(hits3d.node(k));
+            if (d >= 0 && !candidate(proxies[d].slot(), found)) {
                 candidateSlots[found] = proxies[d].slot();
-                candidateDistances[found] = hit.distance();
+                candidateDistances[found] = hits3d.distance(k);
                 candidatePanels[found] = -1;
                 found++;
             }
@@ -672,64 +683,41 @@ public final class ScenePicking implements WorldPicking {
         }
     }
 
-    /** The narrow phase of a node the ray's box test reached: its component's shape. */
-    private double narrow(long node, double box, double ox, double oy, double oz, double dx, double dy, double dz,
-        double max) {
-        narrowTests++;
-        for (int i = 0; i < excludedCount; i++) {
-            if (excluded[i] == node) {
-                return Double.POSITIVE_INFINITY; // found by an earlier ray of this pick
+    /** The entry of {@code node}'s nearest scene-graph ancestor (or itself) with an {@link Interactive}, or -1. */
+    private int interactiveOf(long node) {
+        for (long n = node; n != NodeHandle.NONE; n = scene.parent(n)) {
+            int d = dense(n);
+            if (d >= 0) {
+                return d;
             }
         }
-        int d = dense(node);
-        if (d < 0) {
-            return Double.POSITIVE_INFINITY; // on the layer without a component
+        return -1;
+    }
+
+    /** Whether element {@code slot} is among the first {@code found} candidates (two parts of one model). */
+    private boolean candidate(int slot, int found) {
+        for (int i = 0; i < found; i++) {
+            if (candidateSlots[i] == slot) {
+                return true;
+            }
         }
-        Interactive c = components[d];
-        return switch (c.shape) {
-            case BOUNDS -> box;
-            case MESH -> mesh(node, c.mesh, ox, oy, oz, dx, dy, dz, max);
-            case CUSTOM -> c.narrow.test(node, box, ox, oy, oz, dx, dy, dz, max);
-        };
+        return false;
     }
 
-    /** The world ray against {@code mesh} in {@code node}'s space: undo its translation, rotation and scale. */
-    private double mesh(long node, PickMesh mesh, double ox, double oy, double oz, double dx, double dy, double dz,
-        double max) {
-        MemorySegment s = scene.worldTransforms().segment();
-        long o = NodeHandle.index(node) * scene.worldTransforms().stride();
-        double tx = s.get(DOUBLE, o);
-        double ty = s.get(DOUBLE, o + 8);
-        double tz = s.get(DOUBLE, o + 16);
-        double qx = s.get(DOUBLE, o + 24);
-        double qy = s.get(DOUBLE, o + 32);
-        double qz = s.get(DOUBLE, o + 40);
-        double qw = s.get(DOUBLE, o + 48);
-        double sx = s.get(DOUBLE, o + 56);
-        double sy = s.get(DOUBLE, o + 64);
-        double sz = s.get(DOUBLE, o + 72);
-        double px = ox - tx;
-        double py = oy - ty;
-        double pz = oz - tz;
-        // q^-1 * v: the rotation by the conjugate
-        double ux = 2 * (-qy * pz + qz * py);
-        double uy = 2 * (-qz * px + qx * pz);
-        double uz = 2 * (-qx * py + qy * px);
-        double lox = (px + qw * ux + (-qy * uz + qz * uy)) / sx;
-        double loy = (py + qw * uy + (-qz * ux + qx * uz)) / sy;
-        double loz = (pz + qw * uz + (-qx * uy + qy * ux)) / sz;
-        ux = 2 * (-qy * dz + qz * dy);
-        uy = 2 * (-qz * dx + qx * dz);
-        uz = 2 * (-qx * dy + qy * dx);
-        double ldx = (dx + qw * ux + (-qy * uz + qz * uy)) / sx;
-        double ldy = (dy + qw * uy + (-qz * ux + qx * uz)) / sy;
-        double ldz = (dz + qw * uz + (-qx * uy + qy * ux)) / sz;
-        return mesh.raycast(lox, loy, loz, ldx, ldy, ldz, max);
+    // hits of a smaller depth than the scratch's, for a lowered ui.pick.sceneHits: made once per depth
+    private final PickHits[] byDepth = new PickHits[8];
+
+    @AllowAllocation("once per depth, when ui.pick.sceneHits is lowered")
+    private PickHits depthHits(int depth) {
+        if (byDepth[depth] == null) {
+            byDepth[depth] = new PickHits(depth);
+        }
+        return byDepth[depth];
     }
 
-    /** How many narrow-phase tests ran so far (a test counts them: nodes without a component are never tested). */
+    /** How many narrow-phase tests the scene's picker ran so far (nodes without a pickable are never tested). */
     public long narrowTests() {
-        return narrowTests;
+        return picker.narrowTests();
     }
 
     private int slotOf(int pointerId) {
@@ -935,11 +923,22 @@ public final class ScenePicking implements WorldPicking {
 
     /** The spatial index picking raycasts. */
     public SpatialIndex index() {
-        return index;
+        return picker.index();
     }
 
-    /** The layer interactive nodes are on. */
-    public SceneLayer interactiveLayer() {
-        return layer;
+    /** The scene's picker it picks through. */
+    public ScenePicker picker() {
+        return picker;
+    }
+
+    /** Picks pickables on the pick layers of {@code mask} only (default: every pick layer); returns this. */
+    public ScenePicking pickLayers(int mask) {
+        pickLayers = mask;
+        return this;
+    }
+
+    /** The pick layers it picks. */
+    public int pickLayers() {
+        return pickLayers;
     }
 }

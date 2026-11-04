@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.truesim.scene.core.Mobility;
 import com.truesim.scene.core.NodeHandle;
+import com.truesim.scene.core.PickMesh;
+import com.truesim.scene.core.Pickable;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.event.EventType;
@@ -14,6 +16,61 @@ import org.junit.jupiter.api.Test;
 
 /** The scene bridge's edges: handles before the scene, views coming and going, pointers it never saw. */
 class ScenePickingMoreTest {
+
+    @Test
+    void pickableModelPartsRouteToTheirInteractiveAncestor() {
+        SceneRig r = ScenePickingTest.rig();
+        long car = r.scene.create();
+        long body = r.box(0, 0, -10, 1, Mobility.STATIC);
+        long wheel = r.box(0, 0, -12, 1, Mobility.STATIC);
+        long loose = r.box(0, 0, -14, 1, Mobility.STATIC);
+        r.scene.setParent(body, car);
+        r.scene.setParent(wheel, car);
+        // the model marked its parts pickable (as glTF extras do); the game listens on the model's root
+        r.scene.components().set(body, Pickable.TYPE, Pickable.mesh());
+        r.scene.components().set(wheel, Pickable.TYPE, Pickable.bounds());
+        r.scene.components().set(loose, Pickable.TYPE, Pickable.bounds());
+        List<Long> targets = new ArrayList<>();
+        r.picking.add(car, Interactive.of(EventType.PRESS, e -> targets.add(r.picking.targetNode(e))));
+        assertThat(r.scene.components().has(car, Pickable.TYPE)).as("the root has no box: given one, never hit").isTrue();
+        r.frame();
+        r.mouse(400, 300, Pointer.PRIMARY).mouse(400, 300, 0);
+        assertThat(targets).as("both parts are the car: once").containsExactly(car);
+        assertThat(r.picking.worldHitCount(com.truesim.ui.testkit.SyntheticInput.MOUSE)).isOne();
+        // a part made interactive keeps the pickable it had; taking it away leaves it
+        r.picking.add(body, Interactive.create());
+        assertThat(r.scene.components().get(body, Pickable.TYPE).shape()).isEqualTo(Pickable.Shape.MESH);
+        r.picking.remove(body);
+        assertThat(r.scene.components().has(body, Pickable.TYPE)).isTrue();
+        // a shape given replaces it, and goes with the interactive
+        PickMesh tri = new PickMesh(new float[] {-1, -1, 0, 1, -1, 0, -1, 1, 0}, new int[] {0, 1, 2});
+        r.picking.add(body, Interactive.create().mesh(tri));
+        assertThat(r.scene.components().get(body, Pickable.TYPE).geometry()).isSameAs(tri);
+        r.picking.add(body, Interactive.create().mesh(null));
+        assertThat(r.scene.components().get(body, Pickable.TYPE).geometry()).as("its renderable's").isNull();
+        r.picking.add(body, Interactive.create().shape((n, box, ox, oy, oz, dx, dy, dz, max) -> box));
+        assertThat(r.scene.components().get(body, Pickable.TYPE).shape()).isEqualTo(Pickable.Shape.CUSTOM);
+        r.picking.add(body, Interactive.create().bounds());
+        assertThat(r.scene.components().get(body, Pickable.TYPE).shape()).isEqualTo(Pickable.Shape.BOUNDS);
+        r.picking.remove(body);
+        assertThat(r.scene.components().has(body, Pickable.TYPE)).isFalse();
+        // only so deep along the ray, and only the pick layers asked for
+        r.picking.add(loose, Interactive.of(EventType.PRESS, e -> targets.add(r.picking.targetNode(e))));
+        ScenePicking.SCENE_HITS.set(1);
+        try {
+            targets.clear();
+            r.frame();
+            r.mouse(400, 300, Pointer.PRIMARY).mouse(400, 300, 0);
+            assertThat(targets).containsExactly(car);
+        } finally {
+            ScenePicking.SCENE_HITS.set(4);
+        }
+        r.scene.components().get(loose, Pickable.TYPE).layers(2);
+        r.picking.pickLayers(2);
+        targets.clear();
+        r.mouse(400, 300, Pointer.PRIMARY).mouse(400, 300, 0);
+        assertThat(targets).containsExactly(loose);
+    }
 
     @Test
     void handlesComeBeforeTheSceneAndCanBeRemoved() {

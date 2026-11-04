@@ -51,7 +51,7 @@ public final class SceneGallery {
         double pitch = -Math.atan2(5, 14) / 2;
         view.pose(14 * Math.sin(2 * yaw), 5, 14 * Math.cos(2 * yaw), Math.cos(yaw) * Math.sin(pitch),
             Math.sin(yaw) * Math.cos(pitch), -Math.sin(yaw) * Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-        picking = new ScenePicking(ui, scene, index, SceneRig.INTERACTIVE).mainView(view);
+        picking = new ScenePicking(ui, scene, index).mainView(view);
         long crate = box(-5, 0.5, 0, 0.5);
         long barrel = box(-1.5, 0.6, 1, 0.6);
         scene.setRotation(barrel, 0, Math.sin(0.35), 0, Math.cos(0.35));
