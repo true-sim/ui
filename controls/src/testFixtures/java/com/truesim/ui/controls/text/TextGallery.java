@@ -65,7 +65,18 @@ public final class TextGallery {
     public static TextGallery build(Ui ui, float width, float height) {
         icons(ui);
         TextGallery g = new TextGallery(ui, width, height);
-        g.fill();
+        g.fill(true);
+        return g;
+    }
+
+    /**
+     * Builds the gallery into {@code ui}'s root as a live UI shows it: the same controls and texts, but no frames run
+     * and nothing posed (no focus, typing or composing), so an application's own frames drive it.
+     */
+    public static TextGallery live(Ui ui) {
+        icons(ui);
+        TextGallery g = new TextGallery(ui, 0, 0);
+        g.fill(false);
         return g;
     }
 
@@ -81,7 +92,7 @@ public final class TextGallery {
             .set(Styles.HEIGHT, Length.px(h)).build());
     }
 
-    private void fill() {
+    private void fill(boolean pose) {
         Element columns = flex(Direction.ROW, 24);
         ui.styles().inline(columns.slot(), InlineStyle.builder().set(Styles.LAYOUT, LayoutKind.FLEX)
             .set(Styles.DIRECTION, Direction.ROW).set(Styles.GAP, 24f).set(Styles.ALIGN_ITEMS, Align.START)
@@ -127,7 +138,9 @@ public final class TextGallery {
         sized(area.element(), 640, 260);
         sized(rich.element(), 640, 240);
         right.add(area.element()).add(rich.element());
-        frames(1);
+        if (pose) {
+            frames(1);
+        }
         pw.editor().text("hunter2");
         shown.editor().text("hunter2");
         shown.revealed(true);
@@ -141,6 +154,10 @@ public final class TextGallery {
         bad.editor().validator(com.truesim.ui.text.edit.TextFilters.range(0, 10, false));
         bad.editor().text("42");
         area.editable().select(area.text().length() - 120, area.text().length() - 30);
+        if (!pose) {
+            selected.text("select some words");
+            return;
+        }
         ime.focus();
         frames(1);
         synthetic.type("kana: ");
