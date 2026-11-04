@@ -27,7 +27,7 @@ import com.truesim.ui.style.Styles;
  * <p>Element type {@code view-cube} (its box, border and background from the theme), with style parts
  * {@code view-cube-face#px #nx #py #ny #pz #nz} (each face's colour), {@code view-cube-edge} (the outline's colour
  * and width) and {@code view-cube-hot} (the hovered face, edge or corner: colour and marker size). Faces are drawn as
- * projected quads filled with lines, the draw list having no polygons. Steady state allocates nothing.
+ * projected quads, each two triangles. Steady state allocates nothing.
  */
 public final class ViewCube implements Painter, Ui.FrameListener {
 
@@ -66,6 +66,7 @@ public final class ViewCube implements Painter, Ui.FrameListener {
     private float scale;
     private final double[] q = new double[4];
     private final float[] pa = new float[2];
+    private final float[] quad = new float[8]; // a projected face's corners
     private final float[] pb = new float[2];
     private final UiListener events = this::handle;
 
@@ -297,23 +298,13 @@ public final class ViewCube implements Painter, Ui.FrameListener {
             long fill = Rgba.fade(face.get(Styles.COLOR).rgba(), opacity * face.getFloat(Styles.OPACITY));
             int u = (a + 1) % 3;
             int v = (a + 2) % 3;
-            // filled by lines along u, stepped along v
-            int lines = 10;
-            float width = 0;
-            for (int k = 0; k <= lines; k++) {
-                double t = -1 + 2.0 * k / lines;
-                corner(a, sign, u, -1, v, t, pa);
-                corner(a, sign, u, 1, v, t, pb);
-                if (k == 0) {
-                    // the width that covers one step on the screen
-                    float ax = pa[0];
-                    float ay = pa[1];
-                    corner(a, sign, u, -1, v, -1 + 2.0 / lines, pa);
-                    width = (float) Maths.hypot(pa[0] - ax, pa[1] - ay); // abutting: no overlaps to show
-                    corner(a, sign, u, -1, v, t, pa);
-                }
-                list.line(pa[0], pa[1], pb[0], pb[1], width, fill);
+            // the face's corners (-1, -1), (1, -1), (1, 1), (-1, 1) in u, v: two triangles
+            for (int k = 0; k < 4; k++) {
+                corner(a, sign, u, k == 1 || k == 2 ? 1 : -1, v, k >= 2 ? 1 : -1, pa);
+                quad[2 * k] = pa[0];
+                quad[2 * k + 1] = pa[1];
             }
+            Gizmo.quad(list, quad, fill);
             for (int e = 0; e < 4; e++) {
                 double su = e < 2 ? -1 : 1;
                 double sv = e % 2 == 0 ? -1 : 1;

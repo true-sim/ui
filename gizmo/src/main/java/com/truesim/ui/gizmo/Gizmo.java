@@ -13,6 +13,7 @@ import com.truesim.ui.core.Tunable;
 import com.truesim.ui.core.UiState;
 import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.draw.DrawList;
+import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.event.EventType;
 import com.truesim.ui.core.event.PointerEvents;
@@ -148,6 +149,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     private final double[] q = new double[3];
     private final double[] n = new double[3];
     private final float[] sa = new float[3];
+    private final float[] quad = new float[8]; // a projected square handle's corners
     private final float[] sb = new float[3];
     private long signature;
     private final UiListener events = this::handle;
@@ -1083,30 +1085,29 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         double cz = shapes.origin[2] + (au[2] + av[2]) * mid * s;
         boolean hidden = occlusion != null && occlusion.occluded(view, cx, cy, cz);
         long fill = color(part, hidden ? opacity * fade : opacity);
-        // filled by lines along u, stepped along v: the draw list has no polygons
-        int lines = 6;
-        float w = 0;
-        for (int k = 0; k <= lines; k++) {
-            double f = lo + (hi - lo) * k / lines;
+        // the square's corners (lo, lo), (hi, lo), (hi, hi), (lo, hi) in u, v: two triangles
+        for (int k = 0; k < 4; k++) {
+            double fu = k == 1 || k == 2 ? hi : lo;
+            double fv = k >= 2 ? hi : lo;
             for (int c = 0; c < 3; c++) {
-                p[c] = shapes.origin[c] + (au[c] * lo + av[c] * f) * s;
-                q[c] = shapes.origin[c] + (au[c] * hi + av[c] * f) * s;
+                p[c] = shapes.origin[c] + (au[c] * fu + av[c] * fv) * s;
             }
-            if (k == 0) {
-                // the line width that covers one step on the screen
-                if (view.project(p[0], p[1], p[2], sa)) {
-                    double ex = p[0] + av[0] * (hi - lo) / lines * s;
-                    double ey = p[1] + av[1] * (hi - lo) / lines * s;
-                    double ez = p[2] + av[2] * (hi - lo) / lines * s;
-                    if (view.project(ex, ey, ez, sb)) {
-                        w = (float) Maths.hypot(sb[0] - sa[0], sb[1] - sa[1]); // abutting: translucent overlaps show
-                    }
-                }
+            if (!view.project(p[0], p[1], p[2], sa)) {
+                return;
             }
-            if (view.project(p[0], p[1], p[2], sa) && view.project(q[0], q[1], q[2], sb) && w > 0) {
-                list.line(sa[0], sa[1], sb[0], sb[1], w, fill);
-            }
+            quad[2 * k] = sa[0];
+            quad[2 * k + 1] = sa[1];
         }
+        quad(list, quad, fill);
+    }
+
+    /**
+     * A filled quadrilateral of corners {@code xy} (x, y of four corners in order) as two triangles: its outline
+     * anti-aliased, the diagonal they share hard, so a translucent fill shows no seam.
+     */
+    static void quad(DrawList list, float[] xy, long color) {
+        list.triangle(xy[0], xy[1], xy[2], xy[3], xy[4], xy[5], color, Primitive.EDGE_AB | Primitive.EDGE_BC);
+        list.triangle(xy[0], xy[1], xy[4], xy[5], xy[6], xy[7], color, Primitive.EDGE_BC | Primitive.EDGE_CA);
     }
 
     private void paintBounds(DrawList list, float opacity, float fade) {
@@ -1170,24 +1171,9 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         return Rgba.fade(s.get(Styles.COLOR).rgba(), opacity * s.getFloat(Styles.OPACITY));
     }
 
-    /**
-     * A filled triangle with its point at {@code a} and base {@code b..c}: lines across it from the base to the point,
-     * each as wide as the step between them (the draw list has no polygons).
-     */
+    /** A filled triangle with its point at {@code a} and base {@code b..c}, its edges anti-aliased. */
     static void triangle(DrawList list, float ax, float ay, float bx, float by, float cx, float cy, long color) {
-        float mx = (bx + cx) / 2;
-        float my = (by + cy) / 2;
-        float height = (float) Maths.hypot(ax - mx, ay - my);
-        int steps = Math.max(2, Math.min(32, (int) Math.ceil(height / 1.5f)));
-        float width = height / steps; // abutting: a translucent (faded) tip shows no overlaps
-        for (int k = 0; k < steps; k++) {
-            float t = (k + 0.5f) / steps;
-            float px = bx + (ax - bx) * t;
-            float py = by + (ay - by) * t;
-            float qx = cx + (ax - cx) * t;
-            float qy = cy + (ay - cy) * t;
-            list.line(px, py, qx, qy, width, color);
-        }
+        list.triangle(ax, ay, bx, by, cx, cy, color, Primitive.EDGE_AB | Primitive.EDGE_BC | Primitive.EDGE_CA);
     }
 
     /** Takes the gizmo off its UI and picking; the element is destroyed. */
