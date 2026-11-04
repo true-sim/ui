@@ -266,6 +266,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private final Spans copiedSpans = new Spans();
     private final Spans fragment = new Spans();
 
+    @AllowAllocation("editors are made when a UI is built")
     private TextEditor(Ui ui, String type, String style, String label, boolean multiLine) {
         if (ui.textSystem() == null) {
             throw new IllegalStateException("a text editor needs a UI with a text system");
@@ -2190,6 +2191,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private void move(UiEvent e) {
         if (draggedHandle != 0) {
             if ((e.buttons() & Pointer.PRIMARY) != 0) {
+                handleEdgeScroll(e.x() - grabX, e.y() - grabY);
                 int at = hit(e.x() - grabX, e.y() - grabY);
                 int other = draggedHandle == 1 ? text.selectionEnd() : text.selectionStart();
                 if (at != other) {
@@ -2242,6 +2244,24 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             return;
         }
         hoverLink(linkAt(e.x(), e.y()));
+    }
+
+    /**
+     * A selection handle dragged past the text's edge scrolls the text that far (as a mouse selection does), so the
+     * selection reaches what was out of view: an area up and down, a field sideways.
+     */
+    private void handleEdgeScroll(float x, float y) {
+        if (multiLine) {
+            if (y < textY0 || y > textY0 + viewH) {
+                scrollBy(y < textY0 ? y - textY0 : y - textY0 - viewH);
+            }
+            return;
+        }
+        if (x < textX0 || x > textX0 + viewW) {
+            float most = Math.max(0, shaped(0).width() + caretWidth() - viewW);
+            scrollX = Math.max(0, Math.min(most, scrollX + (x < textX0 ? x - textX0 : x - textX0 - viewW)));
+            ui.repaint(element);
+        }
     }
 
     private void release(UiEvent e) {

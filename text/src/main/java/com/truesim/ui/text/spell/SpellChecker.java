@@ -493,6 +493,7 @@ public final class SpellChecker {
         return (active.contains(s, 0, s.length()) || user.contains(s)) && active.suggestable(s);
     }
 
+    @AllowAllocation("suggestions are asked for on user action")
     private boolean allRight(String s) {
         for (String part : s.split(" ")) {
             if (!isSuggestable(part)) {

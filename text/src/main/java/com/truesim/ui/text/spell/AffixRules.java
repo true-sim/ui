@@ -284,6 +284,7 @@ public final class AffixRules {
     }
 
     /** The entries of flag {@code flag} (empty if none). */
+    @AllowAllocation("dictionaries are expanded when loaded")
     List<Entry> group(int flag) {
         List<Entry> g = groups.get(flag);
         return g == null ? List.of() : g;

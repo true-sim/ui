@@ -11,6 +11,42 @@ import org.junit.jupiter.api.Test;
  */
 class PasswordClustersTest {
 
+    @Test
+    void aTouchHandleDraggedPastAFieldsEdgeScrollsIt() {
+        TextRig r = new TextRig();
+        TextEditor f = TextEditor.field(r.ui, null, "Long");
+        r.ui.styles().inline(f.element().slot(), com.truesim.ui.style.InlineStyle.builder()
+            .set(com.truesim.ui.style.Styles.WIDTH, com.truesim.ui.style.value.Length.px(160)).build());
+        r.add(f.element()).frame();
+        f.text("one two three four five six seven eight nine ten");
+        r.settle();
+        float[] b = r.box(f.element());
+        float y = (b[1] + b[3]) / 2;
+        float two = b[0] + 45;
+        r.synthetic.pointer(3, com.truesim.ui.core.input.Pointer.Kind.TOUCH, two, y,
+            com.truesim.ui.core.input.Pointer.PRIMARY);
+        r.frame();
+        r.later(800_000_000L).frame();
+        r.synthetic.pointer(3, com.truesim.ui.core.input.Pointer.Kind.TOUCH, two, y, 0);
+        r.frame();
+        assertThat(f.touchHandles()).isTrue();
+        float hx = f.handle(2);
+        float hy = f.handle(3);
+        r.synthetic.pointer(3, com.truesim.ui.core.input.Pointer.Kind.TOUCH, hx, hy,
+            com.truesim.ui.core.input.Pointer.PRIMARY);
+        r.frame();
+        for (int i = 0; i < 12; i++) { // held beyond the right edge, moving a little: the text scrolls on
+            r.synthetic.pointer(3, com.truesim.ui.core.input.Pointer.Kind.TOUCH, b[2] + 30 + (i & 1), hy,
+                com.truesim.ui.core.input.Pointer.PRIMARY);
+            r.frame();
+        }
+        r.synthetic.pointer(3, com.truesim.ui.core.input.Pointer.Kind.TOUCH, b[2] + 30, hy, 0);
+        r.frame();
+        assertThat(f.scrollX()).as("scrolled").isPositive();
+        assertThat(f.editable().selectionEnd()).as("the selection reaches what was out of view")
+            .isGreaterThan(f.text().toString().indexOf("five"));
+    }
+
     /** e + combining acute; family (man ZWJ woman ZWJ girl); flag DE; thumbs up + skin tone; a; o + two marks. */
     static final String TEXT = "é" + "👨‍👩‍👧" + "🇩🇪"
         + "👍🏽" + "a" + "ọ̈";

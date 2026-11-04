@@ -55,6 +55,7 @@ public final class NumberField implements UiListener, TextEditor.Listener {
     private double dragStart;
     private boolean dragging;
 
+    @AllowAllocation("controls are made when a UI is built")
     private NumberField(Ui ui, String style, String label, String downLabel, String upLabel) {
         this.ui = ui;
         root = ui.element("numberfield", style);

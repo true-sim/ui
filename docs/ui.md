@@ -1748,6 +1748,113 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3, controls (2026-11-04): local branch a3-controls
+
+Mnemonics, repeat buttons, logarithmic sliders, HDR colours and an eyedropper, grapheme-level password masking, spell
+checking, and windows and tabs by commands. Engine-agnostic: `ui-core` (`ScreenSampler`, command fallbacks),
+`ui-text` (`com.truesim.ui.text.spell`), `ui-controls` (`basic`, `text`, `windows`). No engine work in this branch.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Mnemonics | `&` marks the letter in button, menu-title, menu-item, tab and dialog-button text and in labels for fields (`Controls.labelFor(text, target)`); `&&` is an ampersand, an `&` not before a letter or digit stays. Names and shown text have no marker. `Mnemonics` (one per `Controls`): each label gets a style part `span.mnemonic` with the fact `mnemonics=shown` or `hidden` following `UiInput.mnemonicsShown()`, and `Ui.underline(label, index, part)` draws the letter's underline while the part's `text-decoration` underlines (in its colour), so a theme shows them always, while Alt is held (the default theme) or never. `UiInput.mnemonic()` goes to the deepest open menu (its one item with the letter activates, a submenu opens; several: focus cycles; an open menu takes every letter), else to the buttons and labels-for in the focused scope (the nearest ancestor announced `WINDOW` or `DIALOG`, the trapping modal scope, with no focus what is in no window): one is clicked (a menu bar's title opens its menu, a checkbox toggles, a label focuses its target), several cycle the focus as Windows does | `basic.Mnemonics`, `Button`, `MenuItem`, `Menu`, `MenuBar`, `Controls`, `Ui.underline` |
+| Repeat button | `Repeater` runs an action on the press, then after `ui.button.repeatDelay` (0.4 s) at `ui.button.repeatRate` (20/s), the action system's defaults, at most once a frame, pausing while the held pointer is off the element; `ACCEPT` runs it once; the press's click is swallowed. `RepeatButton` (a `Button`), `Controls.repeatButton`. Used by number-field steppers, time-picker arrows and date-picker month arrows | `basic.Repeater`, `RepeatButton`, `text.NumberField`, `TimePicker`, `DatePicker` |
+| Slider scales | `SliderScale`: `LINEAR`, `logarithmic(base)`, `symlog(linear, base)` (ranges crossing 0); `Slider.scale(...)` maps thumbs, fill, presses and drags; keys step a hundredth of the track (a page `ui.slider.pageFraction`) in the scale's coordinate, then snap to the step, at least one step; `ticks(count)` (even in the scale), `ticksAt(values...)`, `scaleTicks()` (powers of the base; zero and the powers either side for symlog; the step's multiples for linear); `Slider.range(min, max)`. `NumberField.scale(...)`: keys and steppers a hundredth of the range's coordinate, drags a two-hundredth per `ui.input.numberDragPixels` | `basic.SliderScale`, `Slider`, `text.NumberField` |
+| HDR colours | `ColorPicker.hdr(maxStops)`: the colour is a base colour (area, strip, hex) times `2^stops`; a `color-intensity` row (a `slider.intensity` over 0 to `maxStops` and a `color-intensity-value` label, `+1.3 EV`); components above 1 kept in the model (half floats); the preview splits into `color-preview-clipped` (clipped to 1, as SDR shows it) and `color-preview-hdr`; hex shows and takes the base only (the intensity stays); `hdr(0)` turns it off | `basic.ColorPicker` |
+| Eyedropper | `ScreenSampler` (ui-core): `request(x, y, size)` a block of the presented frame (odd, up to 31 px), `poll(ScreenSample)` copies the newest answer (linear, HDR kept), `stop()`; asked every frame, the newest answer shown, so nothing waits. `PatternScreenSampler` answers from a pattern after a latency (default: the frame after next), for tests and galleries. `Eyedropper`: a full-screen `eyedropper` element on its own blocking layer (z 450) takes the pointer, a `color-loupe` (painted: `loupe-pixels` cells, the centre outlined by `color-loupe-center`'s border, at `loupe-gap` from the pointer, flipped at screen edges) follows it; a click or `ACCEPT` picks the pixel (at once when the newest answer is for that point, else when it arrives), `CANCEL` or the secondary button cancels, the focus goes back. `Controls.screenSampler(...)`; a picker shows its `button.eyedropper` (icon `eyedropper`, `:checked` while picking) when the controls have one. A built-in `icons/eyedropper` | `ui-core` `input.ScreenSampler`, `ScreenSample`, `PatternScreenSampler`; `basic.Eyedropper`, `ColorPicker`, `BuiltinIcons` |
+| Password masking | One mask per extended grapheme cluster (an emoji ZWJ sequence, a flag, a skin-toned emoji, a letter with combining marks): the slice shapes the cluster's first character as the mask and the rest as zero-width spaces, so indices stay the text's; Left and Right move logically by clusters while masked, a click never lands inside one, Backspace deletes a whole cluster (`EditableText.deleteBackCluster`), a double click selects all | `text.Slice`, `TextEditor`, `ui-text` `EditableText` |
+| Spell checking | ui-text `spell`: `AffixRules` (the `.aff` subset: `SET`, `FLAG` char/long/num, `TRY`, `REP`, `KEY`, `NOSUGGEST`, `FORBIDDENWORD`, `NEEDAFFIX`, `PFX`/`SFX` with conditions, cross products and continuation flags for a second suffix); `Dictionary` (`.dic` + `.aff` streams or resources, or a plain list) expanded at load into a `WordSet` (one char pool, open addressing, looked up by `CharSequence` ranges without allocating); `SpellChecker`: dictionaries per locale, a user dictionary (`addToDictionary`, `removeFromDictionary`, saved through `UserWords`), session `ignore`, `version()`; `check(text, from, to, Misspelt)` allocates nothing; words are letters, marks and digits with inner apostrophes and hyphens (a hyphenated word is right whole or by parts); case: a lower-case entry is right capitalised and in capitals, a capitalised one in capitals; settings `ui.spell.ignoreUrls`, `ignoreNumbers`, `ignoreMixedCase`, `ignoreCapitals`; `suggest(word)` (at most `ui.spell.suggestions`): the replacement table, a `BkTree` (optimal string alignment, distance 1 then 2; swaps first), the user's words, split words, in the word's case. `TextEditor.spelling(checker, controls)`: the part `span.misspelt` (`color`, `squiggle-wavelength`, `squiggle-amplitude`, `squiggle-thickness`; 0 wavelength: straight) draws squiggles as line primitives; per-paragraph results shifted with the paragraph arrays, only damaged paragraphs checked again: the visible ones as they are drawn (no frame waits), the rest within `ui.text.spellBudget` ms a frame; the word being typed (ending at the caret) is not marked; the context menu (right click or `CONTEXT_MENU`) on a misspelt word offers corrections, "Add to dictionary", "Ignore" (`spellMenuText` localises them); passwords are never checked | `ui-text` `spell`; `text.TextEditor`, `TextStyles` |
+| Windows and tabs by commands | `FloatingWindow`: `WINDOW_MOVE` and `WINDOW_RESIZE` with the focus in it start `keyboardMove()`/`keyboardResize()`; `Interaction.addCommandFallback` (commands no element consumed): `WindowManager` takes `NEXT_WINDOW` (`focusNext()`) and, with nothing focused, `WINDOW_MOVE`/`WINDOW_RESIZE` for the active window; dock panes: `NEXT_TAB`/`PREVIOUS_TAB` (wrapping, focus on the tab), `CLOSE_TAB` (asks the shown panel; the next tab focused once its rebuilt pane is laid out), `NEXT_WINDOW` to the next pane across the space's windows (its remembered focus or its tab); `TabPane`: the same three anywhere in the pane (the new tab focused: the old page leaves the tree) | `windows.FloatingWindow`, `WindowManager`, `DockSpace`; `basic.TabPane`; `ui-core` `Interaction` |
+| Styles | `_controls.tss` and `_controls-test.tss` (one `@use` each in both themes): `span.mnemonic`, the intensity row and preview halves, the eyedropper button, screen and loupe, `span.misspelt`; keys `loupe-pixels`, `loupe-gap` (`BasicStyles`), `squiggle-*` (`TextStyles`, a new `StyleKeyHolder` service) | `style`, `controls` |
+| Galleries | `ControlsGallery`: mnemonics on the menu bar, its items, Save and a label for the key-binding field ("&Jump key"), the Next button repeats, a logarithmic frequency slider with decade ticks, the colour picker in HDR with an eyedropper over a `PatternScreenSampler` (`Gallery.openEyedropper(x, y)`); `TextGallery`: a password of four clusters, the notes area spell checked (squiggles under "mispelled wrod") | `testFixtures` |
+
+#### Decisions
+
+- *Mnemonic underlines through a style part, not a flag in code*: the theme decides when they show (`span.mnemonic`
+  plain, or with the fact `mnemonics=shown`), so "always" needs no key of its own: `text-decoration: underline` on
+  `span.mnemonic` (the test theme does it).
+- *Mnemonic scope by semantics*: the nearest ancestor announced as a window or dialog is the scope, so windows,
+  dialogs and docking's OS windows need no registration.
+- *Repeat timing as UI tunables with the action system's defaults* (`ui.button.repeatDelay` 0.4 s,
+  `ui.button.repeatRate` 20/s): the engine's `ui.repeatDelay`/`ui.repeatRate` cannot reach a pointer hold.
+- *Scales act on the coordinate*: keys step a fixed share of the track on every scale, so a logarithmic slider steps
+  multiplicatively; a step set still snaps.
+- *HDR as base times stops*: the area, strip and hex stay in the displayable range people pick in; the intensity is
+  one exposure control, as in DCC tools.
+- *Sampling is asynchronous by contract* (request, then poll the newest answer); a click commits on the answer for its
+  own point, never on a stale one.
+- *Spell-check index: a BK-tree* over the expanded forms rather than symmetric deletes: the forms do not change, its
+  memory is four int arrays (symmetric deletes at distance 2 would need millions of entries for en_US), and a query
+  runs on a context-menu click, not per frame: 18 ms median on 150,000 synthetic forms, five times faster than a
+  scan (benchmark below). If that is too slow with a real dictionary, symmetric deletes at distance 1 plus the tree
+  at distance 2 only when nothing is found is the next step. Forms are expanded at load so checking is
+  one hash lookup that allocates nothing.
+- *No word list was found* in the repositories, the JDK or the Gradle and LWJGL caches: the mechanism ships with a
+  small self-written sample (`en-sample.aff`/`.dic`, 1,340 stems, about 4,000 forms; project licence). Candidates the
+  user could add: SCOWL-based Hunspell en_US/en_GB (wordlist.aspell.net; SCOWL's permissive MIT-like licence, with
+  parts under other permissive terms; LibreOffice's dictionaries repository), and other languages' Hunspell
+  dictionaries (licences vary: LGPL/MPL/GPL; check each).
+
+#### Tests
+
+`MnemonicsTest` (parsing, underline shown only while the modifier is held and always in the test theme, buttons,
+duplicates cycling, disabled, labels for fields, the menu bar's titles and open menus, submenus, scopes of windows and
+dialogs), `RepeatAndScaleTest` (delay, rate, pausing off the button, ACCEPT once; number-field steppers; scale
+mappings and round trips for five scales, ticks, keys in the scale's space, snapped steps, number-field drags),
+`ColorHdrTest` (stops, base hex, the preview halves; the eyedropper's latency, clicks before and after the answer,
+HDR kept or clipped, cancel by CANCEL and the secondary button, ACCEPT), `PasswordClustersTest` (six clusters six
+masks, caret stops, Backspace by clusters, clicks), `SpellCheckerTest` (affix rules with long flags, continuation
+flags, NEEDAFFIX, FORBIDDENWORD, NOSUGGEST, numeric flags; case; settings; suggestions; user dictionary and its
+store; locales; the BK-tree against a brute-force scan), `SpellEditorTest` (squiggles, only the edited paragraph
+rechecked, the typed word unmarked, 2,000 paragraphs over several frames within the budget, the spelling menu by
+keys and by a right click: replace, add, ignore; passwords not checked), `WindowCommandsTest`, `TabCommandsTest`,
+`A3AllocationTest` (mnemonics toggling, a held repeat button, a logarithmic slider by keys, a spell-checked area
+scrolling, the eyedropper following the pointer: no allocation), `A3PreviewTest` (CPU previews, with
+`TRUESIM_SCREENSHOTS=true`). Goldens regenerated: `basic-gallery.txt`, `basic-gallery-test-theme.txt` (the gallery
+changed).
+
+#### Benchmarks (Ryzen 9 9950X3D, JaCoCo off; other agents were building: noisy)
+
+| What | Measured |
+|---|---|
+| Checking prose with the sample dictionary (`SpellBenchmarkTest`) | 60 ns a word, allocation-free |
+| 150,000 synthetic forms (en_US-sized, random words, denser than real ones): BK-tree build | 284 ms (on the first suggestion, or `Dictionary.prepareSuggestions()` at load) |
+| A distance-2 suggestion query, BK-tree vs a full scan | 18 ms median, 30 ms p99 vs 93 ms median |
+
+#### Engine (to do there)
+
+- Bind the `ui` group's actions to `WINDOW_MOVE` and `WINDOW_RESIZE`: proposed Alt+F7 and Alt+F8 (Windows and KDE),
+  no gamepad default; `NEXT_WINDOW` Ctrl+F6 (and Alt+F6 on KDE); `NEXT_TAB`/`PREVIOUS_TAB` Ctrl+Tab and Ctrl+Shift+Tab
+  (and Ctrl+PageDown/PageUp), the shoulder buttons on a gamepad; `CLOSE_TAB` Ctrl+W (Ctrl+F4).
+- Fill `UiInput.mnemonic()` (a letter or digit pressed with Alt, not when Alt is part of another binding) and
+  `mnemonicsShown()` (Alt held alone; on Windows the system's "underline access keys" setting may keep it on).
+- Implement `ScreenSampler` over the presenter: copy a `size x size` block around the pointer from the frame's
+  scene-referred HDR image (before the display transform) into a small read-back buffer each frame a request stands,
+  hand it back the frame it lands (no wait, no stall), and call `Controls.screenSampler(...)`; with several OS windows,
+  the window under the pointer (`request` false outside every window).
+- Register the new tunables as settings (they are in `Ui.tunables()`): `ui.button.repeatDelay`,
+  `ui.button.repeatRate` (default them from `ui.repeatDelay`/`ui.repeatRate`), `ui.text.spellBudget`,
+  `ui.spell.ignoreUrls`, `ui.spell.ignoreNumbers`, `ui.spell.ignoreMixedCase`, `ui.spell.ignoreCapitals`,
+  `ui.spell.suggestions`.
+- Spell checking: a `SpellChecker.UserWords` store in the player's profile, the locale from the game's language, and
+  where to load full dictionaries from.
+- GPU screenshots of the changed galleries (the HDR preview half and the loupe show HDR values above 1 only there).
+
+#### Left
+
+- The eyedropper's loupe shows the sampler's pixels as they come (no zoom control); docking's OS windows sample the
+  window under the pointer only once the engine's sampler knows them.
+- Spelling: no compounds, no morphological analysis, no per-span language; suggestions do not use keyboard
+  adjacency (`KEY` is read, not used); a full dictionary was not tried here (none available).
+- A pre-existing allocation (also on the base commit, not from this branch): frames alternating between hovering a
+  gallery button, wheel-scrolling a text area on the overlay layer and hovering elsewhere allocate about 8 KB per
+  10,000 frames; found while writing `A3AllocationTest`, not investigated.
+- From the brief, not done: a loupe for touch selection handles (the magnified text needs a clip inside a painter's
+  content, left for the draw-list transform work), a grace for overlays across windows. Built of the small items: a
+  touch selection handle dragged past a field's or area's edge scrolls it that far, as a mouse selection does
+  (`PasswordClustersTest.aTouchHandleDraggedPastAFieldsEdgeScrollsIt`).
+
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
 Two options of docking's windows: a paper white per window, and windows see-through while dragged.
@@ -1918,11 +2025,12 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
   ~~the game's changes to UI state show the next frame~~, ~~windows' title bar buttons draw no icons~~, ~~the tab
   strip's overflow button overlaps a clipped tab~~: fixed, see "Group A2 fixes" above.
 - From the branches: ~~incremental shaping of very long paragraphs~~ (built: below), ~~touch selection handles~~,
-  spell checking,
-  grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
-  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
-  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
-  the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
+  ~~spell checking~~,
+  ~~grapheme-level password masking~~ (built: group A3 controls) (text); OS windows for docking, bindings of the
+  `ui` group for `keyboardMove`, `keyboardResize` and `focusNext` (the commands are handled since group A3 controls;
+  the engine's bindings are left) (windows); a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms, ~~mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  the colour picker~~ (built: group A3 controls) (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
   records by their
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
   (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources

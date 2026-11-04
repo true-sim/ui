@@ -1,6 +1,7 @@
 package com.truesim.ui.controls.basic;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.annotations.AllowStrictMath;
 import com.truesim.common.state.VersionedDouble;
 import com.truesim.common.state.VersionedLong;
 import com.truesim.common.state.Watch;
@@ -430,10 +431,12 @@ public final class ColorPicker extends Control {
     // ---------------------------------------------------------------- model and display
 
     /** {@code 2^stops}: what the base colour is multiplied by (1 without HDR). */
+    @AllowStrictMath("the intensity on a colour change, not per idle frame")
     private float intensityScale() {
-        return maxStops > 0 ? (float) Math.pow(2, stops) : 1;
+        return maxStops > 0 ? (float) StrictMath.pow(2, stops) : 1;
     }
 
+    @AllowStrictMath("the intensity's stops on a colour change, not per idle frame")
     private void fromModel() {
         watch.update();
         long c = model.get();
@@ -442,7 +445,7 @@ public final class ColorPicker extends Control {
         float lb = Rgba.b(c);
         if (maxStops > 0) { // the intensity is what lifts the brightest component above 1
             float m = Math.max(lr, Math.max(lg, lb));
-            stops = m > 1 ? Math.min(maxStops, (float) (Math.log(m) / Math.log(2))) : 0;
+            stops = m > 1 ? Math.min(maxStops, (float) (StrictMath.log(m) / StrictMath.log(2))) : 0;
             float k = 1 / intensityScale();
             lr *= k;
             lg *= k;

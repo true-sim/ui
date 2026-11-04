@@ -1,6 +1,7 @@
 package com.truesim.ui.controls.basic;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.annotations.AllowStrictMath;
 
 /**
  * How a slider (or a dragged number) maps its values to positions: {@link #LINEAR}, {@link #logarithmic} (ranges of
@@ -14,6 +15,7 @@ import com.truesim.annotations.AllowAllocation;
  * Slider pan = controls.slider("Offset", offset, -1000, 1000).scale(SliderScale.symlog(1, 10));
  * }</pre>
  */
+@AllowStrictMath("logarithms and powers map values on input and change, not per idle frame; the same everywhere")
 public abstract sealed class SliderScale {
 
     /** Values evenly along the track. */
@@ -122,17 +124,17 @@ public abstract sealed class SliderScale {
                 throw new IllegalArgumentException("a logarithmic base must exceed 1: " + base);
             }
             this.base = base;
-            this.logBase = Math.log(base);
+            this.logBase = StrictMath.log(base);
         }
 
         @Override
         public double forward(double value) {
-            return Math.log(Math.max(value, Double.MIN_NORMAL)) / logBase;
+            return StrictMath.log(Math.max(value, Double.MIN_NORMAL)) / logBase;
         }
 
         @Override
         public double inverse(double t) {
-            return Math.exp(t * logBase);
+            return StrictMath.exp(t * logBase);
         }
 
         @Override
@@ -171,29 +173,29 @@ public abstract sealed class SliderScale {
             }
             this.linear = linear;
             this.base = base;
-            this.logBase = Math.log(base);
+            this.logBase = StrictMath.log(base);
         }
 
         @Override
         public double forward(double value) {
-            return Math.signum(value) * Math.log1p(Math.abs(value) / linear) / logBase;
+            return Math.signum(value) * StrictMath.log1p(Math.abs(value) / linear) / logBase;
         }
 
         @Override
         public double inverse(double t) {
-            return Math.signum(t) * linear * Math.expm1(Math.abs(t) * logBase);
+            return Math.signum(t) * linear * StrictMath.expm1(Math.abs(t) * logBase);
         }
 
         @Override
         public int ticks(double min, double max, double[] out) {
             int n = 0;
-            double first = Math.pow(base, Math.ceil(Math.log(linear) / logBase - 1e-9));
+            double first = StrictMath.pow(base, Math.ceil(StrictMath.log(linear) / logBase - 1e-9));
             int count = 0;
             for (double v = first; v <= -min * (1 + 1e-9); v *= base) {
                 count++;
             }
             for (int i = count - 1; i >= 0; i--) { // the negative side, outermost first
-                n = add(out, n, -first * Math.pow(base, i));
+                n = add(out, n, -first * StrictMath.pow(base, i));
             }
             if (min <= 0 && max >= 0) {
                 n = add(out, n, 0);
