@@ -14,7 +14,8 @@ import java.util.Locale;
 /**
  * Draw-list goldens (design section 12): a list written as text, one primitive a line, empty slots left out, numbers
  * rounded so goldens survive harmless float noise. {@link #assertMatches} compares against a golden file and, with
- * {@code -Dtruesim.updateGoldens=true}, writes it instead.
+ * {@code -Dtruesim.updateGoldens=true}, writes it instead. Positions are where primitives draw: their clip's offset
+ * added.
  */
 public final class DrawListDump {
 
@@ -40,8 +41,9 @@ public final class DrawListDump {
             if (Primitive.flags(header) != 0) {
                 out.append(" flags=").append(Primitive.flags(header));
             }
-            out.append(' ').append(n(list.floatAt(i, Primitive.X0))).append(',').append(n(list.floatAt(i, Primitive.Y0)))
-                .append(' ').append(n(list.floatAt(i, Primitive.X1))).append(',').append(n(list.floatAt(i, Primitive.Y1)))
+            // where it draws: plus its clip's offset (a scrolled region's content is recorded unscrolled)
+            out.append(' ').append(n(list.drawnX(i, Primitive.X0))).append(',').append(n(list.drawnY(i, Primitive.Y0)))
+                .append(' ').append(n(list.drawnX(i, Primitive.X1))).append(',').append(n(list.drawnY(i, Primitive.Y1)))
                 .append(" a=").append(color(list.colorAt(i, Primitive.COLOR_A)));
             long b = list.colorAt(i, Primitive.COLOR_B);
             if (b != 0) {

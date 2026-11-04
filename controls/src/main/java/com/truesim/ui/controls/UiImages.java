@@ -16,7 +16,8 @@ import javax.imageio.ImageIO;
 /**
  * The images styles name ({@code image: "frame"}, {@code nine-slice("frame", 12 12 12 12)}): each one an sRGB
  * {@link UiTexture} of its own, registered by name when loaded (an asset type later, D16). Lookups are by name at
- * style application, never per frame.
+ * style application, never per frame. The toolkit's own chrome icons ({@link BuiltinIcons}) are there without
+ * registering anything.
  */
 public final class UiImages {
 
@@ -66,8 +67,30 @@ public final class UiImages {
         }
     }
 
-    /** The image named {@code name}, or null. */
+    /**
+     * The image named {@code name}, or null: a registered one, else a {@linkplain BuiltinIcons built-in icon} of that
+     * name (rendered the first time it is asked for).
+     */
     public UiTexture get(String name) {
-        return name == null ? null : byName.get(name);
+        if (name == null) {
+            return null;
+        }
+        UiTexture t = byName.get(name);
+        if (t == null) {
+            int icon = BuiltinIcons.find(name);
+            if (icon >= 0) {
+                t = builtin(name, icon);
+            }
+        }
+        return t;
+    }
+
+    @AllowAllocation("a built-in icon is rendered once, the first time a style names it")
+    private UiTexture builtin(String name, int icon) {
+        UiTexture texture = textures.create(name, BuiltinIcons.SIZE, BuiltinIcons.SIZE, UiTexture.Format.RGBA8_SRGB);
+        System.arraycopy(BuiltinIcons.draw(icon), 0, texture.pixels(), 0, texture.pixels().length);
+        texture.markDirty(0, 0, texture.width(), texture.height());
+        byName.put(name, texture);
+        return texture;
     }
 }

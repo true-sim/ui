@@ -6,6 +6,7 @@ import static org.lwjgl.util.freetype.FreeType.FT_CURVE_TAG_CONIC;
 import static org.lwjgl.util.freetype.FreeType.FT_CURVE_TAG_CUBIC;
 import static org.lwjgl.util.freetype.FreeType.FT_CURVE_TAG_ON;
 import static org.lwjgl.util.freetype.FreeType.FT_Done_Face;
+import static org.lwjgl.util.freetype.FreeType.FT_FACE_FLAG_COLOR;
 import static org.lwjgl.util.freetype.FreeType.FT_GLYPH_FORMAT_OUTLINE;
 import static org.lwjgl.util.freetype.FreeType.FT_LOAD_NO_BITMAP;
 import static org.lwjgl.util.freetype.FreeType.FT_LOAD_NO_HINTING;
@@ -31,6 +32,7 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.freetype.FT_Face;
 import org.lwjgl.util.freetype.FT_GlyphSlot;
+import org.lwjgl.util.freetype.FT_Bitmap_Size;
 import org.lwjgl.util.freetype.FT_Outline;
 import org.lwjgl.util.freetype.FT_Vector;
 import org.lwjgl.util.harfbuzz.hb_font_extents_t;
@@ -52,6 +54,8 @@ public final class NativeFontFace implements FontFace, AutoCloseable {
     private final float ascender;
     private final float descender;
     private final float lineGap;
+    private final float colorStrike;
+    private final int strikeIndex;
     private final long scratch = MemoryUtil.nmemAllocChecked(4); // a glyph id written by HarfBuzz
     private boolean closed;
 
@@ -86,6 +90,32 @@ public final class NativeFontFace implements FontFace, AutoCloseable {
             descender = -extents.descender() / (float) unitsPerEm;
             lineGap = extents.line_gap() / (float) unitsPerEm;
         }
+        // colour bitmaps (CBDT, sbix): the largest strike; scaled outlines are not used for such a face
+        float strike = 0;
+        int index = -1;
+        FT_Bitmap_Size.Buffer sizes = ftFace.available_sizes();
+        if ((ftFace.face_flags() & FT_FACE_FLAG_COLOR) != 0 && sizes != null) {
+            for (int i = 0; i < ftFace.num_fixed_sizes(); i++) {
+                float ppem = sizes.get(i).y_ppem() / 64f;
+                if (ppem > strike) {
+                    strike = ppem;
+                    index = i;
+                }
+            }
+        }
+        colorStrike = strike;
+        strikeIndex = index;
+    }
+
+    /** The pixels per em of the colour bitmaps (the largest strike), or 0 for an outline face. */
+    @Override
+    public float colorStrike() {
+        return colorStrike;
+    }
+
+    /** The FreeType strike the colour bitmaps are read from, or -1. */
+    int strikeIndex() {
+        return strikeIndex;
     }
 
     @Override

@@ -39,6 +39,7 @@ public final class Layout {
     static final int AT_MOST = Measure.AT_MOST;
     static final float INF = Float.POSITIVE_INFINITY;
 
+    private static final LayoutKind[] KIND_VALUES = LayoutKind.values();
     static final byte K_NONE = 0;
     static final byte K_STACK = 1;
     static final byte K_FLEX = 2;
@@ -107,6 +108,8 @@ public final class Layout {
     byte[] growV;
     byte[] textDir;
     boolean[] hidden;
+    /** Inside a hidden element's subtree: collapsed to an empty rectangle, not {@link #shown}. */
+    private boolean[] collapsed;
     boolean[] measured;
     float[] width;
     float[] height;
@@ -153,6 +156,12 @@ public final class Layout {
     float[][] rowTracks;
     int[] columnCount;
     int[] rowCount;
+    float[] scrollX;
+    float[] scrollY;
+    private boolean[] independent;
+    private boolean[] scrollMoved;
+    private int[] scrollQueue = new int[16];
+    private int scrollQueueCount;
 
     // ---------------------------------------------------------------- caches
     private boolean[] lcValid;
@@ -211,6 +220,7 @@ public final class Layout {
     private int update;
     private float lastScale = -1;
     private boolean lastSnapping;
+    private boolean[] topRan = new boolean[4];
     private float lastRootW = -1;
     private float lastRootH = -1;
 
@@ -649,6 +659,65 @@ public final class Layout {
         return this;
     }
 
+    /**
+     * Scrolls the element's children by {@code x, y} panel units (left and up): their positions are shifted without
+     * a new layout, so scrolling costs a visit of the subtree's positions, not a measure. A negative value shifts
+     * them the other way (a sticky header following the viewport). Default 0, 0. With snapping (the default) the
+     * shift is whole pixels ({@link #scrollPixelsX}), so a scrolled child's rectangle moves by exactly the scroll and a
+     * renderer can move recorded content by it instead of recording it again.
+     */
+    public Layout scroll(int slot, float x, float y) {
+        own(slot);
+        if (scrollX[slot] != x || scrollY[slot] != y) {
+            scrollX[slot] = x;
+            scrollY[slot] = y;
+            if (!scrollMoved[slot]) {
+                scrollMoved[slot] = true;
+                if (scrollQueueCount == scrollQueue.length) {
+                    growScrollQueue();
+                }
+                scrollQueue[scrollQueueCount++] = slot;
+            }
+        }
+        return this;
+    }
+
+    /** The element's horizontal scroll in panel units ({@link #scroll}). */
+    public float scrollX(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? scrollX[slot] : 0;
+    }
+
+    /** The element's vertical scroll in panel units ({@link #scroll}). */
+    public float scrollY(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? scrollY[slot] : 0;
+    }
+
+    /** How far the element's children are shifted left by its scroll, in UI pixels (whole when snapping). */
+    public float scrollPixelsX(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? pixels(scrollX[slot], lastScale) : 0;
+    }
+
+    /** How far the element's children are shifted up by its scroll, in UI pixels (whole when snapping). */
+    public float scrollPixelsY(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) ? pixels(scrollY[slot], lastScale) : 0;
+    }
+
+    private float pixels(float panelUnits, float scale) {
+        return snapping ? (float) Math.rint(panelUnits * scale) : panelUnits * scale;
+    }
+
+    /**
+     * Declares that the element's size never depends on its content (a scroll viewport, a virtualized list's body:
+     * its parent or its style sizes it). It measures as if empty (its padding, minimum and style sizes), so content
+     * larger than it scrolls instead of growing it, and a change below it is laid out from it alone, at its last
+     * constraints, as for an element of fixed size, instead of from its ancestors up. Default off.
+     */
+    public Layout independent(int slot, boolean value) {
+        own(slot);
+        independent[slot] = value;
+        return this;
+    }
+
     /** Which way an anchored element grows past its anchors to reach its minimum size (default end). */
     public Layout growDirection(int slot, GrowDirection horizontal, GrowDirection vertical) {
         own(slot);
@@ -743,6 +812,7 @@ public final class Layout {
         growV[s] = G_END;
         textDir[s] = T_INHERIT;
         hidden[s] = false;
+        collapsed[s] = false;
         measured[s] = false;
         width[s] = 0;
         height[s] = 0;
@@ -786,6 +856,10 @@ public final class Layout {
         gridRowSpan[s] = 1;
         columnCount[s] = 0;
         rowCount[s] = 0;
+        scrollX[s] = 0;
+        scrollY[s] = 0;
+        independent[s] = false;
+        scrollMoved[s] = false;
         lcValid[s] = false;
         mcCount[s] = 0;
         laidOutAt[s] = 0;
@@ -817,6 +891,7 @@ public final class Layout {
         growV = grow(growV, n);
         textDir = grow(textDir, n);
         hidden = grow(hidden, n);
+        collapsed = grow(collapsed, n);
         measured = grow(measured, n);
         width = grow(width, n);
         height = grow(height, n);
@@ -862,6 +937,10 @@ public final class Layout {
         rowTracks = rowTracks == null ? new float[n][] : Arrays.copyOf(rowTracks, n);
         columnCount = grow(columnCount, n);
         rowCount = grow(rowCount, n);
+        scrollX = grow(scrollX, n);
+        scrollY = grow(scrollY, n);
+        independent = grow(independent, n);
+        scrollMoved = grow(scrollMoved, n);
         lcValid = grow(lcValid, n);
         lcAw = grow(lcAw, n);
         lcAh = grow(lcAh, n);
@@ -935,6 +1014,11 @@ public final class Layout {
         changed = Arrays.copyOf(changed, changed.length * 2);
     }
 
+    @AllowAllocation("grows to the most elements scrolled in one update, once")
+    private void growScrollQueue() {
+        scrollQueue = Arrays.copyOf(scrollQueue, scrollQueue.length * 2);
+    }
+
     @AllowAllocation("grows to the most relayout roots in one update, once")
     private void growRoots() {
         roots = Arrays.copyOf(roots, roots.length * 2);
@@ -960,8 +1044,13 @@ public final class Layout {
         lastSnapping = snapping;
         float rw = viewportWidth / s;
         float rh = viewportHeight / s;
-        int root = store.rootSlot();
-        own(root);
+        int tops = store.rootCount();
+        if (topRan.length < tops) {
+            growTops(tops);
+        }
+        for (int t = 0; t < tops; t++) {
+            own(store.rootAt(t));
+        }
 
         int[] queue = store.dirtySlots();
         int n = store.dirtyCount();
@@ -970,19 +1059,24 @@ public final class Layout {
             if (store.alive(d) && (store.dirty(d) & UiStore.DIRTY_LAYOUT) != 0) {
                 store.clearDirty(d, UiStore.DIRTY_LAYOUT);
                 own(d);
-                bubble(d, root);
+                bubble(d);
             }
         }
 
-        boolean rootRan = !lcValid[root] || rw != lastRootW || rh != lastRootH;
+        // every root (the main one and each layer's) covers the viewport
+        boolean viewportChanged = rw != lastRootW || rh != lastRootH;
         lastRootW = rw;
         lastRootH = rh;
-        if (rootRan) {
-            layoutNode(root, rw, EXACTLY, rh, EXACTLY, rw, rh, true, false);
+        for (int t = 0; t < tops; t++) {
+            int top = store.rootAt(t);
+            topRan[t] = !lcValid[top] || viewportChanged;
+            if (topRan[t]) {
+                layoutNode(top, rw, EXACTLY, rh, EXACTLY, rw, rh, true, false);
+            }
         }
         for (int i = 0; i < rootCount; i++) {
             int r = roots[i];
-            if (!shown(r, root)) {
+            if (!inShownTree(r)) {
                 roots[i] = UiStore.NONE; // detached or hidden: laid out when it is shown again
             } else if (!lcValid[r]) {
                 layoutNode(r, lcAw[r], lcModes[r] & 3, lcAh[r], lcModes[r] >> 2, lcOw[r], lcOh[r], true, lcRtl[r]);
@@ -991,12 +1085,12 @@ public final class Layout {
             }
         }
 
-        if (rescaled) {
-            visit(root, 0, 0, s, true);
-        } else {
-            if (rootRan) {
-                visit(root, 0, 0, s, false);
+        for (int t = 0; t < tops; t++) {
+            if (rescaled || topRan[t]) {
+                visit(store.rootAt(t), 0, 0, s, rescaled);
             }
+        }
+        if (!rescaled) {
             for (int i = 0; i < rootCount; i++) {
                 int r = roots[i];
                 if (r != UiStore.NONE && visitedAt[r] != update) {
@@ -1005,10 +1099,26 @@ public final class Layout {
                 }
             }
         }
+        // scrolled elements not visited above: only their children's positions change
+        for (int i = 0; i < scrollQueueCount; i++) {
+            int r = scrollQueue[i];
+            if (scrollMoved[r] && store.alive(r) && owner[r] == store.element(r)) {
+                scrollMoved[r] = false;
+                if (laidOutAt[r] != 0 && !hidden[r] && (store.isRoot(r) || inShownTree(r))) {
+                    visitChildren(r, absX[r], absY[r], s, true);
+                }
+            }
+        }
+        scrollQueueCount = 0;
+    }
+
+    @AllowAllocation("grows with the UI's layers, rarely")
+    private void growTops(int count) {
+        topRan = new boolean[count];
     }
 
     /** Invalidates {@code d} and its ancestors up to one whose size cannot depend on its content. */
-    private void bubble(int d, int root) {
+    private void bubble(int d) {
         boolean self = selfChanged[d];
         selfChanged[d] = false;
         int s = d;
@@ -1019,10 +1129,10 @@ public final class Layout {
             invalidAt[s] = update;
             lcValid[s] = false;
             mcCount[s] = 0;
-            if (s == root) {
+            if (store.isRoot(s)) {
                 return;
             }
-            if (!(s == d && self) && laidOutAt[s] != 0 && fixedSize(s)) {
+            if (!(s == d && self) && laidOutAt[s] != 0 && (fixedSize(s) || independent[s] && !hidden[s])) {
                 if (rootCount == roots.length) {
                     growRoots();
                 }
@@ -1038,8 +1148,8 @@ public final class Layout {
     }
 
     /** Whether {@code s} is in the tree and no ancestor is hidden. */
-    private boolean shown(int s, int root) {
-        for (int p = store.parent(s); p != root; p = store.parent(p)) {
+    private boolean inShownTree(int s) {
+        for (int p = store.parent(s); !store.isRoot(p); p = store.parent(p)) {
             if (p == UiStore.NONE || hidden[p]) {
                 return false;
             }
@@ -1055,23 +1165,45 @@ public final class Layout {
     /** Absolute positions, snapped outputs and the changed list for {@code s} and what moved below it. */
     private void visit(int s, float pax, float pay, float scale, boolean force) {
         visitedAt[s] = update;
+        collapsed[s] = false;
         float ax = pax + relX[s];
         float ay = pay + relY[s];
         boolean moved = force || ax != absX[s] || ay != absY[s];
         absX[s] = ax;
         absY[s] = ay;
         output(s, ax, ay, ax + lcRw[s], ay + lcRh[s], scale);
-        if (moved || laidOutAt[s] == update) {
-            // Hidden children get an empty rectangle; their subtrees are not laid out and keep their last outputs.
+        boolean scrolled = scrollMoved[s];
+        scrollMoved[s] = false;
+        if (moved || scrolled || laidOutAt[s] == update) {
+            visitChildren(s, ax, ay, scale, moved || scrolled);
+        }
+    }
+
+    /** Visits the children of {@code s}, whose border box is at {@code ax, ay}, shifted by its scroll. */
+    private void visitChildren(int s, float ax, float ay, float scale, boolean moved) {
+        float cx = ax - (scrollX[s] == 0 ? 0 : pixels(scrollX[s], scale) / scale);
+        float cy = ay - (scrollY[s] == 0 ? 0 : pixels(scrollY[s], scale) / scale);
+        // Hidden children and their subtrees collapse to an empty rectangle (not shown: nothing draws or picks
+        // there); their layout is kept for when they show again.
+        for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
+            if (hidden[c]) {
+                collapse(c, cx, cy, scale);
+            } else {
+                visit(c, cx, cy, scale, moved);
+            }
+        }
+    }
+
+    private void collapse(int s, float x, float y, float scale) {
+        visitedAt[s] = update;
+        absX[s] = x;
+        absY[s] = y;
+        if (!collapsed[s] || outW[s] != 0 || outH[s] != 0) {
+            collapsed[s] = true;
+            output(s, x, y, x, y, scale);
             for (int c = store.firstChild(s); c != UiStore.NONE; c = store.nextSibling(c)) {
-                if (hidden[c]) {
-                    visitedAt[c] = update;
-                    absX[c] = ax;
-                    absY[c] = ay;
-                    output(c, ax, ay, ax, ay, scale);
-                } else {
-                    visit(c, ax, ay, scale, moved);
-                }
+                own(c);
+                collapse(c, x, y, scale);
             }
         }
     }
@@ -1101,6 +1233,20 @@ public final class Layout {
     }
 
     // ================================================================ outputs
+
+    /**
+     * Whether the element has a rectangle from an update and takes part in layout itself (not {@link #visible hidden}):
+     * what picking and focus check before reading {@link #x}, {@link #y}, {@link #width}, {@link #height}.
+     */
+    public boolean shown(int slot) {
+        return slot < capacity && owner[slot] == store.element(slot) && changedAt[slot] != 0 && !hidden[slot]
+            && !collapsed[slot];
+    }
+
+    /** How the element arranges its children: {@link #kind(int, LayoutKind)}'s value (checks of a laid-out tree read it). */
+    public LayoutKind kind(int slot) {
+        return KIND_VALUES[kind[slot]];
+    }
 
     /** The element's left edge in UI pixels (snapped). */
     public float x(int slot) {
@@ -1286,7 +1432,7 @@ public final class Layout {
             long size = measure == null ? 0 : measure.measure(s, iw, iwm, ih, ihm);
             resW = Measure.width(size);
             resH = Measure.height(size);
-        } else if (store.firstChild(s) != UiStore.NONE) {
+        } else if (store.firstChild(s) != UiStore.NONE && !independent[s]) {
             content(s, iw, iwm, ih, ihm, minW - padH, maxW - padH, minH - padV, maxH - padV, rtl);
         } else {
             resW = 0;

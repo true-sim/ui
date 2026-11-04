@@ -1,16 +1,24 @@
 package com.truesim.ui.text.natives;
 
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_DIRECTION_LTR;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_DIRECTION_RTL;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_GLYPH_FLAG_DEFINED;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_SCRIPT_COMMON;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_SCRIPT_INHERITED;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_SCRIPT_INVALID;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.HB_SCRIPT_UNKNOWN;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_clear_contents;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_create;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_destroy;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_get_length;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_guess_segment_properties;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_set_direction;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_set_flags;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_buffer_set_language;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_feature_from_string;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_language_from_string;
+import static org.lwjgl.util.harfbuzz.HarfBuzz.hb_unicode_funcs_get_default;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.nhb_buffer_add_utf16;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.nhb_buffer_get_glyph_infos;
 import static org.lwjgl.util.harfbuzz.HarfBuzz.nhb_buffer_get_glyph_positions;
@@ -28,22 +36,32 @@ import org.lwjgl.util.harfbuzz.hb_glyph_position_t;
 /**
  * Shaping by HarfBuzz (UI9): one {@code hb_buffer} reused for every run. The run's characters go to HarfBuzz with up to
  * {@link #CONTEXT} characters of context on each side (Arabic joining across a font change), direction from the BiDi
- * level, script guessed from the run (runs are one script), language if given; the font's default features (kerning,
- * ligatures, contextual forms, marks) plus any given at construction. Shaping happens when text changes, not per
- * frame; it allocates nothing once its native text buffer has grown.
+ * level, script of the run's first character of a script of its own (runs are one script; HarfBuzz's own guess, made
+ * for the whole run also when only part of it is shaped again), language if given; the font's default features
+ * (kerning, ligatures, contextual forms, marks) plus any given at construction. Glyphs carry HarfBuzz's
+ * unsafe-to-break and unsafe-to-concat flags, so a long run edited in the middle is shaped again only around the edit.
+ * Shaping happens when text changes, not per frame; it allocates nothing once its native text buffer has grown.
  */
 public final class HarfBuzzShaper implements TextShaper, AutoCloseable {
 
     /** Characters of context passed on each side of a run: more than HarfBuzz's own limit of five. */
     static final int CONTEXT = 8;
 
-    private final long buffer = hb_buffer_create();
+    private final long buffer = newBuffer();
+    private final long unicode = hb_unicode_funcs_get_default();
     private final hb_feature_t.Buffer features;
     private long text;
     private int textCapacity;
     private String language;
     private long hbLanguage;
     private boolean closed;
+
+    @AllowAllocation("a shaper per thread, once")
+    private static long newBuffer() {
+        long b = hb_buffer_create();
+        hb_buffer_set_flags(b, HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT); // kept by clear_contents
+        return b;
+    }
 
     /** A shaper with the fonts' default features. */
     @AllowAllocation("a shaper per thread, once")
@@ -72,6 +90,12 @@ public final class HarfBuzzShaper implements TextShaper, AutoCloseable {
     @Override
     public void shape(char[] chars, int length, int start, int end, FontFace face, float sizePx,
         boolean rightToLeft, String language, ShapedGlyphs out) {
+        shape(chars, length, start, end, start, end, face, sizePx, rightToLeft, language, out);
+    }
+
+    @Override
+    public void shape(char[] chars, int length, int runStart, int runEnd, int start, int end, FontFace face,
+        float sizePx, boolean rightToLeft, String language, ShapedGlyphs out) {
         NativeFontFace f = (NativeFontFace) face;
         int from = Math.max(0, start - CONTEXT);
         int to = Math.min(length, end + CONTEXT);
@@ -83,10 +107,14 @@ public final class HarfBuzzShaper implements TextShaper, AutoCloseable {
         HarfBuzzCalls.clearContents(buffer);
         HarfBuzzCalls.addUtf16(buffer, text, to - from, start - from, end - start);
         HarfBuzzCalls.setDirection(buffer, rightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+        int script = script(chars, runStart, runEnd);
+        if (script != HB_SCRIPT_INVALID) {
+            HarfBuzzCalls.setScript(buffer, script);
+        }
         if (language != null) {
             HarfBuzzCalls.setLanguage(buffer, language(language));
         }
-        HarfBuzzCalls.guessSegmentProperties(buffer); // the script, from the run's characters
+        HarfBuzzCalls.guessSegmentProperties(buffer); // the language, and the script of a run of common characters
         HarfBuzzCalls.shape(f.hbFont(), buffer, features == null ? 0 : features.address(),
             features == null ? 0 : features.remaining());
         int n = HarfBuzzCalls.length(buffer);
@@ -100,8 +128,30 @@ public final class HarfBuzzShaper implements TextShaper, AutoCloseable {
                 from + MemoryUtil.memGetInt(info + hb_glyph_info_t.CLUSTER),
                 MemoryUtil.memGetInt(pos + hb_glyph_position_t.X_ADVANCE) * scale,
                 MemoryUtil.memGetInt(pos + hb_glyph_position_t.X_OFFSET) * scale,
-                MemoryUtil.memGetInt(pos + hb_glyph_position_t.Y_OFFSET) * scale);
+                MemoryUtil.memGetInt(pos + hb_glyph_position_t.Y_OFFSET) * scale,
+                MemoryUtil.memGetInt(info + hb_glyph_info_t.MASK) & HB_GLYPH_FLAG_DEFINED);
         }
+    }
+
+    /**
+     * The script HarfBuzz would guess for {@code chars[runStart, runEnd)}: that of its first character whose script is
+     * not common, inherited or unknown; {@code HB_SCRIPT_INVALID} if there is none.
+     */
+    private int script(char[] chars, int runStart, int runEnd) {
+        for (int i = runStart; i < runEnd; ) {
+            int cp = Character.codePointAt(chars, i, runEnd);
+            int s = HarfBuzzCalls.unicodeScript(unicode, cp);
+            if (s != HB_SCRIPT_COMMON && s != HB_SCRIPT_INHERITED && s != HB_SCRIPT_UNKNOWN) {
+                return s;
+            }
+            i += Character.charCount(cp);
+        }
+        return HB_SCRIPT_INVALID;
+    }
+
+    @Override
+    public boolean marksUnsafeBreaks() {
+        return true;
     }
 
     private void ensure(int chars) {

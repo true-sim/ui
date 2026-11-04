@@ -18,11 +18,17 @@ import java.util.Arrays;
  * <p><b>Dirty words.</b> Writes compare before they write: only words that really change widen the dirty range
  * ({@link #dirtyFrom()}, {@link #dirtyTo()}), so re-recording an unchanged element dirties nothing, and a frame where
  * nothing changed uploads nothing. Recording allocates nothing once the arrays have grown.
+ *
+ * <p><b>Clips and their offsets.</b> Each primitive names a clip of the clip table: a rounded rectangle it is cut to,
+ * in pixels of the screen, and an offset added to the primitive's own coordinates when it is drawn
+ * ({@link #setClipOffset}). A scrolled region records its content once, unscrolled, under a clip of its own; scrolling
+ * moves that clip's offset (seven floats) instead of recording the content again. Everything that reads positions
+ * back (picking, previews, goldens) adds the offset: {@link #clipOffsetX}, {@link #clipOffsetY}.
  */
 public final class DrawList {
 
-    /** Floats per clip rectangle: x0, y0, x1, y1, corner radius. */
-    public static final int CLIP_FLOATS = 5;
+    /** Floats per clip: x0, y0, x1, y1, corner radius, then the offset x, y of its primitives. */
+    public static final int CLIP_FLOATS = 7;
     /** The clip that clips nothing, always at index 0. */
     public static final int NO_CLIP = 0;
 
@@ -40,6 +46,9 @@ public final class DrawList {
     private int rangeEnd;
     private int needed;
     private int clip;
+    private float scale = 1; // the range's transform: x' = scale * x + offsetX
+    private float offsetX;
+    private float offsetY;
     private final int[] scratch = new int[WORDS];
 
     /** An empty list. */
@@ -59,6 +68,8 @@ public final class DrawList {
         clips[2] = Float.MAX_VALUE;
         clips[3] = Float.MAX_VALUE;
         clips[4] = 0;
+        clips[5] = 0;
+        clips[6] = 0;
         clipsDirty = true;
         dirtyFrom = 0;
         dirtyTo = 0;
@@ -84,6 +95,9 @@ public final class DrawList {
         rangeEnd = start + capacity;
         needed = 0;
         clip = NO_CLIP;
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
     }
 
     /**
@@ -113,14 +127,68 @@ public final class DrawList {
         this.clip = index;
     }
 
+    /**
+     * Transforms the next primitives of the range (until {@link #begin} starts another): every point maps to
+     * {@code scale * p + (offsetX, offsetY)}, and radii, border, line and outline widths, shadow blur, glyph pixel
+     * ranges and nine-slice insets scale with it. An element's {@code scale} style and animated offsets draw this way
+     * (a per-element transform kept in the primitives themselves, so the renderer needs nothing new); clip rectangles
+     * are not transformed.
+     */
+    public void transform(float scale, float offsetX, float offsetY) {
+        this.scale = scale;
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+    }
+
     /** A new clip rectangle with rounded corners: its index. */
     public int addClip(float x0, float y0, float x1, float y1, float radius) {
         if ((clipCount + 1) * CLIP_FLOATS > clips.length) {
             clips = grow(clips, clips.length * 2);
         }
         int index = clipCount++;
+        int o = index * CLIP_FLOATS;
+        clips[o + 5] = 0;
+        clips[o + 6] = 0;
+        clips[o] = Float.NaN; // compared unequal: set below
         setClip(index, x0, y0, x1, y1, radius);
         return index;
+    }
+
+    /**
+     * Sets the offset added to the coordinates of clip {@code index}'s primitives when they are drawn (a scrolled
+     * region's scroll); the clip rectangle itself does not move. Marks the clip table dirty only when it changed.
+     */
+    public void setClipOffset(int index, float x, float y) {
+        if (index <= NO_CLIP || index >= clipCount) {
+            throw new IllegalArgumentException("no clip " + index);
+        }
+        int o = index * CLIP_FLOATS;
+        if (clips[o + 5] != x || clips[o + 6] != y) {
+            clips[o + 5] = x;
+            clips[o + 6] = y;
+            clipsDirty = true;
+            version++;
+        }
+    }
+
+    /** The horizontal offset of clip {@code index}'s primitives ({@link #setClipOffset}). */
+    public float clipOffsetX(int index) {
+        return clips[index * CLIP_FLOATS + 5];
+    }
+
+    /** The vertical offset of clip {@code index}'s primitives ({@link #setClipOffset}). */
+    public float clipOffsetY(int index) {
+        return clips[index * CLIP_FLOATS + 6];
+    }
+
+    /** Where primitive {@code index}'s word {@code word} (an x coordinate) draws: plus its clip's offset. */
+    public float drawnX(int index, int word) {
+        return floatAt(index, word) + clipOffsetX(Primitive.clip(header(index)));
+    }
+
+    /** Where primitive {@code index}'s word {@code word} (a y coordinate) draws: plus its clip's offset. */
+    public float drawnY(int index, int word) {
+        return floatAt(index, word) + clipOffsetY(Primitive.clip(header(index)));
     }
 
     /** Moves clip {@code index}. */
@@ -208,6 +276,20 @@ public final class DrawList {
         emit(p);
     }
 
+    /**
+     * A colour glyph ({@link Primitive#FLAG_COLOR}): the quad {@code x0..y1} on screen shows the colour bitmap region
+     * {@code u0..v1} of {@code texture} (an {@code RGBA8_SRGB} page), filtered, multiplied by {@code tint} (white with
+     * the text's opacity for an emoji's own colours).
+     */
+    public void colorGlyph(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
+        int texture, long tint) {
+        int[] p = start(Primitive.GLYPH, Primitive.FLAG_COLOR, x0, y0, x1, y1, tint, 0);
+        p[Primitive.UV] = Primitive.unorm16(u0, v0);
+        p[Primitive.UV + 1] = Primitive.unorm16(u1, v1);
+        p[Primitive.TEXTURE] = texture; // pixel range, outline and weight stay 0
+        emit(p);
+    }
+
     /** An image: region {@code u0..v1} of {@code texture}, multiplied by {@code tint}. */
     public void image(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int texture,
         long tint) {
@@ -257,10 +339,10 @@ public final class DrawList {
         int[] p = scratch;
         Arrays.fill(p, 0);
         p[Primitive.HEADER] = Primitive.header(kind, flags, clip);
-        p[Primitive.X0] = Float.floatToRawIntBits(x0);
-        p[Primitive.Y0] = Float.floatToRawIntBits(y0);
-        p[Primitive.X1] = Float.floatToRawIntBits(x1);
-        p[Primitive.Y1] = Float.floatToRawIntBits(y1);
+        p[Primitive.X0] = Float.floatToRawIntBits(scale * x0 + offsetX);
+        p[Primitive.Y0] = Float.floatToRawIntBits(scale * y0 + offsetY);
+        p[Primitive.X1] = Float.floatToRawIntBits(scale * x1 + offsetX);
+        p[Primitive.Y1] = Float.floatToRawIntBits(scale * y1 + offsetY);
         p[Primitive.COLOR_A] = (int) a;
         p[Primitive.COLOR_A + 1] = (int) (a >>> 32);
         p[Primitive.COLOR_B] = (int) b;
@@ -269,11 +351,48 @@ public final class DrawList {
     }
 
     private void emit(int[] p) {
+        if (scale != 1) {
+            scaleSizes(p);
+        }
         needed++;
         if (cursor < rangeEnd) {
             put(cursor, p);
         }
         cursor++;
+    }
+
+    /** Scales the sizes of primitive {@code p} (not its corners: {@link #start} moved those) by the transform. */
+    private void scaleSizes(int[] p) {
+        int kind = Primitive.kind(p[Primitive.HEADER]);
+        switch (kind) {
+            case Primitive.BOX, Primitive.SHADOW -> {
+                p[Primitive.RADII] = scaleHalves(p[Primitive.RADII]);
+                p[Primitive.RADII + 1] = scaleHalves(p[Primitive.RADII + 1]);
+                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+            }
+            case Primitive.GLYPH -> {
+                p[Primitive.PIXEL_RANGE] = scaleFloat(p[Primitive.PIXEL_RANGE]);
+                p[Primitive.OUTLINE] = scaleFloat(p[Primitive.OUTLINE]);
+                p[Primitive.WEIGHT] = scaleFloat(p[Primitive.WEIGHT]);
+            }
+            case Primitive.NINE_SLICE -> {
+                p[Primitive.INSETS] = scaleHalves(p[Primitive.INSETS]);
+                p[Primitive.INSETS + 1] = scaleHalves(p[Primitive.INSETS + 1]);
+            }
+            case Primitive.LINE -> p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+            default -> {
+                // images: the quad alone
+            }
+        }
+    }
+
+    private int scaleFloat(int bits) {
+        return Float.floatToRawIntBits(Float.intBitsToFloat(bits) * scale);
+    }
+
+    private int scaleHalves(int word) {
+        return Primitive.halves(Float.float16ToFloat((short) word) * scale,
+            Float.float16ToFloat((short) (word >>> 16)) * scale);
     }
 
     private void put(int index, int[] p) {

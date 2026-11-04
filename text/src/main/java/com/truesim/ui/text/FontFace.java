@@ -32,4 +32,13 @@ public interface FontFace {
      * outline (a space, a missing glyph id); {@code out} is then empty.
      */
     boolean outline(int glyph, GlyphOutline out);
+
+    /**
+     * The pixel size (pixels per em) of the face's colour bitmaps (an emoji font's CBDT strike: 109 for Noto Color
+     * Emoji), or 0 if its glyphs are outlines. A face with colour bitmaps draws them through the atlas's colour pages
+     * ({@link GlyphAtlas#colorEntry}) instead of MTSDF.
+     */
+    default float colorStrike() {
+        return 0;
+    }
 }

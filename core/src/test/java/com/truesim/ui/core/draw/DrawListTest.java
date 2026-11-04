@@ -36,9 +36,9 @@ class DrawListTest {
     @Test
     void everyKindRecords() {
         DrawList list = new DrawList();
-        int start = list.allocate(8);
+        int start = list.allocate(9);
         int clip = list.addClip(0, 0, 50, 50, 4);
-        list.begin(start, 8);
+        list.begin(start, 9);
         list.clip(clip);
         list.gradientBox(0, 0, 10, 10, Rgba.WHITE, Rgba.BLACK, 1.5f, 1, 1, 1, 1, 0, 0);
         list.shadow(0, 0, 10, 10, Rgba.BLACK, 2, 2, 2, 2, 3);
@@ -47,6 +47,7 @@ class DrawListTest {
         list.nineSlice(0, 0, 80, 40, 0, 0, 1, 1, 4, Rgba.WHITE, 8, 8, 8, 8, 12, 12, 12, 255);
         list.line(0, 0, 10, 10, 2, Rgba.WHITE);
         list.rasterGlyph(3, 4, 9, 12, 0.5f, 0, 1, 0.25f, 7, Rgba.WHITE);
+        list.colorGlyph(3, 4, 23, 24, 0.25f, 0, 0.5f, 0.5f, 9, Rgba.pack(1, 1, 1, 0.5f));
         assertThat(list.end()).isTrue();
 
         assertThat(Primitive.flags(list.header(start))).isEqualTo(Primitive.FLAG_GRADIENT);
@@ -70,9 +71,45 @@ class DrawListTest {
         assertThat(list.intAt(start + 6, Primitive.UV) & 0xFFFF).isEqualTo(32768); // 0.5
         assertThat(list.floatAt(start + 6, Primitive.X1)).isEqualTo(9);
         assertThat(list.floatAt(start + 6, Primitive.PIXEL_RANGE)).isZero();
+        assertThat(Primitive.flags(list.header(start + 7))).as("a colour glyph").isEqualTo(Primitive.FLAG_COLOR);
+        assertThat(list.intAt(start + 7, Primitive.TEXTURE)).isEqualTo(9);
+        assertThat(list.intAt(start + 7, Primitive.UV + 1) & 0xFFFF).isEqualTo(32768); // 0.5
+        assertThat(Rgba.a(list.colorAt(start + 7, Primitive.COLOR_A))).isEqualTo(0.5f);
         float[] clips = list.clips();
         assertThat(list.clipCount()).isEqualTo(2);
         assertThat(clips[clip * DrawList.CLIP_FLOATS + 4]).isEqualTo(4);
+    }
+
+    @Test
+    void aTransformMovesAndScalesEveryKind() {
+        DrawList list = new DrawList();
+        int start = list.allocate(8);
+        list.begin(start, 8);
+        list.transform(2, 10, 20);
+        list.box(0, 0, 10, 10, Rgba.WHITE, 1, 2, 3, 4, 1, Rgba.BLACK);
+        list.shadow(0, 0, 10, 10, Rgba.BLACK, 2, 2, 2, 2, 3);
+        list.glyph(0, 0, 8, 8, 0, 0, 1, 1, 7, 2, Rgba.WHITE, 1, Rgba.BLACK, 0.5f);
+        list.image(0, 0, 8, 8, 0, 0, 1, 1, 3, Rgba.WHITE);
+        list.nineSlice(0, 0, 80, 40, 0, 0, 1, 1, 4, Rgba.WHITE, 8, 8, 8, 8, 12, 12, 12, 12);
+        list.line(0, 0, 10, 10, 2, Rgba.WHITE);
+        assertThat(list.end()).isTrue();
+        assertThat(list.floatAt(start, Primitive.X0)).isEqualTo(10);
+        assertThat(list.floatAt(start, Primitive.Y1)).isEqualTo(40);
+        assertThat(Float.float16ToFloat((short) list.intAt(start, Primitive.RADII))).isEqualTo(2);
+        assertThat(Float.float16ToFloat((short) (list.intAt(start, Primitive.RADII + 1) >>> 16))).isEqualTo(8);
+        assertThat(list.floatAt(start, Primitive.WIDTH)).isEqualTo(2);
+        assertThat(list.floatAt(start + 1, Primitive.WIDTH)).as("the blur").isEqualTo(6);
+        assertThat(list.floatAt(start + 2, Primitive.PIXEL_RANGE)).isEqualTo(4);
+        assertThat(list.floatAt(start + 2, Primitive.OUTLINE)).isEqualTo(2);
+        assertThat(list.floatAt(start + 2, Primitive.WEIGHT)).isEqualTo(1);
+        assertThat(list.floatAt(start + 3, Primitive.X1)).isEqualTo(26);
+        assertThat(Float.float16ToFloat((short) list.intAt(start + 4, Primitive.INSETS))).isEqualTo(16);
+        assertThat(list.floatAt(start + 5, Primitive.WIDTH)).isEqualTo(4);
+        assertThat(list.floatAt(start + 5, Primitive.X1)).isEqualTo(30);
+        list.begin(start, 1);
+        list.box(0, 0, 10, 10, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.end();
+        assertThat(list.floatAt(start, Primitive.X1)).as("a new range starts untransformed").isEqualTo(10);
     }
 
     @Test
@@ -124,6 +161,35 @@ class DrawListTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> list.nineSlice(0, 0, 1, 1, 0, 0, 1, 1, 1, Rgba.WHITE, 0, 0, 0, 0, -1, 0, 0, 0))
             .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void aClipsOffsetMovesItsPrimitivesWhereTheyDrawAndDirtiesOnlyTheClipTable() {
+        DrawList list = new DrawList();
+        int clip = list.addClip(0, 0, 100, 100, 0);
+        int a = list.allocate(1);
+        list.begin(a, 1);
+        list.clip(clip);
+        list.box(10, 20, 30, 40, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.end();
+        list.clean();
+        long version = list.version();
+        list.setClipOffset(clip, 0, 0); // as it is
+        assertThat(list.clipsDirty()).isFalse();
+        list.setClipOffset(clip, -5, -15);
+        assertThat(list.clipsDirty()).isTrue();
+        assertThat(list.version()).isGreaterThan(version);
+        assertThat(list.dirtyTo()).isEqualTo(list.dirtyFrom()); // no primitive changed
+        assertThat(list.clipOffsetX(clip)).isEqualTo(-5);
+        assertThat(list.clipOffsetY(clip)).isEqualTo(-15);
+        assertThat(list.floatAt(a, Primitive.X0)).isEqualTo(10);
+        assertThat(list.drawnX(a, Primitive.X0)).isEqualTo(5);
+        assertThat(list.drawnY(a, Primitive.Y1)).isEqualTo(25);
+        assertThat(list.clips()[clip * DrawList.CLIP_FLOATS + 5]).isEqualTo(-5);
+        assertThatThrownBy(() -> list.setClipOffset(0, 1, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setClipOffset(9, 1, 1)).isInstanceOf(IllegalArgumentException.class);
+        list.reset();
+        assertThat(list.clipOffsetX(0)).isZero();
     }
 
     @Test

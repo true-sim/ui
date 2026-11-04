@@ -1,6 +1,7 @@
 plugins {
     id("truesim.java-library-conventions")
     id("truesim.allocation-free")
+    `java-test-fixtures`
 }
 
 description = "UI controls for true-sim: panels, labels and images over the element store, their decorations, and the frame that styles, lays out and records them."
@@ -10,9 +11,13 @@ dependencies {
     api(project(":ui-style"))
     api(project(":ui-layout"))
     api(project(":ui-text"))
+    // The galleries (ControlsGallery, DataGallery, WindowsScene): scenes of every control that the tests here and the
+    // engine's GPU screenshot tests build.
+    testFixturesApi(project(":ui-testkit"))
     testImplementation(project(":ui-testkit"))
     testImplementation(project(":ui-text-native")) // the real text path in allocation tests and benchmarks
     testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the same layout on every machine
+    testImplementation(project(":ui-fonts-emoji")) // colour emoji in text fields
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.

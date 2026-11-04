@@ -20,6 +20,9 @@ import java.util.Set;
  * <li>the {@link #fallback(UnicodeScript, String...) fallback families of the character's script};</li>
  * <li>the {@link #lastResort(String...) last-resort families} (symbols, emoji, CJK);</li>
  * </ol>
+ * Characters shown as emoji (emoji presentation by default or asked for with U+FE0F, keycaps, flags, skin tones)
+ * try the {@link #emoji(String...) emoji families} first, so a text font that also has a plain glyph for them (a
+ * digit of a keycap, a heart) does not take them.
  * the first face that covers the character wins, matched by weight and style. Faces open on first use, so registering
  * every system font costs a directory scan, not a font load. Used from the UI thread.
  */
@@ -33,6 +36,7 @@ public final class FontRegistry {
     private final Map<String, String[]> aliases = new HashMap<>();
     private final Map<UnicodeScript, String[]> scriptFallbacks = new EnumMap<>(UnicodeScript.class);
     private String[] lastResort = new String[0];
+    private String[] emoji = new String[0];
     private final Map<ChainKey, FontChain> chains = new HashMap<>();
     private long version;
 
@@ -112,6 +116,12 @@ public final class FontRegistry {
     /** The families tried for characters of {@code script} that the requested families do not cover. */
     public void fallback(UnicodeScript script, String... families) {
         scriptFallbacks.put(script, families.clone());
+        changed();
+    }
+
+    /** The families tried first for characters shown as emoji (a colour emoji font, then installed ones). */
+    public void emoji(String... families) {
+        emoji = families.clone();
         changed();
     }
 
@@ -241,6 +251,11 @@ public final class FontRegistry {
     /** The fallback faces for {@code script} at {@code weight} and {@code italic}. */
     FontFace[] scriptFaces(UnicodeScript script, int weight, boolean italic) {
         return resolve(scriptFallbacks.get(script), weight, italic);
+    }
+
+    /** The emoji faces at {@code weight} and {@code italic}. */
+    FontFace[] emojiFaces(int weight, boolean italic) {
+        return resolve(emoji, weight, italic);
     }
 
     /** The last-resort faces at {@code weight} and {@code italic}. */

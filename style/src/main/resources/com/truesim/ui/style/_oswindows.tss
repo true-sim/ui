@@ -1,0 +1,13 @@
+// OS windows of docking (com.truesim.ui.controls.windows.OsDockHost), imported by default-theme.tss: the dock-window
+// filling each OS window a tab was torn out into, holding that window's dock area (a dock-space).
+
+dock-window {
+  layout: flex;
+  direction: column;
+  align-items: stretch;
+  padding: 0px;
+  background: box(var(--bg));
+  border: 1px var(--edge);
+
+  > dock-space { grow: 1; basis: 0px; }
+}

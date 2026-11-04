@@ -1667,6 +1667,48 @@ PRs:
 - Done: tools written with the façade render through the same pipeline, and the gallery is readable by Windows
   Narrator.
 
+### Plan additions from the user (2026-11-03)
+
+The order of the areas below does not matter to the user; independent areas may be built in parallel on their own
+branches once the A2 groundwork (picking, events, focus, layers) is in, which they all share. Every area keeps the
+rules: everything stylable from `.tss`, tunables as settings, nothing allocated per frame, tests, screenshots; still
+one PR per repository per group, CI and release once per group.
+
+- **Text editing** (A2 pulled forward: focus, keyboard routing through `UiCommand`s, the IME rectangle in
+  `engine-platform`, the clipboard through the engine's `Clipboard`): single-line text fields (caret, selection by
+  pointer and keys incl. word and line, copy/cut/paste, undo/redo, IME preedit inline and the candidate window placed
+  by the IME rectangle, BiDi caret movement, scrolling within the field, placeholder, maximum length, filters and
+  validation, read-only) and password fields (masking, reveal toggle, no copy, no IME); multi-line text areas (word
+  wrap, virtualized scrolling for 1 MB of text, tabs, optional line numbers, soft and hard breaks); rich text (spans
+  with colour, weight, italic, size, underline/strike, highlight, links that can run console commands, inline images
+  and icons, all by `.tss` span classes; an inline markup to author it; editable in text areas); colour emoji
+  (bundled Noto Color Emoji, OFL; ZWJ sequences, skin tones, flags, variation selectors; emoticon and shortcode
+  replacement as an optional input filter behind a setting).
+- **Overlays, hovers, windows, docking**: a layer stack per view (HUD, overlays, pop-ups, tooltips, modal, debug)
+  with z-order, input blocking or passthrough and dimming backdrops; overlays anchored to elements, 3D points or scene
+  nodes, kept on screen and flipped; hover, pressed, focus and disabled states everywhere; tooltips (delay, follow or
+  anchored, rich content, long-press and focus equivalents), hover cards and popovers with hover intent; floating
+  windows (move, resize by edges and corners, minimise, maximise, close, title bar, modal and modeless, z-order and
+  focus on click, snapping, remembered positions, keyboard and gamepad move/resize, also in 3D/VR panels); docking
+  (left/right/top/bottom/centre, tab groups with drag between and reorder, split panes with splitters, drop previews,
+  undocking to floating windows, nesting, a serialisable stylable layout description, optionally separate OS
+  windows).
+- **Container controls** (emphasised): tabbed panes (strips on any side, scrolling or wrapping, closable and
+  reorderable tabs, overflow menu), collapsibles (headers, accordions single or multi open, animated by style
+  transitions), group boxes and fieldsets, expanders, split panes outside docking, cards, carousels and pagers,
+  steppers and wizards, sidebars and drawers, scroll views with sticky headers.
+- **Basic controls**: buttons (plain, icon, toggle), checkboxes, radio groups, switches, segmented controls, labels
+  with icons, images, separators, progress bars, spinners, sliders (range, vertical), number fields with steppers and
+  drag-to-change, colour picker, date and time pickers, search box, tag and chip input, key-binding capture (for the
+  input system's rebinding), drop-downs with search, message and confirm dialogs, toasts, badges, menu bars, context
+  and pop-up menus with submenus, toolbars, status bars, breadcrumbs, scroll panes with stylable scrollbars (touch
+  momentum, gamepad).
+- **Data controls**: virtualized list boxes (single and multi select), tree views (lazy, drag and drop), tables and
+  data grids (sort, filter, resizable, reorderable and frozen columns, inline editing, virtualized).
+- **Also added**: a file browser with open and save dialogs (an engine-agnostic file model; native OS dialogs maybe
+  later); a minimap or picture-in-picture camera view control (a second view rendered into a UI image).
+- **Left out for now**: the node-graph editor.
+
 ## 14. Risks and open questions
 
 - The presenter's `UI` key and the composition in the output transform are planned (frame-graph-v2 §4.8) but not
@@ -1706,6 +1748,148 @@ PRs:
 
 ## Build status
 
+### Group A2 fixes (2026-11-04): local branches `a2-fixes` (ui) and `ui-a2-fixes` (engine), not yet in CI
+
+The defects the GPU screenshots of the A2 galleries showed, a check that finds their kinds in any UI, the frame in
+two phases (no frame of latency for the game's changes), built-in icons and touch selection handles.
+
+#### Built
+
+| Item | Cause and fix | Where |
+|---|---|---|
+| Data gallery: a section's rows at one place | Style names are inherited by unnamed children; the gallery's root is `panel.hud`, so every unnamed panel in it (a section's body) matched `panel.hud { layout: anchors; anchors: full }` and anchored all its rows to its corner (a minimal pane without a hud root stacked them). The HUD root's rule now applies to the root only (`root > panel.hud, layer > panel.hud`) | `default-theme.tss` |
+| Stuck section headers over their rows | The header moved by its holder's scroll offset, but the `scroll-sticky` bar's background stayed behind, so the stuck title drew over the rows. `ScrollPane` scrolls an unstyled `scroll-stick` holding the bar; the default bar is opaque (the surface is 86 % opaque) | `controls.data` `ScrollPane`, `_data.tss` |
+| Tab under the overflow button | With `tab-overflow: menu` (now the default theme's) the strip shows only tabs it holds whole, the selected one always; the others are drawn transparent and not pickable (their places stay: hiding changes no layout, so no oscillation) and reached through the menu (`TabPane.overflowing(i)`). Scroll mode scrolls and clips before the button; the test theme wraps | `TabPane` |
+| Carousel: slides floating, mostly empty | The viewport is a surface of its own (96 px), clips, shows one page; a page lays its content over itself, stretched (`layout: overlay`), so a slide fills it; arrows beside, dots right below | `_basic.tss`, gallery |
+| Split pane | Both panes are surfaces (background, border, padding, clip), the splitter visible | `_basic.tss` |
+| Window buttons without icons | `BuiltinIcons`: the toolkit's own icons (close, dismiss, minimise, maximise, restore, more, previous, next, up, down, the drop-down, collapsible, menu and breadcrumb arrows, chevrons, check, minus, plus, eye, eye-off, search, grip), distance fields of lines, triangles, circles and rings on a 16-unit grid, rendered once at 32 texels when a style first names `icons/<name>`, tinted by the style's image colour; `UiImages.get` falls back to them, a game's image under the same name wins. Each `window-button` holds an `image.icon` of its id (`restore` while maximised) | `controls` `BuiltinIcons`, `UiImages`, `FloatingWindow`, `_windows.tss` |
+| Test theme: rich text over its neighbours | `richtext` clips in both themes (it scrolls when taller than its box) | `_text-edit*.tss` |
+| A clipping label's text drew outside it | Text and image content were recorded under the parent's clip only; all content now switches to the element's own clip, as painted content did (found by the check below) | `Ui` |
+| More | Gallery: the drawer's row lost its flex row to a second inline style; sized panels are minimum sizes (the test theme's text overflowed them); test theme: date cells, badges and step numbers sized for its text | gallery, `_basic-test.tss` |
+| `LayoutSanity` | `LayoutSanity.check(ui)` (ui-testkit) lists a laid-out, recorded UI's defects over every layer, from what is drawn (each range's primitives where they draw, cut by their clips; glyphs by their inked atlas texels; transparent primitives, shadows and focus rings left out; boxes transformed as their primitives): `CLIP` (drawn outside the nearest clipping ancestor's clip), `OVERLAP` (siblings of a stack, flex or grid overlap; not overlay, anchors, border or absolute layouts or negative margins), `TEXT_OVERFLOW` (ink leaves the box; sideways up to 0.4 of the ink's height for italics), `TEXT_OVERLAP` (two elements' glyphs overlap with nothing opaque drawn between them: it found the data gallery's rows, which `OVERLAP` cannot see in an anchors layout), `TAB_UNDER_OVERFLOW`, `TAB_PARTIAL`. `assertSane(ui, what)` throws with the list. `GallerySanityTest` runs it on every gallery in both themes with the real text path (controls, with its overlays open, while the carousel turns; data; windows; text) | `ui-testkit`, `controls` tests |
+| Two-phase frame | `Ui.input(input, nanos)` at the frame's start (picking, events, states, focus, commands, text: the game's update sees this frame's clicks); `Ui.update(width, height)` after the game's update (listeners, animations, styles, layout, recording: what the input and the game changed shows in this frame). `Ui.input()` keeps returning the frame's input in the second phase, so popovers and tooltips see the pointer; `update(w, h, input, nanos)` does both. Engine: `UiPlugin` runs `input` in `beforeUpdate` and `update`, the submit and the cursor in `afterUpdate` (after the game's update and late update); `UiPlugin.pointers(source)` adds pointer sources | `Ui`, engine `UiPlugin` |
+| Touch selection handles | A touch long press selects a word with a `selection-handle` (size, background, radius) at each end, centred on the line's bottom; touching within a line height of one drags that end (kept where grabbed, swapping past the other end); typing, a tap, a mouse press end them | `TextEditor`, `_text-edit*.tss` |
+
+#### Decisions
+
+- *A tab that does not fit is hidden, not taken out of the row*: taking it out would shrink the row, which would
+  then fit and bring it back; transparent and unpickable, it keeps its place and the layout does not change.
+- *Icons as small rendered textures*, not primitives: an image element already draws a texture tinted and fitted by
+  its style; 32 texels with a texel of distance antialiasing stay crisp at the 10 to 16 px the themes use. Shapes are
+  code, so no asset pipeline is needed and a game can still register its own.
+- *The checker reads the draw lists*, not the layout alone: the defects users see are where things draw (clips,
+  offsets, scales, text ink); layout-only checks missed the anchored rows and the label clip.
+- *Two phases, one per side of the game's update*, instead of a second input-free update: input is processed once,
+  everything after it once.
+
+#### Left
+
+- Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
+  label's text overflows its box rather than the row overflowing. The galleries use minimum sizes; a layout change is
+  its own step (the Yoga oracle tests pin the current behaviour).
+- `LayoutSanity` tolerates italic overhang by a share of the ink's height; it does not check text against elision
+  (no element elides yet) nor overlaps across layers (pop-ups are meant to cover).
+- Touch handles are not magnified (no loupe) and do not scroll a field while dragged past its edge.
+
+### Group A2 (2026-11-04): built, local branches `a2-group` (ui) and `ui-a2` (engine), not yet in CI
+
+The interaction core (A2 groundwork) and the four areas of the plan additions built on it in parallel (text editing;
+overlays, windows and docking; basic and container controls; data controls), merged into one group with their
+cross-branch work: one set of frame phases, the text field in the other areas' hooks, scrolling by clip offsets, the
+engine's `UiPlugin` and GPU screenshots of every gallery. Engine-agnostic code is in `ui-core`, `ui-layout`, `ui-style`
+and `ui-controls` (`com.truesim.ui.controls.{text,overlay,windows,basic,anim,data}`); the engine side is `engine-ui`.
+
+#### Built
+
+| Area | Built | Where |
+|---|---|---|
+| Interaction core | Layers (HUD, overlay, modal, popup, tooltip, drag, debug; input pass-through, block or none), picking by a uniform grid per layer, events with capture, target and bubble, drag and drop with typed payloads, states, focus per player with spatial navigation and modal scopes, commands and text routed to the focused element, semantics actions | `ui-core` `event`, `Ui` |
+| Frame phases | `Ui.FrameListener` (`addFrameListener`): `frame(nanos)` after input, before animations, styles and layout; `afterLayout()` after each layout pass, with another styles-and-layout pass while listeners change styles, states or layout inputs (at most `Ui.MAX_PASSES`, 4). Layout inputs set in code are owned (`Ui.codeLayout`/`ownLayout`: kind and direction, placement, width, height, flex), so restyles keep them. Content a control draws itself: `Ui.paint` (a `Painter`), `repaint`, `remeasure`; style parts: `Ui.part` (hidden children whose resolved style a painter reads). `Ui.input()` is the frame's input | `Ui` |
+| Text editing | Fields (caret, selection by pointer, touch and keys, every `ui.text` command, clipboard, coalesced undo, IME composition inline with the candidate window at the caret, BiDi caret movement, scrolling, placeholder, maximum length, filters and validators with `:invalid`, `:read-only`); `PasswordField`, `SearchField`, `NumberField`, `TagInput`; areas (wrap, Fenwick-indexed virtual paragraphs, line numbers, Tab policy); rich text runs and spans styled by `.tss` (`span.<class>`, `link`, `img`), BBCode `Markup`; colour emoji (Noto Color Emoji CBDT in `ui-fonts-emoji`, ZWJ, flags, skin tones), emoticon replacement | `controls.text`, `ui-text` `edit`, `ui-text-native` |
+| Overlays and windows | `Overlays`/`Overlay` anchored to elements, points or scene objects, placed by `Placer` (side, align, gap, shift, flip, viewport margin; the side as fact `side`), pass-through, blocking or modal with a backdrop; overlays fade in and out by their `opacity` transition (input off while fading out); `Tooltips` (delay, warm moves, follow or anchored, long press, visible focus); `Popovers` (hover cards with a safe triangle and grace, click popovers, nesting); `WindowManager`/`FloatingWindow` (move with snapping, eight resize edges, minimise, maximise, close, modal, focus cycling, keyboard move and resize, `WindowLayout`); `DockSpace` (splits, tab groups, drop zones and preview, floating into windows and back, `DockLayout` round trip) | `controls.overlay`, `controls.windows` |
+| Basic and container controls | `Button`, `ToggleButton`, `Checkbox` (`:indeterminate`), `RadioGroup`, `Switch`, `SegmentedControl`, `IconLabel`, `ImageView`, `Separator`, `Badge`, `ProgressBar`, `Spinner`, `Slider` (range, vertical), `ColorPicker`, `DatePicker`, `TimePicker`, `KeyBindingField`, `DropDown`, `Menu`/`MenuBar` (submenus with hover intent, context menus), `Dialog`, `Toasts`, `Toolbar`, `StatusBar`, `Breadcrumbs`, `TabPane`, `Collapsible`, `Accordion`, `GroupBox`, `Card`, `SplitPane`, `Carousel`, `Stepper`, `Drawer`; models are `common-state` versioned values polled once a frame by `Controls` | `controls.basic` |
+| Animation | `Animator`: element channels (opacity, scale, drawn offset, colours, sizes, offsets, anchors) and controls' own, fast-forward reversal, CSS easings, `ui.animation.speed` (0: reduced motion); style transitions on restyle; `Visuals` per-element overrides; opacity and scale apply to the subtree; `DrawList.transform` draws scales and offsets without a renderer change | `controls.anim`, `ui-core` |
+| Data controls | `Scroller`, `ScrollView` (stylable bars, auto-hide, touch momentum, rubber band, keys), `ScrollPane` with sticky headers; virtualization (`VirtualView`, fixed or Fenwick-measured extents, a moving origin for a million rows); `ValueRenderer`/`ValueEditor`/`ValueRenderers`; `ListView`, `DataView` (sorted and filtered, O(log n + B) a change), `TreeView` over `common-state`'s `VersionedTree` (lazy, drag and drop), `TableView` (sort, filter row, resize, move, frozen columns, inline editing, row, multi-row or cell selection, column virtualization) | `controls.data` |
+| Cross-branch hooks | `SearchField` is a `DropDown.FilterSource` (it takes the focus when the list opens; `FilterSource.focusTarget`); `HexField` puts a hex text field in a `ColorPicker`'s hex slot; `TextCellEditor` is the `ValueEditor` of strings (Enter commits through `TextEditor.passSubmit`, Escape cancels, validators); `TextColumnFilter` puts a field in a table's filter row (contains, ignoring case). Styled as `textfield.cell`, `.column-filter`, `.hex` in both themes; the galleries use all four | `controls.text` |
+| Scrolling by clip offsets | Each clip record carries an offset added to its primitives' coordinates (`DrawList.CLIP_FLOATS` 7, `setClipOffset`, `drawnX`/`drawnY`); the UI records an element in its clip's content space (its rectangle plus the clip owner's scroll), and a scroll region (`Ui.scrollRegion`: a virtual view's body, a scroll pane's viewport; any clipping element) moves its clip's offset when it scrolls, so its rows are not recorded again. Layout scroll shifts are whole pixels when snapping (`Layout.scrollPixelsX/Y`), so picking, which reads the layout, hits exactly where the content draws. The engine's shader moves each primitive's quad by its clip's offset and tests the clip's rectangle unmoved | `ui-core`, `ui-layout`, `Ui`, engine `ui/draw.slang` |
+| Engine | `UiPlugin` (key `ui`): the `ui` action group, every UI tunable a setting (`UiTunables`, with `UiCommands.ALL`, group `ui`), each frame at its start `UiCommands`, `MousePointer` and `UiTextInput` into one `UiInput`, `ui.update(width, height, input, nanos)` with the view's size and the frame's real time, `GpuUiRenderer.submit`; with a window `SdlClipboard`, SDL text input, the display's content scale as the layout's, and the mouse cursor following the UI's (`Platform.setCursor`, `SystemCursor`). `UiTextInput`, `SdlClipboard`, `Window.startTextInput(kind)`, the colour glyph path of the shader (from `ui-text-input`) | engine `ui`, `platform` |
+| Galleries | `ControlsGallery`, `DataGallery`, `WindowsScene` and `TextGallery` are `ui-controls` test fixtures (`java-test-fixtures`), used by its own tests and by the engine's `GalleryScreenshots` | `controls/src/testFixtures` |
+| Styles | every key of the control packages registered as `StyleKeyHolder` services (one services file: `BasicStyles`, `DataStyles`, `OverlayStyles`, `WindowStyles`), loaded once by `StyleKeys.loadServices` when a sheet compiles; the partials `_text-edit`, `_basic`, `_data`, `_windows` and their garish counterparts, one `@use`/`@import` each in both themes; new states `:invalid`, `:read-only`, `:indeterminate` (bits 11, 12, 13) | `ui-style`, themes, `UiState` |
+| Settings | `Ui.tunables()` lists every area's tunables once (39 with a text system's atlas settings besides): the frame and interaction, text editing, the basic controls, scrolling and lists, tooltips, hover cards and windows; `UiTunablesTest` finds every static `Tunable` of the UI modules by reflection and checks it is listed | `Ui` |
+
+#### Decisions
+
+- *One frame extension point.* The branches had four (`UiFrameHook` with a before-layout re-set of positions,
+  `Updater` with a boolean second pass, `FrameListener` with `laidOut`, `onFrame`). Kept: a listener with `frame` and
+  `afterLayout`, extra passes found from the dirty queue (not a returned flag), and code-owned layout inputs instead
+  of setting them again before every pass (no work and no extra pass when a restyle happens). Content drawing
+  (`paint`, `part`) stays separate: it is not a phase.
+- *One style-key discovery.* `StyleKeyHolder` services, loaded once; `StyleKeyProvider` and `loadInstalled` went.
+- *One type-ahead setting* (`ui.list.typeAheadTimeout`) for lists, drop-downs and menus.
+- *Docking keeps its own tab strip and splitter.* `TabPane` and `SplitPane` were not substituted: docking's tabs
+  drag across panes, to drop zones and out into windows through its own drag sessions and `DockHost`, and its
+  splits hold any number of panes with ratios as flex factors, where `TabPane` reorders within one strip (pages taken
+  out of the tree) and `SplitPane` splits two panes by a share. Replacing them would need drag-out hooks in `TabPane`
+  and an N-way `SplitPane`, and give no benefit to either; they share the theme's looks instead.
+- *Fades through the animator.* Overlays read their own `opacity` transition: fade in from transparent on the first
+  styled frame, fade out before leaving the layer; without a transition or with animations off, at once. The
+  overlay is logically hidden at once (focus, modality, `showing()`).
+- *Scrolling by offset, not by re-recording*, with whole-pixel scroll shifts so draw and pick positions agree
+  exactly; a non-region scroll (a sticky header) still records its content again.
+- ~~*Engine frame wiring at the frame's start.*~~ The frame is two phases since the fixes below: input at the
+  frame's start, the update after the game's.
+- From the branches: BBCode markup, CBDT colour emoji on straight-alpha sRGB pages, style parts instead of
+  control-specific keys (text); positions in code as layout inputs and overlays placed after layout in the same frame
+  (windows); animated values in `Visuals`, never inline styles, and pages taken out of the tree rather than hidden
+  (basic); hidden subtrees collapse and draw nothing (data).
+
+#### Goldens regenerated by the merge
+
+- Windows scene (`goldens/windows/scene-*`, both themes): content of hidden dock tabs no longer records (data's
+  collapsed hidden subtrees); nested opacity multiplies, `scale` from styles draws, labels shape with a pixel of
+  tolerance (basic). The scene now settles running transitions before its goldens.
+- Basic gallery (`basic-gallery*.txt`): the searchable country drop-down and the hex field added by the hooks.
+- `ListViewTest.drawListGolden`: rows draw under the body's region clip (index 2); positions unchanged.
+
+#### Benchmarks (Ryzen 9 9950X3D, RX 9070 XT, without JaCoCo)
+
+| Target | Budget | Measured |
+|---|---|---|
+| `TableView` 100,000 x 20 (1880 x 1000, 38 rows x 19 columns), scrolling | ≤ 0.3 ms | 0.077 ms median, 0.15 to 0.19 ms p99 (before clip offsets: 0.235 ms median, 0.38 to 0.46 ms p99) (`DataBenchmarkTest`) |
+| `ListView` of 10,000 rows, scrolling | ≤ 0.1 ms | 0.0036 ms median, 0.010 to 0.012 ms p99 (before: 0.022, 0.036 to 0.045) |
+| 1,000,000 rows, sorted and filtered, 100 changes a frame | ≤ 0.5 ms | 0.012 to 0.014 ms median, 0.025 to 0.047 ms p99 |
+| 50 windows and 30 docked panels (1,091 elements): idle, dragging a window | 0.05 ms, 0.3 ms | 0.0074 ms (0.0080 p99), 0.031 ms (0.052 p99) (`WindowsBenchmarkTest`, windows branch) |
+| Controls gallery (523 elements): idle animating, pointer moving | — | 1.0 µs (1.6 p99), 3.7 µs (7.3 p99) (`GalleryBenchmarkTest`, basic branch) |
+| 1 MB text area: typing, scrolling | well under 1 ms | 0.045 ms (0.085 p99), 0.004 ms (0.022 p99) (`TextAreaTest`, text branch) |
+| Picking, 2,001-element HUD | 5 µs | 0.017 µs front-most, 0.023 µs every hit (`PickingBenchmarkTest`, groundwork) |
+
+Steady-state frames allocate nothing (allocation tests without escape analysis) in every area: interaction with two
+pointers, text editing idle, blinking, scrolling and hovering, windows idle and dragging, the controls gallery with
+hover, drags, wheel, keys and model changes, animations, lists and tables scrolling and changing.
+
+#### GPU screenshots
+
+`TRUESIM_SCREENSHOTS=true TRUESIM_SCREENSHOTS_DIR=<dir> ./gradlew :engine-ui:test --tests '*GalleryScreenshots'`
+writes `ui-windows/windows-{default,test}.png`, `ui-controls/controls{,-overlays}-{default,test}.png`,
+`ui-data/data-{default,test}.png` and `ui-text/text-{default,test}.png`, over the dark backdrop the CPU previews use.
+Looked at: the GPU images match the CPU previews; the test theme restyles every element.
+
+#### Left
+
+- ~~The scroll pane of the data gallery lays the rows of a section's body on top of one another~~,
+  ~~the game's changes to UI state show the next frame~~, ~~windows' title bar buttons draw no icons~~, ~~the tab
+  strip's overflow button overlaps a clipped tab~~: fixed, see "Group A2 fixes" above.
+- From the branches: ~~incremental shaping of very long paragraphs~~ (built: below), ~~touch selection handles~~,
+  spell checking,
+  grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
+  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
+  records by their
+  metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
+  (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources
+  (groundwork).
+
 ### Group A1 (2026-11-03): built, local branches, not yet in CI
 
 Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text-native`, `ui-fonts`,
@@ -1743,14 +1927,138 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 | Steady-state allocation | 0 bytes | 0 (allocation tests: idle and 10% changing frames, layout, recording, input mapping) |
 
 **Left from A1:**
-- The `Ui` engine plugin (key, settings registration, frame-start wiring); the demo wires the pieces in a test.
-- Stage 2's binding, lenses, converters, validators, value renderers, tweens, effect channels and style transitions;
-  `scale` from styles is resolved but not drawn (no per-element transforms yet).
-- `common-state`'s `VersionedTree` and `VersionedRingBuffer` (needed by tree views and charts, groups B and C).
-- SVG icons through NanoSVG; colour emoji (COLR draws as a silhouette); atlas page eviction.
-- The IME rectangle in `engine-platform`; touch, pen and XR pointer sources.
+- ~~The `Ui` engine plugin~~: built in A2 (`UiPlugin`).
+- Stage 2's binding, lenses, converters and effect channels (A2 built value renderers and editors, validators of
+  text, tweens, style transitions and `scale` drawn by per-range transforms).
+- ~~`common-state`'s `VersionedTree` and `VersionedRingBuffer`~~: built after A2 (`VersionedTree`,
+  `VersionedDoubleRing`/`VersionedFloatRing`, below).
+- SVG icons through NanoSVG; atlas page eviction (colour emoji: built in A2, CBDT).
+- Touch, pen and XR pointer sources (the IME rectangle: built in A2).
 - 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
 - A multi-range dirty list: one range per list spans all changed elements of a frame.
-- Colour emoji: no emoji font is bundled; with bundled fonts only, emoji draws as `.notdef` (a test pins that), and an
-  installed emoji font is used when the registry includes installed fonts.
+- ~~Colour emoji without a bundled font~~: Noto Color Emoji is bundled in A2 (`ui-fonts-emoji`).
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
+
+### Incremental reshaping and `VersionedTree` (2026-11-04): local branches `a2-text-tree` (ui) and `versioned-tree` (common-state)
+
+#### Built
+
+- **Incremental reshaping** (`TextBlock`, used by every text field and area paragraph): a change of the text alone is
+  applied to the shaped and laid out block instead of shaping it again, for blocks of at least
+  `TextBlock.INCREMENTAL_MIN` (128) characters (`incremental(boolean)`, on by default; `incrementalEdits()` counts).
+  - The edit is the text between the common prefix and suffix (whole code points); per-character data after it moves.
+  - BiDi: paragraphs without right-to-left text keep level 0 unless the inserted text needs BiDi; otherwise the levels
+    from the last strong character before the edit to the first after it are resolved again (a level depends only on
+    its strong neighbours without explicit embeddings, isolates and brackets), or the whole paragraph's when it has
+    those or no strong character precedes the edit; the changed range is found by comparison. A paragraph whose
+    direction changes is shaped from scratch.
+  - Itemisation restarts at a character with a script of its own (its run's level, face and script are its own, so the
+    itemiser's state there does not depend on what came before) a margin before the edit, inside its run, and stops at
+    the first such character past the edit and its level changes, where the old runs go on.
+  - Shaping: a long run (a Latin paragraph is one run) is shaped again only in a segment `[w, z)` around the edit. Split
+    points are clusters whose glyphs lack HarfBuzz's `UNSAFE_TO_BREAK` flag (shapers without flags: after white
+    space); the segment must give the old glyphs again over a margin at both ends (`[w, x)` and `[y, z)`), else it
+    widens (four attempts, then the whole run). The old glyphs before `x` and from `z` stay in place; the rest is
+    spliced (`ShapedGlyphs.replace`). `UNSAFE_TO_CONCAT` would be the strict condition for reuse after an edit, but
+    HarfBuzz sets it on nearly every glyph a lookup looked at (every letter of a kerned font), so the overlap check
+    replaces it. HarfBuzz is given the run's script explicitly (the script of the run's first character of a script of
+    its own, HarfBuzz's own guess for the whole run), so a segment of common characters shapes as its run.
+  - Lines are broken again from a clean line start (not inside a split word) before the edit's line, until a line
+    starts, past the changed range, where an old line started clean (greedy breaking from a clean start depends on
+    nothing before it); the new lines replace the old ones in place and the following lines move. The break iterator
+    sees a window from 64 characters before the restart, not the whole paragraph.
+  - Exactness: glyph and caret positions are kept relative to their line (`glyphX`, `charX0/1` before alignment,
+    `glyphDy` from the baseline) and the line's offset and baseline are added when read or recorded, giving the same
+    floats as before; line tops and alignment are recomputed for the moved lines. A line's glyphs are found by binary
+    search in its runs when their clusters are monotone (all of HarfBuzz's), which also takes the full layout of a
+    long paragraph from O(lines x glyphs) to O(glyphs + lines log glyphs).
+  - Tests: `IncrementalShapingTest` in `ui-text` (JDK shaper, and a shaper marking flags) and `ui-text-native`
+    (HarfBuzz): random typing, deleting, replacing, pasting and line feeds in 600 to 3,000-character paragraphs mixing
+    Latin (kerning, ligatures), Arabic, CJK, Devanagari, marks, digits, brackets and (native) emoji, at several widths,
+    alignments and directions; after every edit the block equals one shaped from scratch glyph by glyph (id, face,
+    x, y, cluster, size), line by line (range, glyphs, left, width, baseline, top, direction) and caret by caret
+    (levels, character edges, caret x), compared exactly (many more seeds were run while building it).
+- Fixes found by the comparison: the JDK shaper read the whole character array as context (also stale characters past
+  the text's end); it now passes 8 characters of context on each side, as the HarfBuzz shaper does. Paragraph
+  separators get their paragraph's level instead of whatever the array held.
+- **`VersionedTree<T>`** in `common-state` (with `VersionedDoubleRing`/`VersionedFloatRing` for chart streaming:
+  appended ranges logged, `changesSince` visits the range appended since, clipped to the held samples). `TreeView` and
+  `TreeRows` take a `VersionedTree`; the data controls' own `TreeModel`/`TreeNode` went. View state moved into
+  `TreeRows`: expansion, lazy loaders (`TreeRows.ChildLoader`, `TreeView.lazy`) and loading, in arrays by node id
+  (ids are dense, never reused), stamped on the tree's clock, so two views of one tree open nodes independently.
+  Value changes come from `VersionedTree.changesSince` (its log survives structure changes, node identity being
+  stable).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; `BenchmarkTest.typingInLongParagraphs`, HarfBuzz, wrapped at 600 px)
+
+Per keystroke, typing into the middle of one paragraph (the text area shapes one block per paragraph):
+
+| Paragraph | Before (A2) | Full reshape now | Incremental |
+|---|---|---|---|
+| 5,000 characters, Latin | 892 µs | 540 µs | 23 µs |
+| 5,000 characters, Latin, Arabic, CJK, Devanagari | 1,183 µs | 1,206 µs | 31 µs |
+| 20,000 characters, Latin | 8,978 µs | 2,254 µs | 31 µs |
+| 20,000 characters, Latin, Arabic, CJK, Devanagari | 5,699 µs | 4,542 µs | 52 µs |
+
+Target well under 0.2 ms: met. Incremental stays; the full reshape is the fallback (short blocks, style or box
+changes, rich text, line feeds typed or deleted, a paragraph's direction changing, a segment that does not converge).
+What remains per keystroke is linear but cheap: comparing the text, moving per-character and per-glyph arrays, the
+following lines' cluster indices.
+
+#### Left
+
+- Rich text (style runs) still reshapes whole: its runs are rebuilt by the editor on every change.
+- Brackets or explicit embeddings in a paragraph with right-to-left text resolve the whole paragraph's BiDi on each
+  edit (0.25 ms at 20,000 characters); pairing brackets incrementally would remove that.
+- `common-state` 0.4.0 must be released with `VersionedTree` before `ui` can use the published artifact: the
+  dependency in `core/build.gradle.kts` stays 0.3.0 and builds use `-Ptruesim.common-state=../common-state-tree`
+  until then.
+
+### OS windows for docking (2026-11-04): built, local branches `a2-oswindows` (ui) and `ui-a2-oswindows` (engine)
+
+Built on group A2: tabs tear out of the main window into OS windows of their own, and dock back.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Dock areas | A `DockSpace` has areas: its main one (`root()`) and one per OS window (`newArea`, `closeArea`, `areaOf`, `findArea`, `dock(panel, area, position)`); each a tree of splits and panes; tabs drag between areas like between panes; an area left empty closes its window; a closed window's panels dock again where they last were in the main area (beside the panels they were beside, at their side and share, else into the main area) | `controls.windows` `DockArea`, `DockSpace` |
+| Area hosts | `DockHost` gains default methods for hosts with areas (`areas`, `openArea`, `closeArea`, `titleArea`, `raiseArea`, `outside`, `follow`, `following`, `describe`, `restoreArea`); `WindowDockHost` (floating windows in the UI) is unchanged | `DockHost` |
+| `OsDockHost` | Over `OsWindows` (open, close, move, title, raise, maximise, bounds, pixel ratio, content scale, monitors, the global cursor: an engine's, or a fake): a tab dragged beyond every window tears out into a window at the cursor that follows it until release (the drag session continues, so dropping on any area's panes or edges docks it); the only tab of a window drags the window; a window's close button re-docks its panels; a window gone by itself too. Every window shows a region of the one `Ui` (a layer `dock-window-<n>` at z 50 + n, its region at x 65,536 + n x 16,384 UI pixels), so sheet, tokens, text, atlas, focus, commands and drag and drop are shared; `toUi` maps screen points into the region of the front-most window under them (the following window left out; the OS focus orders them), `toScreen` back; a window's UI pixels per screen coordinate are its pixel density times the main window's scale over its own, so content keeps its size in points on monitors of other scales | `OsDockHost`, `OsWindows` |
+| Overlays | Anchored overlays are kept inside the viewport of their anchor's window (`Overlays.viewports(Viewports)`) | `controls.overlay` |
+| Layouts | `DockLayout` window lines: `window <id> "<monitor key>" <x> <y> <width> <height> [maximized] <node>`, the place from the monitor's top left in screen coordinates; round trip exact (`#` in quoted monitor keys is not a comment). Restored on a missing monitor, a window goes to the primary one, its size and place clamped into the usable area; persisted through the `LayoutStore`, saved once a moved or resized window kept still for 20 frames (never per frame) | `DockLayout`, `OsDockHost` |
+| Engine | `UiOsWindows` (engine-ui) implements `OsWindows` over the platform: a window per area, presented by the presenter from a view of its own (`ui.window<id>`: `UiBackdrop`, the scene cleared black, and a `GpuUiRenderer.share()` drawing the main renderer's uploads at its region's `origin`): one device, one upload, one atlas, a presenter target per window with its own encoding (SDR, HDR10, scRGB by its display); the mouse of every window maps through the host (`MousePointer.mapper`; the global cursor where the system tells it), text input starts on the window holding the field (`UiTextInput.locator`), close buttons and focus reach the host. `UiPlugin.osWindows()` makes it with a window and a presenter and drives it each frame. Platform: `Platform.createWindow(options, x, y)`, `Platform.globalMouse(out)` (false on Wayland); monitors are `Platform.displays()` with `displayKey` | engine `ui`, `platform`, the UI shader's `originX`, `originY` |
+| Styles | `dock-window` in `_oswindows.tss` and `_oswindows-test.tss` (one `@import` each) | themes |
+
+#### Decisions
+
+- *One UI, regions per window* (Dear ImGui's multi-viewport way) rather than a second `Ui` per window: elements
+  belong to one store, so a panel's content could not move to another UI; one UI shares everything and a tab drags
+  between windows as between panes. The cost: every window draws every layer, clipped by the rasteriser (the main
+  window's primitives fall outside an OS window's image).
+- *The window follows the drag; the drag session stays.* Docking on drop is the ordinary drop on a dock space's
+  root, wherever the cursor is; the following window is left out of the mouse mapping and of the drop targets.
+- *DPI by scaling the region*, not a second layout: an OS window's region is laid out at the main window's scale and
+  drawn scaled to its monitor's; MSDF text stays sharp, raster small text drawn at another scale is resampled.
+
+#### Tests
+
+ui: `OsDockTest` (fake windows: tear out and follow, dock back, close and re-dock, between windows and out of them,
+a drop where nothing docks, layouts with monitors round trip and restore on a missing monitor and clamped, the
+store, scales and the front-most window, no global cursor, overlays kept in a window, the test theme),
+`OsDockAllocationTest` (idle, the mouse over windows, a window following a drag: nothing allocated without escape
+analysis). Engine: `OsWindowsTest` (real windows and the presenter: a tab dragged out opens a second window that
+follows the cursor, both render, the close button docks it back, screenshots `ui-windows/os-window-main.png`,
+`os-window-undocked.png`, `os-window-redocked.png`), `PlatformTest` (windows at a position, the global mouse).
+
+#### Left
+
+- Wayland: no global cursor and no window positions; windows open where the compositor puts them, the following
+  window tracks the pointer's place in the UI (when the cursor leaves every window it is not known), and saved
+  positions are not restored.
+- Paper white and the UI's brightness are the graph's settings, one for all windows; each window's encoding is its
+  own.
+- Windows stack by the OS focus as the host saw it; overlapping windows of other applications are not known.
+- Pop-ups of content in a window flip within its region; a centred dialog shows in the main window.
+- An OS window is not made a child of the main one (stays on top, no task bar entry): SDL's parent windows behave
+  differently per system; to decide.

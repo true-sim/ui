@@ -1,9 +1,12 @@
 package com.truesim.ui.text.natives;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.util.freetype.FreeType.FT_LOAD_COLOR;
 import static org.lwjgl.util.freetype.FreeType.FT_LOAD_RENDER;
 import static org.lwjgl.util.freetype.FreeType.FT_LOAD_TARGET_LIGHT;
 import static org.lwjgl.util.freetype.FreeType.FT_Load_Glyph;
+import static org.lwjgl.util.freetype.FreeType.FT_PIXEL_MODE_BGRA;
+import static org.lwjgl.util.freetype.FreeType.FT_Select_Size;
 import static org.lwjgl.util.freetype.FreeType.FT_Set_Char_Size;
 import static org.lwjgl.util.freetype.FreeType.FT_Set_Transform;
 
@@ -63,6 +66,53 @@ public final class FreeTypeRasterizer implements GlyphRasterizer {
                 }
             }
             return new Coverage(w, h, slot.bitmap_left(), slot.bitmap_top(), pixels);
+        }
+    }
+
+    /**
+     * The colour bitmap of {@code glyph} at the face's largest strike ({@code FT_LOAD_COLOR}: a CBDT or sbix PNG
+     * decoded by FreeType as premultiplied BGRA), as straight-alpha sRGB RGBA; null for an outline face, a glyph
+     * without a bitmap or an error.
+     */
+    @Override
+    public ColorBitmap color(FontFace face, int glyph) {
+        NativeFontFace f = (NativeFontFace) face;
+        if (f.strikeIndex() < 0) {
+            return null;
+        }
+        synchronized (f) {
+            if (FT_Select_Size(f.ftFace(), f.strikeIndex()) != 0
+                || FT_Load_Glyph(f.ftFace(), glyph, FT_LOAD_COLOR) != 0) {
+                return null;
+            }
+            FT_GlyphSlot slot = f.ftFace().glyph();
+            FT_Bitmap bitmap = slot.bitmap();
+            int w = bitmap.width();
+            int h = bitmap.rows();
+            if (w == 0 || h == 0 || bitmap.pixel_mode() != FT_PIXEL_MODE_BGRA) {
+                return null;
+            }
+            int pitch = bitmap.pitch();
+            ByteBuffer buffer = bitmap.buffer(Math.abs(pitch) * h);
+            byte[] rgba = new byte[w * h * 4];
+            for (int y = 0; y < h; y++) {
+                int row = (pitch >= 0 ? y : h - 1 - y) * Math.abs(pitch);
+                for (int x = 0; x < w; x++) {
+                    int o = row + x * 4;
+                    int b = buffer.get(o) & 0xFF;
+                    int g = buffer.get(o + 1) & 0xFF;
+                    int r = buffer.get(o + 2) & 0xFF;
+                    int a = buffer.get(o + 3) & 0xFF;
+                    int t = (y * w + x) * 4;
+                    if (a > 0) { // FreeType premultiplies in sRGB: divide back
+                        rgba[t] = (byte) Math.min(255, (r * 255 + a / 2) / a);
+                        rgba[t + 1] = (byte) Math.min(255, (g * 255 + a / 2) / a);
+                        rgba[t + 2] = (byte) Math.min(255, (b * 255 + a / 2) / a);
+                    }
+                    rgba[t + 3] = (byte) a;
+                }
+            }
+            return new ColorBitmap(w, h, slot.bitmap_left(), slot.bitmap_top(), f.colorStrike(), rgba);
         }
     }
 }

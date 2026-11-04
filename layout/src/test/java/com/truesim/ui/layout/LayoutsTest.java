@@ -2,6 +2,8 @@ package com.truesim.ui.layout;
 
 import static com.truesim.ui.layout.FlexLayoutTest.assertRect;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
 
 /** Fixtures for grid, border, anchors, overlay and absolute layouts. */
@@ -27,6 +29,8 @@ class LayoutsTest {
         // the two auto rows (22 and 25) stretch over the height: 146 and 149
         assertRect(ui, cells[3], 0, 151, 100, 23);
         assertRect(ui, cells[5], 213.333f, 151, 186.667f, 25);
+        assertThat(ui.layout.kind(g)).isEqualTo(LayoutKind.GRID);
+        assertThat(ui.layout.kind(cells[0])).isEqualTo(LayoutKind.STACK); // the default
     }
 
     @Test

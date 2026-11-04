@@ -56,7 +56,7 @@ public final class UiStore implements Versioned {
     private int[] rangeStart;
     private int[] rangeCapacity;
     private Role[] role;
-    private String[] label;
+    private CharSequence[] label;
     private Element[] facades;
 
     private int[] dirtyQueue;
@@ -64,6 +64,9 @@ public final class UiStore implements Versioned {
     private int dirtyCount;
     private long version;
     private final int root;
+    private boolean[] isRoot;
+    private int[] roots = new int[8];
+    private int rootCount;
 
     /** A store with a root element (type {@code "root"}) on its own clock. */
     public UiStore() {
@@ -75,8 +78,49 @@ public final class UiStore implements Versioned {
     public UiStore(ChangeClock clock) {
         this.clock = clock;
         allocate(64);
-        root = create("root", "root").slot();
+        root = createRoot("root", "root").slot();
         role[root] = Role.GROUP;
+    }
+
+    /**
+     * A new top-level element of {@code type} with id {@code id}: the root of a further tree (a UI layer: pop-ups,
+     * tooltips, modal dialogs), laid out over the whole screen like {@link #root()} and never a child. Roots stay
+     * until the store is dropped.
+     */
+    @AllowAllocation("roots are made when a UI is built")
+    public Element createRoot(String type, String id) {
+        Element e = create(type, id);
+        int slot = e.slot();
+        isRoot[slot] = true;
+        if (rootCount == roots.length) {
+            roots = Arrays.copyOf(roots, rootCount * 2);
+        }
+        roots[rootCount++] = slot;
+        return e;
+    }
+
+    /** Whether {@code slot} is a root ({@link #root()} or one made by {@link #createRoot}). */
+    public boolean isRoot(int slot) {
+        return slot >= 0 && slot < highWater && isRoot[slot];
+    }
+
+    /** How many roots exist ({@link #root()} first). */
+    public int rootCount() {
+        return rootCount;
+    }
+
+    /** Root {@code index} in the order they were made; {@link #rootSlot()} is index 0. */
+    public int rootAt(int index) {
+        return roots[index];
+    }
+
+    /** The root of the tree {@code slot} is in, or {@link #NONE} if that tree is detached. */
+    public int rootOf(int slot) {
+        int s = slot;
+        while (parent[s] != NONE) {
+            s = parent[s];
+        }
+        return isRoot[s] ? s : NONE;
     }
 
     @AllowAllocation("growing, rarely")
@@ -84,6 +128,7 @@ public final class UiStore implements Versioned {
         generation = grow(generation, newCapacity);
         alive = alive == null ? new boolean[newCapacity] : Arrays.copyOf(alive, newCapacity);
         queued = queued == null ? new boolean[newCapacity] : Arrays.copyOf(queued, newCapacity);
+        isRoot = isRoot == null ? new boolean[newCapacity] : Arrays.copyOf(isRoot, newCapacity);
         parent = grow(parent, newCapacity);
         firstChild = grow(firstChild, newCapacity);
         lastChild = grow(lastChild, newCapacity);
@@ -98,7 +143,7 @@ public final class UiStore implements Versioned {
         rangeStart = grow(rangeStart, newCapacity);
         rangeCapacity = grow(rangeCapacity, newCapacity);
         role = role == null ? new Role[newCapacity] : Arrays.copyOf(role, newCapacity);
-        label = grow(label, newCapacity);
+        label = label == null ? new CharSequence[newCapacity] : Arrays.copyOf(label, newCapacity);
         facades = facades == null ? new Element[newCapacity] : Arrays.copyOf(facades, newCapacity);
         dirtyQueue = grow(dirtyQueue, newCapacity); // each slot is queued at most once
         capacity = newCapacity;
@@ -170,8 +215,8 @@ public final class UiStore implements Versioned {
     public void append(int parentSlot, int child) {
         check(parentSlot);
         check(child);
-        if (child == root) {
-            throw new IllegalArgumentException("the root has no parent");
+        if (isRoot[child]) {
+            throw new IllegalArgumentException("a root has no parent");
         }
         for (int p = parentSlot; p != NONE; p = parent[p]) {
             if (p == child) {
@@ -220,8 +265,8 @@ public final class UiStore implements Versioned {
     /** Destroys {@code slot} and its subtree: their facades stop working. */
     public void destroy(int slot) {
         check(slot);
-        if (slot == root) {
-            throw new IllegalArgumentException("the root stays");
+        if (isRoot[slot]) {
+            throw new IllegalArgumentException("roots stay");
         }
         detach(slot);
         destroyTree(slot);
@@ -264,9 +309,11 @@ public final class UiStore implements Versioned {
         version = stamp;
     }
 
-    /** Marks every element dirty with {@code bits}: a new style sheet, a token switch, a new scale. */
+    /** Marks every element in a root's tree dirty with {@code bits}: a new style sheet, a token switch, a new scale. */
     public void markAll(int bits) {
-        markSubtree(root, bits);
+        for (int i = 0; i < rootCount; i++) {
+            markSubtree(roots[i], bits);
+        }
     }
 
     /** The slots queued since {@link #clearDirtyQueue()}: the first {@link #dirtyCount()} entries. */
@@ -417,13 +464,17 @@ public final class UiStore implements Versioned {
         return role[slot];
     }
 
-    /** The element's accessible name, or null. */
+    /** The element's accessible name, or null: taken from the live text when one was given ({@link #semantics}). */
     public String label(int slot) {
-        return label[slot];
+        CharSequence l = label[slot];
+        return l == null ? null : l.toString();
     }
 
-    /** Sets the element's semantics. */
-    public void semantics(int slot, Role newRole, String newLabel) {
+    /**
+     * Sets the element's semantics. The label may be live text (a label's or a row's {@link StringBuilder}): the
+     * accessible name is read from it when the semantics tree is taken, so changing text costs nothing here.
+     */
+    public void semantics(int slot, Role newRole, CharSequence newLabel) {
         check(slot);
         role[slot] = newRole;
         label[slot] = newLabel;

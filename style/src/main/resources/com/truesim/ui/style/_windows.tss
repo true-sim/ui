@@ -1,0 +1,251 @@
+// Overlays, tooltips, popovers, floating windows and docking (ui-controls' controls.overlay and controls.windows),
+// imported by default-theme.tss. Element types: backdrop, tooltip, hover-card, popover, window-host, window,
+// window-frame, window-title-bar, window-button (#minimise, #maximise, #close), window-content, window-resize (#n #s #e
+// #w #nw #ne #sw #se), dock-space, dock-split, dock-splitter, dock-tabs, dock-tab-strip, dock-tab, dock-tab-close,
+// dock-pane-body, dock-drop-preview, dock-zones, dock-zone (#left #right #top #bottom #center). Facts: side (an
+// overlay's side of its anchor), mode (a window's normal, minimised, maximised), orientation (a split's row or column).
+
+// ------------------------------------------------------------------ overlays
+
+// Dims what is under a modal dialog; takes every pointer there.
+backdrop {
+  background: box(rgba(black, 0.42));
+  transition: opacity tokens.$normal ease-out;
+}
+
+tooltip {
+  layout: stack;
+  padding: tokens.$space-xs tokens.$space-m;
+  max-width: 320px;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  @include raised(2);
+  placement: top;
+  placement-align: center;
+  placement-gap: 6px;
+  viewport-margin: tokens.$space-s;
+  tooltip-mode: anchored;
+  transition: opacity tokens.$fast ease-out;
+
+  > label { color: var(--fg); @include text(caption); line-height: 1.35; }
+}
+
+hover-card, popover {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+  max-width: 420px;
+  background: box(var(--surface-raised));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(3);
+  placement: bottom;
+  placement-align: start;
+  placement-gap: tokens.$space-s;
+  viewport-margin: tokens.$space-s;
+  transition: opacity tokens.$fast ease-out;
+}
+
+popover { border: 1px rgba(#3fa7ff, 0.5); }
+
+// ------------------------------------------------------------------ floating windows
+
+window-host { pointer-events: none; }
+
+window {
+  min-width: 160px;
+  min-height: 96px;
+  resize-handle: 8px;
+  focus-ring-offset: 0px;
+
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+
+window-frame {
+  layout: flex;
+  direction: column;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(3);
+  clip: true;
+}
+
+window:selected > window-frame { border: 1px rgba(#3fa7ff, 0.65); @include raised(5); }
+window[mode=maximised] > window-frame { radius: 0; border: 0px var(--edge); }
+
+window-title-bar {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s tokens.$space-m;
+  background: box(var(--surface-raised));
+  cursor: move;
+}
+
+window:selected window-title-bar { background: box(lighten(var(--surface-raised), 4%)); }
+
+label.window-title {
+  grow: 1;
+  color: var(--fg);
+  @include text(body, 600);
+}
+
+window-button {
+  size: 16px;
+  layout: flex;
+  align-items: center;
+  justify-content: center;
+  radius: 999px;
+  background: box(var(--track));
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(lighten(var(--track), 18%)); }
+  &:pressed { scale: 0.9; }
+  &#close:hover { background: box(var(--danger)); }
+  &:checked { background: box(var(--accent)); }
+}
+
+// the buttons' pictures: built-in icons (a game registering its own under these names replaces them)
+window-button image.icon { size: 10px; }
+window-button image.icon#minimise { image: "icons/minimise" var(--fg) contain; }
+window-button image.icon#maximise { image: "icons/maximise" var(--fg) contain; }
+window[mode=maximised] window-button image.icon#maximise { image: "icons/restore" var(--fg) contain; }
+window-button image.icon#close { image: "icons/close" var(--fg) contain; }
+
+window-content {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  grow: 1;
+  shrink: 1;
+  min-height: 0px;
+  padding: tokens.$space-m;
+  clip: true;
+}
+
+window-resize {
+  &#n, &#s { cursor: resize-ns; }
+  &#e, &#w { cursor: resize-ew; }
+  &#nw, &#se { cursor: resize-nwse; }
+  &#ne, &#sw { cursor: resize-nesw; }
+}
+
+// ------------------------------------------------------------------ docking
+
+dock-space {
+  layout: flex;
+  direction: column;
+  align-items: stretch;
+  background: box(var(--bg));
+  dock-zone: 0.3;
+  dock-min-pane: 48px;
+}
+
+dock-split {
+  layout: flex;
+  align-items: stretch;
+  gap: 0px;
+}
+
+dock-splitter {
+  background: box(var(--edge));
+  @include reactive;
+
+  &[orientation=row] { width: 4px; cursor: resize-ew; }
+  &[orientation=column] { height: 4px; cursor: resize-ns; }
+  &:hover, &:pressed { background: box(var(--accent)); }
+}
+
+dock-tabs {
+  layout: flex;
+  direction: column;
+  align-items: stretch;
+  background: box(var(--surface));
+  min-width: 48px;
+  min-height: 48px;
+}
+
+dock-tab-strip {
+  layout: flex;
+  direction: row;
+  align-items: end;
+  gap: 1px;
+  padding: tokens.$space-xs tokens.$space-xs 0px tokens.$space-xs;
+  background: box(darken(var(--surface), 3%));
+  clip: true;
+
+  &:drop-target { background: box(rgba(#3fa7ff, 0.18)); }
+}
+
+dock-tab {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-xs tokens.$space-m;
+  radius: tokens.$radius-s tokens.$radius-s 0 0;
+  background: box(var(--track));
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(lighten(var(--track), 6%)); }
+  &:selected { background: box(var(--surface-raised)); }
+  &:dragging { opacity: 0.5; }
+  &:focus-visible { focus-ring: 2px var(--accent); focus-ring-offset: -2px; }
+
+  > label { color: var(--fg-muted); @include text(caption, 600); }
+  &:selected > label { color: var(--fg); }
+}
+
+dock-tab-close {
+  size: 10px;
+  radius: 999px;
+  background: box(rgba(#8b949e, 0.35));
+  cursor: pointer;
+
+  &:hover { background: box(var(--danger)); }
+}
+
+dock-pane-body {
+  layout: flex;
+  direction: column;
+  grow: 1;
+  shrink: 1;
+  min-height: 0px;
+  padding: tokens.$space-m;
+  clip: true;
+}
+
+// Where a dragged tab or window would dock, shown over the dock space while dragging.
+dock-drop-preview {
+  background: box(rgba(#3fa7ff, 0.22));
+  border: 2px var(--accent);
+  radius: tokens.$radius-s;
+  transition: opacity tokens.$fast;
+}
+
+// The zone guides over the pane under the pointer: a 3 x 3 grid with the five zones.
+dock-zones {
+  layout: grid;
+  grid-template-columns: 28px 28px 28px;
+  grid-template-rows: 28px 28px 28px;
+  gap: tokens.$space-xs;
+}
+
+dock-zone {
+  background: box(rgba(#161b22, 0.9));
+  border: 1px var(--accent);
+  radius: tokens.$radius-s;
+
+  &#top { grid-column: 2; grid-row: 1; }
+  &#left { grid-column: 1; grid-row: 2; }
+  &#center { grid-column: 2; grid-row: 2; }
+  &#right { grid-column: 3; grid-row: 2; }
+  &#bottom { grid-column: 2; grid-row: 3; }
+  &:selected { background: box(var(--accent)); }
+}

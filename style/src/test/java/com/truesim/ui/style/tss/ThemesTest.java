@@ -53,8 +53,9 @@ class ThemesTest {
     @Test
     void theShippedThemesCompile() {
         Compilation c = Tss.compileResource(Tss.THEMES + "/default-theme.tss");
-        assertThat(c.sources()).containsExactly(Tss.THEMES + "/default-theme.tss", Tss.THEMES + "/_tokens.tss",
-            Tss.THEMES + "/_mixins.tss");
+        assertThat(c.sources()).contains(Tss.THEMES + "/default-theme.tss", Tss.THEMES + "/_tokens.tss",
+            Tss.THEMES + "/_mixins.tss", Tss.THEMES + "/_basic.tss", Tss.THEMES + "/_data.tss",
+            Tss.THEMES + "/_windows.tss", Tss.THEMES + "/_text-edit.tss");
         assertThat(c.warnings()).isEmpty();
         StyleSheet theme = Tss.defaultTheme();
         assertThat(theme).isEqualTo(c.sheet());
@@ -83,6 +84,43 @@ class ThemesTest {
         assertThat(label.get(Styles.COLOR)).isEqualTo(Color.hex("#e6edf3"));
         Element hudRoot = store.element(store.firstChild(store.rootSlot()));
         assertThat(normal.styleOf(hudRoot.slot()).get(Styles.LAYOUT)).isEqualTo(LayoutKind.ANCHORS);
+    }
+
+    @Test
+    void bothThemesStyleLayersAndTheInteractionStates() {
+        UiStore store = new UiStore();
+        Element layer = store.createRoot("layer", "popup");
+        StyleResolver plain = new StyleResolver(store, StyleSheet.empty());
+        StyleResolver normal = new StyleResolver(store, Tss.defaultTheme());
+        StyleResolver garish = new StyleResolver(store, Tss.testTheme());
+        assertThat(differs(normal.styleOf(layer.slot()), plain.styleOf(layer.slot()))).isTrue();
+        assertThat(differs(normal.styleOf(layer.slot()), garish.styleOf(layer.slot()))).isTrue();
+        assertThat(normal.styleOf(layer.slot()).get(Styles.LAYOUT)).isEqualTo(LayoutKind.NONE);
+        for (int state : new int[] {UiState.FOCUS_VISIBLE, UiState.DROP_TARGET, UiState.DRAGGING}) {
+            Element panel = store.create("panel", null);
+            store.root().add(panel);
+            ResolvedStyle before = normal.styleOf(panel.slot());
+            ResolvedStyle beforeGarish = garish.styleOf(panel.slot());
+            panel.state(state, true);
+            normal.resolve(panel.slot());
+            garish.resolve(panel.slot());
+            ResolvedStyle after = normal.styleOf(panel.slot());
+            assertThat(differs(after, before)).as("the default theme styles :%s", UiState.name(state)).isTrue();
+            assertThat(differs(garish.styleOf(panel.slot()), beforeGarish)).as("the test theme styles :%s",
+                UiState.name(state)).isTrue();
+            assertThat(differs(after, garish.styleOf(panel.slot()))).isTrue();
+        }
+        Element focused = store.create("panel", null);
+        store.root().add(focused);
+        focused.state(UiState.FOCUS_VISIBLE, true);
+        assertThat(normal.styleOf(focused.slot()).get(Styles.FOCUS_RING).width()).isEqualTo(2);
+        Element meter = store.create("panel", null).style("meter");
+        store.root().add(meter);
+        assertThat(normal.styleOf(meter.slot()).get(Styles.CLIP)).isTrue();
+        Element card = store.create("panel", null).style("card");
+        store.root().add(card);
+        assertThat(normal.styleOf(card.slot()).get(Styles.POINTER_EVENTS))
+            .isEqualTo(com.truesim.ui.core.event.PointerEvents.ALL);
     }
 
     @Test
