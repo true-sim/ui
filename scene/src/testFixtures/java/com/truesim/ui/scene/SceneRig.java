@@ -130,10 +130,15 @@ public final class SceneRig {
         return mouse(x, y, Pointer.PRIMARY).mouse(x, y, 0);
     }
 
-    /** Places {@code element} at {@code x, y} with size {@code w x h} in UI pixels, in code (anchors layout). */
+    /** Places {@code element} (added to its parent) at {@code x, y}, {@code w x h} UI pixels, in code. */
     public static void place(Ui ui, com.truesim.ui.core.Element element, float x, float y, float w, float h) {
         ui.codeLayout(element, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
         int slot = element.slot();
+        com.truesim.ui.core.Element parent = element.parent();
+        if (parent != null) { // positions are offsets in a parent laid out by none
+            ui.codeLayout(parent, ui.codeLayout(parent) | Ui.CODE_KIND);
+            ui.layout().kind(parent.slot(), com.truesim.ui.layout.LayoutKind.NONE);
+        }
         ui.layout().anchors(slot, 0, 0, 0, 0).offsets(slot, x, y, 0, 0)
             .width(slot, w, com.truesim.ui.layout.Unit.PX).height(slot, h, com.truesim.ui.layout.Unit.PX);
     }
