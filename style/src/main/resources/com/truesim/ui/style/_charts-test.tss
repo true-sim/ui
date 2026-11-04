@@ -133,6 +133,7 @@ chart-drag-rect {
   fill-opacity: 0.3;
   stroke: $lime;
   line-width: 3px;
+  line-join: miter;
   &:hover { fill-opacity: 0.45; }
   &:pressed { fill-opacity: 0.6; }
 }
@@ -148,6 +149,8 @@ chart-digital {
 }
 
 chart-area { fill-opacity: 0.55; line-dash: none; }
+chart-stairs { line-join: bevel; }
+chart-drag-rect { line-miter-limit: 2; }
 chart-shaded { fill-opacity: 0.6; line-width: 2px; }
 chart-stacked { fill-opacity: 0.9; line-dash: none; marker: none; }
 chart-stems { marker: square; marker-size: 9px; line-dash: none; }
