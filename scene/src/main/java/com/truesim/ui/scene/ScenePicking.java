@@ -125,6 +125,8 @@ public final class ScenePicking implements WorldPicking {
     private final double[][] worldDistances = new double[UiInput.MAX_POINTERS][MAX];
     private final int[] worldCounts = new int[UiInput.MAX_POINTERS];
     private final int[] panelTarget = new int[UiInput.MAX_POINTERS];
+    private final boolean[] taken = new boolean[UiInput.MAX_POINTERS]; // by a screen element, a handle or a panel
+    private final double[] reaches = new double[UiInput.MAX_POINTERS];
     private final float[][] panelPoint = new float[UiInput.MAX_POINTERS][2];
     private long frame;
 
@@ -560,6 +562,7 @@ public final class ScenePicking implements WorldPicking {
         pickedFrame[p] = frame;
         worldCounts[p] = 0;
         panelTarget[p] = -1;
+        taken[p] = screenCount > 0;
         SceneView view = null;
         double reach;
         if (pointer.hasRay()) {
@@ -582,6 +585,7 @@ public final class ScenePicking implements WorldPicking {
         }
         hasRay[p] = true;
         pointerViews[p] = view;
+        reaches[p] = reach;
         System.arraycopy(ray, 0, rays[p], 0, 6);
         int n = screenCount;
         int[] slots = worldSlots[p];
@@ -593,6 +597,7 @@ public final class ScenePicking implements WorldPicking {
                 hits[n++] = slot;
                 slots[w] = slot;
                 distances[w++] = 0;
+                taken[p] = true;
             }
         }
         int found = 0;
@@ -621,6 +626,7 @@ public final class ScenePicking implements WorldPicking {
             }
         }
         sortCandidates(found);
+        taken[p] |= found > 0 && candidatePanels[0] >= 0;
         for (int i = 0; i < found && n < hits.length; i++) {
             hits[n++] = candidateSlots[i];
             slots[w] = candidateSlots[i];
@@ -799,6 +805,26 @@ public final class ScenePicking implements WorldPicking {
         }
         System.arraycopy(rays[p], 0, out, 0, 6);
         return true;
+    }
+
+    /**
+     * Whether pointer {@code pointerId} is the UI's this frame, not the scene's: over a screen element (or a modal layer
+     * that blocked the world), a gizmo handle or a world panel nearer than any scene node, captured by such an element,
+     * or not picked at all (off every view). The engine's scene interaction leaves such pointers alone.
+     */
+    public boolean claimed(int pointerId) {
+        int p = slotOf(pointerId);
+        if (p < 0 || pickedFrame[p] != frame || !hasRay[p] || taken[p]) {
+            return true;
+        }
+        Element captured = interaction.captured(pointerId);
+        return captured != null && node(captured) == NodeHandle.NONE;
+    }
+
+    /** How far pointer {@code pointerId}'s ray reached this frame (0 without one), as the scene's picker was asked. */
+    public double reach(int pointerId) {
+        int p = slotOf(pointerId);
+        return p < 0 || pickedFrame[p] != frame || !hasRay[p] ? 0 : reaches[p];
     }
 
     /** The view pointer {@code pointerId} picked through this frame (null: none, or its own XR ray). */

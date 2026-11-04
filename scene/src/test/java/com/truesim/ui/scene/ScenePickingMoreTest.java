@@ -90,6 +90,14 @@ class ScenePickingMoreTest {
         r.frame();
         r.mouse(400, 300, Pointer.PRIMARY).mouse(400, 300, 0);
         assertThat(seen).containsExactly("handle", "node");
+        assertThat(r.picking.claimed(com.truesim.ui.testkit.SyntheticInput.MOUSE)).as("a handle took it").isTrue();
+        assertThat(r.picking.reach(com.truesim.ui.testkit.SyntheticInput.MOUSE)).isPositive();
+        over[0] = false;
+        r.frame();
+        assertThat(r.picking.claimed(com.truesim.ui.testkit.SyntheticInput.MOUSE)).as("the scene's").isFalse();
+        over[0] = true;
+        assertThat(r.picking.claimed(42)).as("a pointer it never saw").isTrue();
+        assertThat(r.picking.reach(42)).isZero();
         double[] point = new double[3];
         r.picking.removeHandles(picker);
         r.picking.removeHandles(picker); // not there: nothing
