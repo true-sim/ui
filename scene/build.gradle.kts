@@ -9,7 +9,7 @@ description = "UI scene bridge for true-sim: the Interactive component, scene pi
 dependencies {
     api(project(":ui-controls"))
     // Components, Pickable and ScenePicker (the picking model this bridge routes) arrived in scene 0.64.0.
-    api("com.truesim.scene:scene-core:0.64.0")
+    api("com.truesim.scene:scene-core:0.64.1")
     testFixturesApi(project(":ui-testkit"))
     testImplementation(project(":ui-testkit"))
     testImplementation(project(":ui-text-native")) // the real text path in allocation tests and previews
