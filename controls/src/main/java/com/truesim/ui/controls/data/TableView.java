@@ -125,6 +125,7 @@ public final class TableView<R> extends VirtualView<R> {
     private final List<Boolean> sortAscending = new ArrayList<>();
     private final Predicate<R> columnFilters = this::passes;
     private Predicate<? super R> tableFilter;
+    private Comparator<? super R> baseOrder;
 
     // header groups
     private final List<CharSequence> bandTitles = new ArrayList<>();
@@ -673,6 +674,17 @@ public final class TableView<R> extends VirtualView<R> {
         applySort();
     }
 
+    /**
+     * Orders rows by {@code order} before any sort or grouping (null: none): a file list keeps folders first. Returns
+     * this.
+     */
+    @AllowAllocation("a user action: the comparator is composed anew")
+    public TableView<R> baseOrder(Comparator<? super R> order) {
+        baseOrder = order;
+        applySort();
+        return this;
+    }
+
     /** Sorts by nothing: rows in the list's order. */
     @AllowAllocation("a user action")
     public void unsort() {
@@ -699,7 +711,12 @@ public final class TableView<R> extends VirtualView<R> {
             }
             by = by == null ? c : by.thenComparing(c);
         }
-        view.sort(grouped != null && !groupBy.isEmpty() ? grouped.order(by) : by);
+        Comparator<R> rest = grouped != null && !groupBy.isEmpty() ? grouped.order(by) : by;
+        if (baseOrder != null) {
+            Comparator<R> base = (Comparator<R>) baseOrder;
+            rest = rest == null ? base : base.thenComparing(rest);
+        }
+        view.sort(rest);
         for (Column<R> c : columns) {
             int s = sortedBy(c);
             ui.styles().facts(headerCells[c.id].slot(), s > 0 ? ASCENDING : s < 0 ? DESCENDING : Facts.NONE);

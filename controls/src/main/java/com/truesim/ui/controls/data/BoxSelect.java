@@ -18,8 +18,8 @@ import com.truesim.ui.layout.Unit;
  * helper sets their state as the box moves, so the canvas shows the result live. Lists, trees and tables box-select
  * by row ranges themselves ({@link VirtualView}); the modes are these constants.
  *
- * <p>The canvas is laid out with anchors (or none): the box is its last child, placed by code. A drag allocates
- * nothing once the snapshot of the selection has grown to the item count.
+ * <p>The canvas places its children by position (layout {@code none}): the box is its last child, placed by code.
+ * A drag allocates nothing once the snapshot of the selection has grown to the item count.
  *
  * <pre>{@code
  * BoxSelect select = new BoxSelect(ui, canvas, new BoxSelect.Items() { ... });
@@ -78,7 +78,7 @@ public final class BoxSelect implements UiListener {
         ui.codeLayout(box, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH | Ui.CODE_HEIGHT);
         ui.layout().anchors(box.slot(), 0, 0, 0, 0).visible(box.slot(), false);
         ui.interaction().on(canvas, EventType.PRESS.bit() | EventType.DRAG_START.bit() | EventType.DRAG.bit()
-            | EventType.RELEASE.bit(), this);
+            | EventType.RELEASE.bit() | EventType.DRAG_END.bit(), this);
     }
 
     /** The mode for pointer modifiers {@code modifiers} ({@link Pointer#SHIFT}, ...). */
@@ -193,6 +193,11 @@ public final class BoxSelect implements UiListener {
                     nowY = localY(e.y());
                     update();
                     e.consume();
+                }
+            }
+            case DRAG_END -> {
+                if (e.pointerId() == pointer) {
+                    cancel(); // ended without a release: CANCEL, the pointer lost
                 }
             }
             case RELEASE -> {

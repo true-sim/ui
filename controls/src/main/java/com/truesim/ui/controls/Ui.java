@@ -1396,6 +1396,7 @@ public final class Ui {
         all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);
         all.addAll(com.truesim.ui.controls.basic.Controls.tunables());
         all.addAll(com.truesim.ui.controls.data.DataTunables.all());
+        all.addAll(com.truesim.ui.controls.files.FilePlaces.tunables());
         all.addAll(com.truesim.ui.controls.windows.Tooltips.tunables());
         all.addAll(com.truesim.ui.controls.windows.Popovers.tunables());
         all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());

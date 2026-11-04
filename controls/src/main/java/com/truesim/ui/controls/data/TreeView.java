@@ -56,7 +56,7 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
     private final VersionedTree<T> model;
     private final TreeRows<T> treeRows;
     private final StyledRenderer<T> renderer;
-    private CharSequence loadingText = "Loading2026";
+    private CharSequence loadingText = "Loading…";
     private Element[] loadingRows = new Element[4];
     private int loadingCount;
     private int lit = -1;

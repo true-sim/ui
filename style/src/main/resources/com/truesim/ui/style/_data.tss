@@ -209,3 +209,100 @@ table-cell {
 // frozen cells cover the scrolled ones under them
 table-frozen > table-cell { background: box(var(--surface)); }
 table-frozen > table-cell:selected { background: box(lighten(var(--surface), 12%)); }
+
+// ------------------------------------------------------------------ group A3: box selection, horizontal lists, records,
+// loading rows, grouped tables and header groups. Element types: selection-box; list-view[axis=horizontal];
+// record-view, record-field (#<component>), label.record-name; tree-loading, tree-loading-indicator,
+// tree-loading-dot ([lit=true]), label#loading; table-group-row ([level=n], :expanded), table-group-indent,
+// table-group-expander, labels table-group-column, table-group-count, table-group-sum; table-header-group-row,
+// table-header-group-cell.
+
+selection-box {
+  background: box(rgba(#3fa7ff, 0.16));
+  border: 1px rgba(#3fa7ff, 0.85);
+  radius: 2px;
+}
+
+list-view[axis=horizontal] list-item {
+  width: 96px;
+  height: auto;
+  direction: column;
+  justify-content: center;
+  padding: tokens.$space-s tokens.$space-m;
+}
+
+record-view { layout: flex; direction: row; align-items: center; gap: tokens.$space-m; }
+record-field { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+label.record-name { @include text(caption); color: var(--fg-muted); }
+
+tree-loading {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  height: 26px;
+  padding: 0 tokens.$space-m;
+  loading-period: 900ms;
+  indent: 16;
+
+  > label#loading { @include text(caption); color: var(--fg-muted); font-style: italic; }
+}
+
+tree-loading-indicator { layout: flex; direction: row; align-items: center; gap: 3px; width: 8px; }
+tree-loading-dot {
+  size: 4px;
+  radius: 999px;
+  background: box(var(--fg-muted));
+  opacity: 0.35;
+  &[lit=true] { opacity: 1; background: box(var(--accent)); }
+}
+
+table-group-row {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  height: 26px;
+  padding: 0 tokens.$space-m;
+  group-indent: 16;
+  background: box(var(--surface-raised));
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(lighten(var(--surface-raised), 6%)); }
+  &:focused { border: 1px var(--edge); }
+  &[level=1] { background: box(lighten(var(--surface), 4%)); }
+}
+
+table-group-expander {
+  size: 8px;
+  radius: 1px 4px 4px 1px;
+  background: box(var(--fg-muted));
+  &:expanded { radius: 1px 1px 4px 4px; }
+}
+
+label.table-group-column { @include text(caption, 600); color: var(--fg-muted); }
+label.table-group-count { @include text(caption); color: var(--fg-muted); }
+label.table-group-sum { @include text(caption); color: var(--accent); grow: 1; text-align: end; }
+
+table-header-group-row { height: 22px; }
+table-header-group-cell {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  justify-content: center;
+  border: 1px var(--edge);
+  background: box(var(--surface-raised));
+  clip: true;
+
+  > label { @include text(caption, 600); color: var(--fg); }
+}
+
+// a canvas of box-selectable items (BoxSelect): panel.box-canvas holding canvas-items (:selected)
+panel.box-canvas { background: box(var(--surface)); border: 1px var(--edge); radius: tokens.$radius-m; clip: true; }
+canvas-item {
+  background: box(var(--track));
+  radius: tokens.$radius-s;
+  &:selected { background: box(var(--accent)); }
+}
+table-group-indent { height: 1px; }

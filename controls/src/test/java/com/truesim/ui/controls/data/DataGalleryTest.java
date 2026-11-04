@@ -31,7 +31,7 @@ class DataGalleryTest {
             gallery.pose(ui, 1600, 1000);
             assertThat(gallery.table.editing()).isTrue();
             assertThat(gallery.list.selection().size()).isEqualTo(3);
-            assertThat(gallery.tree.rows().size()).isEqualTo(12);
+            assertThat(gallery.tree.rows().size()).isEqualTo(15); // with "remote", its child and its loading row
             Semantics.Node tree = Semantics.of(ui.store(), ui.interaction());
             assertThat(Semantics.unnamed(tree)).isEmpty();
             String drawn = DrawListDump.of(ui.layers()[0]);

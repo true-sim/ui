@@ -183,7 +183,7 @@ public abstract class VirtualView<R> extends ScrollView {
         interaction.focusable(root, true);
         interaction.on(body, EventType.PRESS.bit() | EventType.CLICK.bit(), viewEvents);
         interaction.on(root, EventType.TEXT.bit() | EventType.PRESS.bit() | EventType.DRAG_START.bit()
-            | EventType.DRAG.bit() | EventType.RELEASE.bit(), viewEvents);
+            | EventType.DRAG.bit() | EventType.RELEASE.bit() | EventType.DRAG_END.bit(), viewEvents);
     }
 
     // ---------------------------------------------------------------- what subclasses provide
@@ -284,6 +284,13 @@ public abstract class VirtualView<R> extends ScrollView {
     /** Calls {@code action} when a row is activated (double click; ACCEPT in a single selection). */
     public void onActivate(RowAction action) {
         onActivate = action;
+    }
+
+    /** Activates row {@code index} as a double click would (its action runs, if any). */
+    public void activate(int index) {
+        if (onActivate != null && index >= 0 && index < rows.size() && rows.selectable(index)) {
+            onActivate.act(index);
+        }
     }
 
     /** The row extents in use (fixed or measured). */
@@ -1181,6 +1188,7 @@ public abstract class VirtualView<R> extends ScrollView {
                     if (e.pointerId() != pressPointer || e.consumed() || !boxSelect
                         || selection.mode() != Selection.Mode.MULTIPLE || e.pointerKind() == Pointer.Kind.TOUCH
                         || !pressEmpty && rowsDrag()) {
+                        pressEmpty = false; // a drag is no click
                         return;
                     }
                     startBox(e);
@@ -1205,6 +1213,14 @@ public abstract class VirtualView<R> extends ScrollView {
                         selection.clear(); // a click in empty space selects nothing
                     }
                     pressPointer = -1;
+                }
+                case DRAG_END -> {
+                    if (e.pointerId() == boxPointer) {
+                        endBox(false); // the drag ended without a release: CANCEL, the pointer lost
+                    }
+                    if (e.pointerId() == pressPointer) {
+                        pressPointer = -1; // a drag is no click
+                    }
                 }
                 default -> {
                 }

@@ -47,6 +47,11 @@ public final class ColumnMenu implements Controls.Polled {
         return new ColumnMenu(controls, table, "Columns");
     }
 
+    /** Whether the check of column {@code index} (of the table's columns when attached) is on. */
+    public boolean shown(int index) {
+        return shown[index].get();
+    }
+
     /** The menu. */
     public Menu menu() {
         return menu;

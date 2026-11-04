@@ -116,6 +116,11 @@ public final class ValueRenderers {
     @AllowAllocation("once per class")
     private ValueRenderer<?> resolve(Class<?> type) {
         ValueRenderer<?> r = registered.get(type);
+        for (int i = 0; r == null && i < builtinTypes.size(); i++) {
+            if (builtinTypes.get(i) == type) {
+                r = builtins.get(i); // a built-in of exactly this class (vectors and colours are records)
+            }
+        }
         if (r == null && type.isRecord() && records != null) {
             r = records;
         }

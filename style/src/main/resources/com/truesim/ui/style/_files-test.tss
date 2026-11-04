@@ -1,0 +1,38 @@
+// The garish test look of the file browser (see _files.tss for the element types).
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+
+image.icon#back, image.icon#forward, image.icon#edit, image.icon#new-folder, image.icon#home, image.icon#drive,
+image.icon#favourite, image.icon#recent { size: 13px; image: "icons/dismiss" $hot contain; }
+image.icon#folder { size: 19px; image: "icons/up" $lime contain; }
+image.icon#file { size: 19px; image: "icons/down" $sun contain; }
+
+dialog.file-dialog { max-width: 900px; width: 860px; background: box(#003333); border: 5px $sun; }
+file-browser { layout: flex; direction: column; gap: 9px; width: 800px; height: 460px; background: box(#330033); }
+file-bar { layout: flex; direction: row-reverse; align-items: center; gap: 5px; background: box($cyan); }
+file-path {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  grow: 1;
+  shrink: 1;
+  min-width: 0px;
+  height: 35px;
+  background: box($sun);
+  border: 3px $hot;
+  clip: true;
+}
+textfield.file-path-field { grow: 1; width: auto; }
+file-main { layout: flex; direction: row-reverse; gap: 11px; grow: 1; shrink: 1; min-height: 0px; }
+list-view.file-places { width: 190px; grow: 0; shrink: 0; align-self: stretch; }
+file-views { layout: flex; direction: column; grow: 1; shrink: 1; min-width: 0px; }
+table-view.file-table, list-view.file-list { grow: 1; shrink: 1; min-height: 0px; }
+file-name, file-place { layout: flex; direction: row-reverse; align-items: center; gap: 9px; }
+label#date { color: $hot; }
+file-footer { layout: flex; direction: row; align-items: center; gap: 13px; background: box($lime); padding: 3px; }
+label.file-name-label { color: #0000ff; }
+textfield.file-name-field { grow: 1; width: auto; }
+label.file-error { color: $hot; font-size: 17px; }

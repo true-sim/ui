@@ -128,3 +128,54 @@ table-cell {
 }
 
 table-frozen > table-cell { background: box(#500000); }
+
+// group A3: box selection, horizontal lists, records, loading rows, grouped tables, header groups
+selection-box { background: box(rgba(#39ff14, 0.4)); border: 3px $hot; radius: 0; }
+list-view[axis=horizontal] list-item { width: 123px; height: auto; direction: column-reverse; padding: 5px; }
+record-view { layout: flex; direction: column; align-items: start; gap: 1px; background: box(#003300); }
+record-field { layout: flex; direction: row-reverse; gap: 6px; }
+label.record-name { color: $hot; font-size: 9px; }
+tree-loading {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: 9px;
+  height: 41px;
+  padding: 2px 11px;
+  loading-period: 3s;
+  indent: 25;
+  background: box(#404000);
+  > label#loading { color: $cyan; font-size: 15px; }
+}
+tree-loading-indicator { layout: flex; direction: row; gap: 5px; align-items: center; }
+tree-loading-dot { size: 7px; background: box($hot); &[lit=true] { background: box($lime); size: 11px; } }
+table-group-row {
+  layout: flex;
+  direction: row-reverse;
+  align-items: center;
+  gap: 9px;
+  height: 33px;
+  padding: 0 7px;
+  group-indent: 29;
+  background: box($cyan);
+  border: 2px $hot;
+  &:focused { border: 4px $lime; }
+  &[level=1] { background: box($sun); }
+}
+table-group-expander { size: 12px; background: box($hot); &:expanded { background: box($lime); } }
+label.table-group-column { color: #0000ff; font-size: 15px; }
+label.table-group-count { color: #800000; }
+label.table-group-sum { color: #008000; }
+table-header-group-row { height: 31px; }
+table-header-group-cell {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  justify-content: end;
+  background: box($lime);
+  border: 3px #0000ff;
+  > label { color: $hot; }
+}
+panel.box-canvas { background: box(#000060); border: 4px $sun; clip: true; }
+canvas-item { background: box($cyan); &:selected { background: box($hot); border: 3px $lime; } }
+table-group-indent { height: 5px; background: box($sun); }
