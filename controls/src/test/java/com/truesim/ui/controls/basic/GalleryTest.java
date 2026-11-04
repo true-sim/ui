@@ -79,7 +79,8 @@ class GalleryTest {
         "collapsible-header", "collapsible-body", "accordion", "group-box", "group-content", "card", "card-header",
         "card-body", "card-footer", "split-pane", "split-first", "split-second", "splitter", "carousel",
         "carousel-viewport", "carousel-track", "carousel-page", "carousel-dots", "stepper", "stepper-steps", "step",
-        "stepper-content", "stepper-buttons", "drawer", "drawer-content", "drawer-backdrop", "image", "label"));
+        "stepper-content", "stepper-buttons", "drawer", "drawer-content", "drawer-backdrop", "image", "label",
+        "color-intensity", "color-preview-clipped", "color-preview-hdr", "span"));
 
     @Test
     void theGarishThemeRestylesEveryPartOfEveryControl() {

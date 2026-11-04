@@ -11,7 +11,8 @@ import com.truesim.ui.core.UiState;
 /**
  * One entry of a {@link Menu} (type {@code menu-item}: a {@code menu-check} box, a {@code label}, a label of style
  * name {@code menu-shortcut}, and for submenus a {@code menu-arrow} icon; {@code :checked} for checked check and
- * radio items, {@code :expanded} while its submenu shows), or a {@code menu-separator}.
+ * radio items, {@code :expanded} while its submenu shows), or a {@code menu-separator}. Its text may mark a mnemonic
+ * ({@code "&Open"}): the letter activates it while its menu is open ({@link Mnemonics}).
  */
 public final class MenuItem {
 
@@ -31,6 +32,8 @@ public final class MenuItem {
     private final Watch watch;
     private Element shortcutLabel;
     private Object shortcut;
+    /** The mnemonic key (lower case), or 0. */
+    final int key;
 
     @AllowAllocation("menus are built once")
     MenuItem(Controls controls, Menu menu, Kind kind, CharSequence text, Runnable action, VersionedBoolean check,
@@ -46,13 +49,15 @@ public final class MenuItem {
             element = controls.ui().element("menu-separator", null);
             element.semantics(Role.SEPARATOR, null);
             watch = null;
+            key = 0;
             return;
         }
         element = controls.ui().element("menu-item", null);
-        element.semantics(Role.MENU_ITEM, text.toString());
+        element.semantics(Role.MENU_ITEM, Button.plain(text));
         controls.ui().interaction().focusable(element, true);
         Element box = controls.ui().element("menu-check", null);
-        Element label = controls.ui().label(null, text);
+        Element label = controls.mnemonics().label(text, null, null);
+        key = Mnemonics.key(controls.ui().text(label), controls.ui().underlined(label));
         label.semantics(Role.NONE, null);
         element.add(box).add(label);
         if (kind == Kind.SUBMENU) {

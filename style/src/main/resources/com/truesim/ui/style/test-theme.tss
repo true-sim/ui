@@ -6,6 +6,7 @@
 @import "data-test";
 @use "basic-test"; // the basic and container controls of ui-controls
 @use "text-edit-test"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "controls-test"; // group A3: mnemonics, HDR colours and the eyedropper, spelling
 
 $hot: #ff00ff;
 $lime: #39ff14;

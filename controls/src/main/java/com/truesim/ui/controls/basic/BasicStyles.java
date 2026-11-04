@@ -27,6 +27,14 @@ public final class BasicStyles implements StyleKeyHolder {
     public static final StyleKey<TabOverflow> TAB_OVERFLOW =
         StyleKey.of("tab-overflow", TabOverflow.class, TabOverflow.SCROLL);
 
+    /**
+     * How many screen pixels across an eyedropper's magnifier ({@code color-loupe}) shows (odd: one is the centre, the
+     * pixel picked); each is drawn as a square cell of the loupe.
+     */
+    public static final StyleKey<Float> LOUPE_PIXELS = StyleKey.number("loupe-pixels", 11, 3, 31);
+    /** How far (panel units) the magnifier sits from the pointer, so it never covers the pixels it shows. */
+    public static final StyleKey<Float> LOUPE_GAP = StyleKey.number("loupe-gap", 20, 0, 400);
+
     /** Made by {@link java.util.ServiceLoader}: initialises the keys. */
     public BasicStyles() {
         // the keys are static

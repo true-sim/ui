@@ -177,6 +177,9 @@ public final class Ui {
     private TextBlock[] blocks = new TextBlock[0];
     private StringBuilder[] strings = new StringBuilder[0];
     private long[] drawnTextVersion = new long[0];
+    private int[] underlined = new int[0]; // per label: a character (a mnemonic) + 1 to underline, 0 for none
+    private Element[] underlineParts = new Element[0]; // per label: the part styling its underline
+    private final float[] underlineBox = new float[16];
     private ResolvedStyle[] applied = new ResolvedStyle[0];
     private long[] appliedVersion = new long[0];
     private int[] textSlots = new int[16];
@@ -315,6 +318,8 @@ public final class Ui {
         region[e.slot()] = false;
         painters[e.slot()] = null;
         parts[e.slot()] = false;
+        underlined[e.slot()] = 0;
+        underlineParts[e.slot()] = null;
         applied[e.slot()] = null; // a reused slot applies its style again
         return e;
     }
@@ -426,6 +431,27 @@ public final class Ui {
     /** A label's current text. */
     public CharSequence text(Element label) {
         return strings[label.slot()];
+    }
+
+    /**
+     * Underlines character {@code index} of {@code label}'s text (a mnemonic's letter; -1: none) as {@code part} (a
+     * {@linkplain #part style part} of the label, such as {@code span.mnemonic}) is styled: drawn while the part's
+     * {@code text-decoration} underlines, in its {@code color} (the label's when it sets none), so the theme decides
+     * when it shows (always, or only while a fact on the part says so).
+     */
+    public void underline(Element label, int index, Element part) {
+        int slot = label.slot();
+        if (content[slot] != TEXT) {
+            throw new IllegalArgumentException(label + " is not a label");
+        }
+        underlined[slot] = index < 0 ? 0 : index + 1;
+        underlineParts[slot] = part;
+        store.markDirty(slot, UiStore.DIRTY_DRAW);
+    }
+
+    /** The character {@code label} underlines, or -1. */
+    public int underlined(Element label) {
+        return underlined[label.slot()] - 1;
     }
 
     /** Destroys {@code element} and its subtree. */
@@ -557,6 +583,8 @@ public final class Ui {
             blocks = Arrays.copyOf(blocks, n);
             strings = Arrays.copyOf(strings, n);
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
+            underlined = Arrays.copyOf(underlined, n);
+            underlineParts = Arrays.copyOf(underlineParts, n);
             applied = Arrays.copyOf(applied, n);
             appliedVersion = Arrays.copyOf(appliedVersion, n);
             clipOf = Arrays.copyOf(clipOf, n);
@@ -1285,10 +1313,35 @@ public final class Ui {
             b.record(rec, cx0, cy0, Rgba.fade(textColor, opacity), outline.width() * scale,
                 Rgba.fade(outline.color().rgba(), opacity), 0);
             drawnTextVersion[slot] = b.version();
+            if (underlined[slot] > 0) {
+                recordUnderline(slot, b, cx0, cy0, textColor, opacity);
+            }
         } else if (content[slot] == IMAGE) {
             recordImage(s.get(Styles.IMAGE), opacity, cx0, cy0, cx1, cy1);
         } else if (content[slot] == PAINTED) {
             painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, opacity);
+        }
+    }
+
+    /** The underline of a label's character ({@link #underline}), if its part's style underlines. */
+    private void recordUnderline(int slot, TextBlock b, float x, float y, long textColor, float opacity) {
+        Element part = underlineParts[slot];
+        int at = underlined[slot] - 1;
+        if (part == null || !part.alive() || at >= b.length()) {
+            return;
+        }
+        ResolvedStyle ps = resolver.styleOf(part.slot());
+        if (!ps.get(Styles.TEXT_DECORATION).underline()) {
+            return;
+        }
+        int end = Math.min(b.length(), at + (Character.isHighSurrogate(strings[slot].charAt(at)) ? 2 : 1));
+        int n = Math.min(b.rangeBoxes(at, end, 0, underlineBox), underlineBox.length / 4);
+        long color = Rgba.fade(ps.isSet(Styles.COLOR) ? ps.rgba(Styles.COLOR) : textColor, opacity);
+        float thick = Math.max(1, layout.scale());
+        for (int k = 0; k < n; k++) {
+            int line = b.lineAt(underlineBox[k * 4 + 1] + 0.5f);
+            float base = y + b.lineBaseline(line) + Math.max(1, b.lineHeight(line) * 0.08f);
+            rec.box(x + underlineBox[k * 4], base, x + underlineBox[k * 4 + 2], base + thick, color, 0, 0, 0, 0, 0, 0);
         }
     }
 
