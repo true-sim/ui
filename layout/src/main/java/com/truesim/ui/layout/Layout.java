@@ -189,6 +189,12 @@ public final class Layout {
     float[] sCross;
     float[] sTemp;
     float[] sAutoMin; // a flex item's automatic minimum main size, NaN until needed in this run
+    // per slot, its min-content main size and what it was measured for (cross size, modes, owner sizes), kept until
+    // its layout changes: an unchanged item does not measure it again
+    float[] amValue;
+    float[] amKey;
+    int[] amModes;
+    boolean[] amValid;
     float[] sCrossAvail; // the cross size its flex base size was measured in, for its min-content measure
     int[] sCrossMode;
     boolean[] sFrozen;
@@ -881,6 +887,7 @@ public final class Layout {
         scrollMoved[s] = false;
         lcValid[s] = false;
         mcCount[s] = 0;
+        amValid[s] = false;
         laidOutAt[s] = 0;
         relX[s] = 0;
         relY[s] = 0;
@@ -983,6 +990,10 @@ public final class Layout {
         sCross = grow(sCross, n);
         sTemp = grow(sTemp, n);
         sAutoMin = grow(sAutoMin, n);
+        amValue = grow(amValue, n);
+        amKey = amKey == null ? new float[n * 3] : Arrays.copyOf(amKey, n * 3);
+        amModes = grow(amModes, n);
+        amValid = grow(amValid, n);
         sCrossAvail = grow(sCrossAvail, n);
         sCrossMode = grow(sCrossMode, n);
         sFrozen = grow(sFrozen, n);
@@ -1152,6 +1163,7 @@ public final class Layout {
             invalidAt[s] = update;
             lcValid[s] = false;
             mcCount[s] = 0;
+            amValid[s] = false;
             if (store.isRoot(s)) {
                 return;
             }

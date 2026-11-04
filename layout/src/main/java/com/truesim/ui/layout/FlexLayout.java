@@ -80,12 +80,25 @@ final class FlexLayout {
         }
         float ca = l.sCrossAvail[c];
         int cm = l.sCrossMode[c];
-        if (row) {
-            l.layoutNode(c, 0, Layout.AT_MOST, ca, cm, ow, oh, false, rtl);
+        int key = cm << 1 | (row ? 1 : 0);
+        int k = c * 3;
+        if (l.amValid[c] && l.amModes[c] == key && l.amKey[k] == ca && Float.compare(l.amKey[k + 1], ow) == 0
+            && Float.compare(l.amKey[k + 2], oh) == 0) {
+            m = l.amValue[c];
         } else {
-            l.layoutNode(c, ca, cm, 0, Layout.AT_MOST, ow, oh, false, rtl);
+            if (row) {
+                l.layoutNode(c, 0, Layout.AT_MOST, ca, cm, ow, oh, false, rtl);
+            } else {
+                l.layoutNode(c, ca, cm, 0, Layout.AT_MOST, ow, oh, false, rtl);
+            }
+            m = row ? l.resW : l.resH;
+            l.amValid[c] = true;
+            l.amModes[c] = key;
+            l.amKey[k] = ca;
+            l.amKey[k + 1] = ow;
+            l.amKey[k + 2] = oh;
+            l.amValue[c] = m;
         }
-        m = row ? l.resW : l.resH;
         float em = l.fontSize[c];
         float specified = row ? resolve(l.width[c], l.widthUnit[c], mainOwner, em)
             : resolve(l.height[c], l.heightUnit[c], mainOwner, em);
@@ -372,7 +385,7 @@ final class FlexLayout {
                     t = b + (sumScaled > 0 ? free * l.shrink[c] * b / sumScaled : 0);
                 }
                 // below its hypothetical size an item meets its automatic minimum (measured only then)
-                float least = t < l.sHypo[c] ? floor(l, c, row, owner, ow, oh, rtl) : padMain(l, c, row);
+                float least = t < l.sHypo[c] - EPSILON ? floor(l, c, row, owner, ow, oh, rtl) : padMain(l, c, row);
                 float clamped = Math.max(clamp(t, minMain(l, c, row, owner), maxMain(l, c, row, owner)), least);
                 l.sTarget[c] = clamped;
                 l.sTemp[c] = t;
