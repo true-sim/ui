@@ -1,5 +1,6 @@
 package com.truesim.ui.text;
 
+import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
@@ -40,9 +41,12 @@ public final class SoftwareGlyphRenderer {
 
     /**
      * Composites every GLYPH primitive of {@code list} over {@code rgb}: linear RGB triples, {@code width} by
-     * {@code height} pixels, rows top to bottom, opaque.
+     * {@code height} pixels, rows top to bottom, opaque. Glyphs draw where the list draws them: their transforms and
+     * clip offsets applied ({@link DrawList#baked()}).
      */
-    public static void render(DrawList list, UiTextures textures, float[] rgb, int width, int height) {
+    @AllowAllocation("a software preview")
+    public static void render(DrawList drawn, UiTextures textures, float[] rgb, int width, int height) {
+        DrawList list = drawn.baked();
         for (int i = 0; i < list.size(); i++) {
             if (Primitive.kind(list.header(i)) == Primitive.GLYPH) {
                 glyph(list, i, textures, rgb, width, height);

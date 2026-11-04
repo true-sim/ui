@@ -14,8 +14,9 @@ import java.util.Locale;
 /**
  * Draw-list goldens (design section 12): a list written as text, one primitive a line, empty slots left out, numbers
  * rounded so goldens survive harmless float noise. {@link #assertMatches} compares against a golden file and, with
- * {@code -Dtruesim.updateGoldens=true}, writes it instead. Positions are where primitives draw: their clip's offset
- * added.
+ * {@code -Dtruesim.updateGoldens=true}, writes it instead. Primitives are written as they draw
+ * ({@link DrawList#baked()}): positions with their clip's offset and transform applied, sizes scaled, colours faded by
+ * their transform's opacity, so a golden does not change with how a transform is stored.
  */
 public final class DrawListDump {
 
@@ -26,7 +27,8 @@ public final class DrawListDump {
 
     /** The list as text. */
     @AllowAllocation("test helper")
-    public static String of(DrawList list) {
+    public static String of(DrawList recorded) {
+        DrawList list = recorded.baked(); // where and how it draws: transforms and clip offsets applied
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < list.size(); i++) {
             int header = list.header(i);
@@ -41,7 +43,6 @@ public final class DrawListDump {
             if (Primitive.flags(header) != 0) {
                 out.append(" flags=").append(Primitive.flags(header));
             }
-            // where it draws: plus its clip's offset (a scrolled region's content is recorded unscrolled)
             out.append(' ').append(n(list.drawnX(i, Primitive.X0))).append(',').append(n(list.drawnY(i, Primitive.Y0)))
                 .append(' ').append(n(list.drawnX(i, Primitive.X1))).append(',').append(n(list.drawnY(i, Primitive.Y1)))
                 .append(" a=").append(color(list.colorAt(i, Primitive.COLOR_A)));

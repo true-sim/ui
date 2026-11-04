@@ -50,6 +50,19 @@ public final class Visuals {
     /** The overrides applied to layout. */
     static final int LAYOUT = WIDTH | HEIGHT | OFFSETS | ANCHORS | MIN_WIDTH | MIN_HEIGHT;
 
+    /**
+     * Draws a change of an element's opacity, scale or drawn offset without recording its subtree again: the UI frame
+     * rewrites the transform table entry the subtree draws by (design 6.1).
+     */
+    @FunctionalInterface
+    public interface TransformListener {
+        /**
+         * {@code slot}'s opacity, scale or drawn offset changed (an override, its style, or its place, which its scale
+         * centres on): true if a transform table entry draws it, false to record its subtree again.
+         */
+        boolean transformChanged(int slot);
+    }
+
     /** Re-applies an element's style to its layout inputs: what clearing a layout override falls back to. */
     @FunctionalInterface
     public interface LayoutRestyler {
@@ -61,6 +74,7 @@ public final class Visuals {
     private final Layout layout;
     private final StyleResolver styles;
     private LayoutRestyler restyler;
+    private TransformListener transforms;
 
     private int[] gen = new int[0];
     private int[] set = new int[0];
@@ -96,6 +110,11 @@ public final class Visuals {
         this.layout = layout;
         this.styles = styles;
         ensure();
+    }
+
+    /** Who draws transform changes by a table entry (the UI frame); without one a change records the subtree again. */
+    public void transformListener(TransformListener value) {
+        transforms = value;
     }
 
     /** What clearing a layout override falls back to: the UI frame re-applies the element's style. */
@@ -437,9 +456,15 @@ public final class Visuals {
     }
 
     private void subtreeChanged(int slot) {
+        if (transforms == null || !transforms.transformChanged(slot)) {
+            redraw(slot);
+        }
+    }
+
+    private void redraw(int slot) {
         store.markDirty(slot, UiStore.DIRTY_DRAW);
         for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
-            subtreeChanged(c);
+            redraw(c);
         }
     }
 
@@ -497,6 +522,19 @@ public final class Visuals {
         return composedY;
     }
 
+    /**
+     * Whether {@code slot} composes a look of its own over its subtree: an opacity, scale or drawn offset override (set,
+     * whatever its value: it animates), or a style opacity or scale other than 1. Such an element owns a transform
+     * table entry its subtree draws by.
+     */
+    public boolean composes(int slot) {
+        if ((flags(slot) & SUBTREE) != 0) {
+            return true;
+        }
+        ResolvedStyle style = styles.styleOf(slot);
+        return style.getFloat(Styles.OPACITY) != 1 || style.getFloat(Styles.SCALE) != 1;
+    }
+
     /** Whether {@code slot} draws with a transform of its own (a scale other than 1 or a drawn offset). */
     public boolean transformed(int slot) {
         int f = flags(slot);
@@ -504,7 +542,10 @@ public final class Visuals {
         return es != 1 || (f & TRANSLATE) != 0 && (tx[slot] != 0 || ty[slot] != 0);
     }
 
-    /** Marks {@code slot}'s subtree to record again (its transform or opacity changed). */
+    /**
+     * {@code slot}'s transform or opacity changed (its style, or its place): its transform table entry is rewritten, or
+     * without one its subtree records again.
+     */
     public void redrawSubtree(int slot) {
         subtreeChanged(slot);
     }

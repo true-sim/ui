@@ -116,7 +116,7 @@ public final class LayoutSanity {
             int root = ui.layerStack().at(li).rootSlot();
             inks.clear();
             covers.clear();
-            walk(root, lists[li]);
+            walk(root, lists[li].baked()); // where primitives draw: transforms and clip offsets applied
             overlaps();
         }
     }

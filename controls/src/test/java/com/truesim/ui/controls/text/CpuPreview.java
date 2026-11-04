@@ -38,7 +38,7 @@ final class CpuPreview {
 
     CpuPreview draw(DrawList[] layers, int count, UiTextures textures) {
         for (int l = 0; l < count; l++) {
-            DrawList list = layers[l];
+            DrawList list = layers[l].baked(); // where its primitives draw: transforms and clip offsets applied
             for (int i = 0; i < list.size(); i++) {
                 int kind = Primitive.kind(list.header(i));
                 if (kind == Primitive.BOX) {

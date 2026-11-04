@@ -169,6 +169,16 @@ public final class Ui {
     private float recordShiftX; // the shift of the element being recorded: its clip owner's scroll
     private float recordShiftY;
     private StyleWatcher watcher;
+    // transform table entries (design 6.1): an element that composes an opacity, scale or drawn offset over its
+    // subtree owns one in its layer's list; its subtree draws by it, so animating it rewrites the entry alone
+    private int[] ownEntry = new int[0]; // per slot: its entry, valid while ownEntryList's generation is ownEntryGen
+    private DrawList[] ownEntryList = new DrawList[0];
+    private long[] ownEntryGen = new long[0];
+    private boolean[] entryListed = new boolean[0];
+    private int[] entrySlots = new int[16]; // the slots holding entries (some stale after a rebuild)
+    private int entrySlotCount;
+    private boolean transformsDirty;
+    private int[] clipEntry = new int[0]; // per clip owner: the entry its clip rectangle is in
 
     // per slot
     private int[] content = new int[0];
@@ -237,6 +247,7 @@ public final class Ui {
         this.visuals = new Visuals(store, layout, resolver);
         this.animator = new Animator(store, visuals);
         visuals.restyler(this::restyleLayout);
+        visuals.transformListener(this::transformChanged);
         ensure();
         store.semantics(store.rootSlot(), Role.GROUP, null);
     }
@@ -560,6 +571,11 @@ public final class Ui {
             applied = Arrays.copyOf(applied, n);
             appliedVersion = Arrays.copyOf(appliedVersion, n);
             clipOf = Arrays.copyOf(clipOf, n);
+            ownEntry = Arrays.copyOf(ownEntry, n);
+            ownEntryList = Arrays.copyOf(ownEntryList, n);
+            ownEntryGen = Arrays.copyOf(ownEntryGen, n);
+            entryListed = Arrays.copyOf(entryListed, n);
+            clipEntry = Arrays.copyOf(clipEntry, n);
             ownClip = Arrays.copyOf(ownClip, n);
             clipOwner = Arrays.copyOf(clipOwner, n);
             clipStamp = Arrays.copyOf(clipStamp, n);
@@ -698,6 +714,7 @@ public final class Ui {
                 }
             }
         }
+        updateTransforms();
         if (clipsMoved) {
             clipsMoved = false;
             moveClips();
@@ -761,6 +778,9 @@ public final class Ui {
         layout.update(measure, width, height);
         shiftPass++;
         int[] moved = layout.changedSlots();
+        if (layout.changedCount() > 0 && entrySlotCount > 0) {
+            transformsDirty = true; // an entry's scale centres on its element's (or an ancestor's) place
+        }
         for (int i = 0; i < layout.changedCount(); i++) {
             int slot = moved[i];
             int owner = clipOwner[slot];
@@ -775,7 +795,7 @@ public final class Ui {
             }
             interaction.picking().moved(slot);
             if (visuals.transformed(slot)) {
-                visuals.redrawSubtree(slot); // the centre its subtree scales about moved
+                visuals.redrawSubtree(slot); // the centre its subtree scales about moved: its entry
             }
             if (ownClip[slot] != DrawList.NO_CLIP) {
                 clipsMoved = true;
@@ -1030,6 +1050,9 @@ public final class Ui {
         clipOf[slot] = owner == UiStore.NONE ? DrawList.NO_CLIP : ownClip[owner];
         int start = list.size();
         ownClip[slot] = DrawList.NO_CLIP; // its clip is made below: the count leaves it out
+        if (visuals.composes(slot)) {
+            giveEntry(slot, list);
+        }
         list.begin(start, 0); // count only
         rec = list;
         recordPrimitives(slot);
@@ -1047,16 +1070,18 @@ public final class Ui {
         int childOwner = owner;
         ownClip[slot] = DrawList.NO_CLIP;
         if (resolver.styleOf(slot).get(Styles.CLIP)) { // before recording: painted content clips to it
-            clipBox(slot, owner);
+            clipBox(slot, owner, list);
             int o = slot * 4;
             ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
                 clipRadius(slot));
+            list.setClipTransform(ownClip[slot], clipEntry[slot]);
             childOwner = slot;
         } else if (region[slot]) { // a scroll region clips like its owner; its clip carries the scroll
             regionBox(slot, owner);
             int o = slot * 4;
             ownClip[slot] = list.addClip(clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
                 owner == UiStore.NONE ? 0 : clipRadius(owner));
+            list.setClipTransform(ownClip[slot], clipEntry[slot]);
             childOwner = slot;
         }
         if (ownClip[slot] != DrawList.NO_CLIP) {
@@ -1075,19 +1100,39 @@ public final class Ui {
         }
     }
 
-    /** The clip rectangle of {@code slot}: its box within its clipping ancestor's. */
-    private void clipBox(int slot, int owner) {
+    /**
+     * The clip rectangle of {@code slot}: its box within its clipping ancestor's, in the space of the transform entry
+     * {@code slot} draws by ({@link #clipEntry}); an ancestor's clip drawn by another entry is mapped into it (both are
+     * scales and offsets, so the cut stays a rectangle).
+     */
+    private void clipBox(int slot, int owner, DrawList list) {
         int o = slot * 4;
+        int entry = entryOf(slot, list);
+        clipEntry[slot] = entry;
         float x0 = layout.x(slot);
         float y0 = layout.y(slot);
         float x1 = x0 + layout.width(slot);
         float y1 = y0 + layout.height(slot);
         if (owner != UiStore.NONE) {
             int p = owner * 4;
-            x0 = Math.max(x0, clipRect[p]);
-            y0 = Math.max(y0, clipRect[p + 1]);
-            x1 = Math.min(x1, clipRect[p + 2]);
-            y1 = Math.min(y1, clipRect[p + 3]);
+            float ax0 = clipRect[p];
+            float ay0 = clipRect[p + 1];
+            float ax1 = clipRect[p + 2];
+            float ay1 = clipRect[p + 3];
+            int from = clipEntry[owner];
+            if (from != entry && ax0 > -Float.MAX_VALUE) { // the ancestor's cut where it draws, back into this space
+                float k = list.transformScale(from) / list.transformScale(entry);
+                float dx = (list.transformX(from) - list.transformX(entry)) / list.transformScale(entry);
+                float dy = (list.transformY(from) - list.transformY(entry)) / list.transformScale(entry);
+                ax0 = ax0 * k + dx;
+                ay0 = ay0 * k + dy;
+                ax1 = ax1 * k + dx;
+                ay1 = ay1 * k + dy;
+            }
+            x0 = Math.max(x0, ax0);
+            y0 = Math.max(y0, ay0);
+            x1 = Math.min(x1, ax1);
+            y1 = Math.min(y1, ay1);
         }
         clipRect[o] = x0;
         clipRect[o + 1] = y0;
@@ -1095,9 +1140,10 @@ public final class Ui {
         clipRect[o + 3] = y1;
     }
 
-    /** A scroll region's clip rectangle: its clipping ancestor's (none: everything). */
+    /** A scroll region's clip rectangle: its clipping ancestor's (none: everything), in that one's space. */
     private void regionBox(int slot, int owner) {
         int o = slot * 4;
+        clipEntry[slot] = owner == UiStore.NONE ? DrawList.NO_TRANSFORM : clipEntry[owner];
         if (owner != UiStore.NONE) {
             System.arraycopy(clipRect, owner * 4, clipRect, o, 4);
         } else {
@@ -1136,15 +1182,16 @@ public final class Ui {
             return;
         }
         boolean clips = resolver.styleOf(slot).get(Styles.CLIP);
+        DrawList list = layerStack.at(li).drawList();
         if (clips) {
-            clipBox(slot, owner);
+            clipBox(slot, owner, list);
         } else {
             regionBox(slot, owner);
         }
         int o = slot * 4;
-        DrawList list = layerStack.at(li).drawList();
         list.setClip(ownClip[slot], clipRect[o], clipRect[o + 1], clipRect[o + 2], clipRect[o + 3],
             clips ? clipRadius(slot) : owner == UiStore.NONE ? 0 : clipRadius(owner));
+        list.setClipTransform(ownClip[slot], clipEntry[slot]);
         shift(slot);
         list.setClipOffset(ownClip[slot], -shiftX[slot], -shiftY[slot]);
         appliedShiftX[slot] = shiftX[slot];
@@ -1194,12 +1241,10 @@ public final class Ui {
         float y0 = layout.y(slot);
         float x1 = x0 + layout.width(slot);
         float y1 = y0 + layout.height(slot);
-        visuals.compose(slot);
-        float opacity = visuals.composedOpacity();
-        float composedX = visuals.composedX() + recordShiftX; // content space of its clip: unscrolled
-        float composedY = visuals.composedY() + recordShiftY;
-        if (visuals.composedScale() != 1 || composedX != 0 || composedY != 0) {
-            rec.transform(visuals.composedScale(), composedX, composedY);
+        // opacity, scale and drawn offsets are the transform table entry's (design 6.1), not the primitives'
+        rec.useTransform(entryOf(slot, rec));
+        if (recordShiftX != 0 || recordShiftY != 0) {
+            rec.transform(1, recordShiftX, recordShiftY); // content space of its clip: unscrolled
         }
         int overrides = visuals.flags(slot);
         Radii r = s.get(Styles.RADIUS);
@@ -1215,26 +1260,26 @@ public final class Ui {
             float dx = sh.x() * scale;
             float dy = sh.y() * scale;
             rec.shadow(x0 + dx - spread, y0 + dy - spread, x1 + dx + spread, y1 + dy + spread,
-                Rgba.fade(sh.color().rgba(), opacity), tl + spread, tr + spread, br + spread, bl + spread,
+                sh.color().rgba(), tl + spread, tr + spread, br + spread, bl + spread,
                 sh.blur() * scale * 0.5f);
         }
 
         Border border = s.get(Styles.BORDER);
         float bw = border.width() * scale;
-        long borderColor = Rgba.fade((overrides & Visuals.BORDER_COLOR) != 0 ? visuals.borderColor(slot)
-            : border.color().rgba(), opacity);
+        long borderColor = (overrides & Visuals.BORDER_COLOR) != 0 ? visuals.borderColor(slot)
+            : border.color().rgba();
         boolean fill = (overrides & Visuals.BACKGROUND) != 0;
         Paint paint = s.get(Styles.BACKGROUND);
         switch (paint) {
-            case Paint.Box box -> rec.box(x0, y0, x1, y1, Rgba.fade(fill ? visuals.backgroundA(slot)
-                : box.color().rgba(), opacity), tl, tr, br, bl, bw, borderColor);
-            case Paint.LinearGradient g -> rec.gradientBox(x0, y0, x1, y1, Rgba.fade(fill ? visuals.backgroundA(slot)
-                : g.from().rgba(), opacity), Rgba.fade(fill ? visuals.backgroundB(slot) : g.to().rgba(), opacity),
+            case Paint.Box box -> rec.box(x0, y0, x1, y1, fill ? visuals.backgroundA(slot)
+                : box.color().rgba(), tl, tr, br, bl, bw, borderColor);
+            case Paint.LinearGradient g -> rec.gradientBox(x0, y0, x1, y1, fill ? visuals.backgroundA(slot)
+                : g.from().rgba(), fill ? visuals.backgroundB(slot) : g.to().rgba(),
                 (g.angle() - 90) * RADIANS, tl, tr, br, bl, bw, borderColor);
             case Paint.Image image -> {
                 UiTexture t = images.get(image.name());
                 if (t != null) {
-                    rec.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(image.tint().rgba(), opacity));
+                    rec.image(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), image.tint().rgba());
                 }
                 borderOnly(x0, y0, x1, y1, tl, tr, br, bl, bw, borderColor);
             }
@@ -1246,7 +1291,7 @@ public final class Ui {
                     float tp = d == null ? nine.top() * scale : d.top() * scale;
                     float rt = d == null ? nine.right() * scale : d.right() * scale;
                     float bt = d == null ? nine.bottom() * scale : d.bottom() * scale;
-                    rec.nineSlice(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), Rgba.fade(nine.tint().rgba(), opacity), l, tp, rt,
+                    rec.nineSlice(x0, y0, x1, y1, 0, 0, 1, 1, t.id(), nine.tint().rgba(), l, tp, rt,
                         bt, nine.left(), nine.top(), nine.right(), nine.bottom());
                 }
                 borderOnly(x0, y0, x1, y1, tl, tr, br, bl, bw, borderColor);
@@ -1259,7 +1304,7 @@ public final class Ui {
             float rw = ring.width() * scale;
             float off = s.getFloat(Styles.FOCUS_RING_OFFSET) * scale + rw;
             rec.box(x0 - off, y0 - off, x1 + off, y1 + off, Rgba.TRANSPARENT, ringRadius(tl, off), ringRadius(tr, off),
-                ringRadius(br, off), ringRadius(bl, off), rw, Rgba.fade(ring.color().rgba(), opacity));
+                ringRadius(br, off), ringRadius(bl, off), rw, ring.color().rgba());
         }
 
         Insets padding = s.get(Styles.PADDING);
@@ -1271,10 +1316,8 @@ public final class Ui {
             // content clips to its own element's box, as its children do (text that does not fit, a painter's)
             rec.clip(ownClip[slot]);
             shift(slot); // its own clip's content space: its own scroll too
-            float ox = visuals.composedX() + shiftX[slot];
-            float oy = visuals.composedY() + shiftY[slot];
-            if (ox != composedX || oy != composedY) {
-                rec.transform(visuals.composedScale(), ox, oy);
+            if (shiftX[slot] != recordShiftX || shiftY[slot] != recordShiftY) {
+                rec.transform(1, shiftX[slot], shiftY[slot]);
             }
         }
         if (content[slot] == TEXT) {
@@ -1282,13 +1325,102 @@ public final class Ui {
             TextOutline outline = s.get(Styles.TEXT_OUTLINE);
             TextBlock b = blocks[slot];
             long textColor = (overrides & Visuals.COLOR) != 0 ? visuals.color(slot) : s.rgba(Styles.COLOR);
-            b.record(rec, cx0, cy0, Rgba.fade(textColor, opacity), outline.width() * scale,
-                Rgba.fade(outline.color().rgba(), opacity), 0);
+            b.record(rec, cx0, cy0, textColor, outline.width() * scale,
+                outline.color().rgba(), 0);
             drawnTextVersion[slot] = b.version();
         } else if (content[slot] == IMAGE) {
-            recordImage(s.get(Styles.IMAGE), opacity, cx0, cy0, cx1, cy1);
+            recordImage(s.get(Styles.IMAGE), cx0, cy0, cx1, cy1);
         } else if (content[slot] == PAINTED) {
-            painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, opacity);
+            painters[slot].paint(slot, rec, cx0, cy0, cx1, cy1, 1); // the entry fades it
+        }
+    }
+
+    // ---------------------------------------------------------------- transform table entries
+
+    /** The transform table entry {@code slot} draws by in {@code list}: its own, or its nearest ancestor's (0: none). */
+    private int entryOf(int slot, DrawList list) {
+        for (int e = slot; e != UiStore.NONE; e = store.parent(e)) {
+            if (ownEntry[e] != DrawList.NO_TRANSFORM && ownEntryList[e] == list
+                && ownEntryGen[e] == list.generation()) {
+                return ownEntry[e];
+            }
+        }
+        return DrawList.NO_TRANSFORM;
+    }
+
+    private boolean hasEntry(int slot) {
+        DrawList list = ownEntryList[slot];
+        return ownEntry[slot] != DrawList.NO_TRANSFORM && list != null && ownEntryGen[slot] == list.generation();
+    }
+
+    /** Gives {@code slot} an entry of its own in {@code list}, set to what it composes now. */
+    private void giveEntry(int slot, DrawList list) {
+        int e = list.addTransform();
+        ownEntry[slot] = e;
+        ownEntryList[slot] = list;
+        ownEntryGen[slot] = list.generation();
+        visuals.compose(slot);
+        list.setTransform(e, visuals.composedScale(), visuals.composedX(), visuals.composedY(),
+            visuals.composedOpacity());
+        if (!entryListed[slot]) {
+            entryListed[slot] = true;
+            if (entrySlotCount == entrySlots.length) {
+                entrySlots = Arrays.copyOf(entrySlots, entrySlotCount * 2);
+            }
+            entrySlots[entrySlotCount++] = slot;
+        }
+    }
+
+    /**
+     * Visuals' hook: {@code slot}'s opacity, scale or drawn offset changed. With an entry, the entry is rewritten this
+     * frame (true); without one it gets one, and its subtree records again once to draw by it (false).
+     */
+    private boolean transformChanged(int slot) {
+        if (slot >= ownEntry.length) {
+            ensure();
+        }
+        if (hasEntry(slot)) {
+            transformsDirty = true;
+            return true;
+        }
+        int li = layerStack.indexOf(slot);
+        if (li >= 0) {
+            giveEntry(slot, layerStack.at(li).drawList());
+            transformsDirty = true;
+        }
+        return false;
+    }
+
+    /**
+     * Writes what each entry's element composes now into its entry (compared: unchanged entries upload nothing); a
+     * moved or scaled entry moves the clips (an ancestor's cut mapped into its space).
+     */
+    private void updateTransforms() {
+        if (!transformsDirty) {
+            return;
+        }
+        transformsDirty = false;
+        boolean moved = false;
+        int kept = 0;
+        for (int i = 0; i < entrySlotCount; i++) {
+            int slot = entrySlots[i];
+            if (!store.alive(slot) || !hasEntry(slot)) {
+                entryListed[slot] = false;
+                continue;
+            }
+            entrySlots[kept++] = slot;
+            DrawList list = ownEntryList[slot];
+            int e = ownEntry[slot];
+            visuals.compose(slot);
+            float k = visuals.composedScale();
+            float x = visuals.composedX();
+            float y = visuals.composedY();
+            moved |= list.transformScale(e) != k || list.transformX(e) != x || list.transformY(e) != y;
+            list.setTransform(e, k, x, y, visuals.composedOpacity());
+        }
+        entrySlotCount = kept;
+        if (moved) {
+            clipsMoved = true;
         }
     }
 
@@ -1303,12 +1435,12 @@ public final class Ui {
         }
     }
 
-    private void recordImage(ImageSpec spec, float opacity, float x0, float y0, float x1, float y1) {
+    private void recordImage(ImageSpec spec, float x0, float y0, float x1, float y1) {
         UiTexture t = images.get(spec.name());
         if (t == null || x1 <= x0 || y1 <= y0) {
             return;
         }
-        long tint = Rgba.fade(spec.tint().rgba(), opacity);
+        long tint = spec.tint().rgba();
         float w = x1 - x0;
         float h = y1 - y0;
         float iw = t.width() * layout.scale();
@@ -1391,6 +1523,7 @@ public final class Ui {
         all.add(StyleResolver.CACHE_LIMIT);
         all.add(StyleWatcher.DELAY);
         all.add(Animator.SPEED);
+        all.addAll(com.truesim.ui.core.draw.DirtyRanges.tunables());
         all.addAll(Interaction.tunables());
         all.addAll(com.truesim.ui.controls.text.TextEditor.tunables());
         all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);

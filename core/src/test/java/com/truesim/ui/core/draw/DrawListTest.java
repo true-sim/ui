@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.truesim.testing.AllocationAssertions;
+import org.assertj.core.data.Offset;
 import org.junit.jupiter.api.Test;
 
 class DrawListTest {
@@ -234,6 +235,103 @@ class DrawListTest {
             list.end();
             list.clean();
         });
+    }
+
+    @Test
+    void primitivesDrawByTheirTransformEntryWhichAnAnimationRewritesAlone() {
+        DrawList list = new DrawList();
+        int t = list.addTransform();
+        int clip = list.addClip(0, 0, 50, 50, 4);
+        list.setClipTransform(clip, t);
+        list.setClipOffset(clip, 0, -10);
+        int a = list.allocate(3);
+        list.begin(a, 3);
+        list.clip(clip);
+        list.useTransform(t);
+        list.box(10, 20, 30, 40, Rgba.pack(1, 1, 1, 0.8f), 2, 2, 2, 2, 1, Rgba.BLACK);
+        list.glyph(0, 10, 8, 18, 0, 0, 1, 1, 7, 2, Rgba.WHITE, 1, Rgba.BLACK, 0.5f);
+        list.useTransform(DrawList.NO_TRANSFORM);
+        list.line(0, 10, 10, 10, 2, Rgba.WHITE);
+        assertThat(list.end()).isTrue();
+        assertThat(list.transformOf(a)).isEqualTo(t);
+        assertThat(list.intAt(a, Primitive.TRANSFORM)).isEqualTo(t);
+        assertThat(list.transformOf(a + 2)).isEqualTo(DrawList.NO_TRANSFORM);
+        assertThat(list.drawnX(a, Primitive.X0)).as("an identity entry: the clip's offset alone").isEqualTo(10);
+        assertThat(list.drawnY(a, Primitive.Y0)).isEqualTo(10);
+        list.clean();
+
+        list.setTransform(t, 2, 100, 50, 0.5f); // an animation: scale, offset and opacity
+        assertThat(list.dirtyRanges().isEmpty()).as("no primitive changed").isTrue();
+        assertThat(list.transformRanges().count()).isEqualTo(1);
+        assertThat(list.transformRanges().from(0)).isEqualTo(t);
+        assertThat(list.clipsDirty()).isFalse();
+        assertThat(list.drawnX(a, Primitive.X0)).isEqualTo(120); // 2 * 10 + 100
+        assertThat(list.drawnY(a, Primitive.Y1)).isEqualTo(110); // 2 * (40 - 10) + 50
+        assertThat(list.drawnScale(a)).isEqualTo(2);
+        assertThat(list.drawnOpacity(a)).isEqualTo(0.5f);
+        assertThat(list.drawnX(a + 2, Primitive.X1)).as("the identity").isEqualTo(10);
+        float[] c = new float[5];
+        list.drawnClip(clip, c);
+        assertThat(c).as("the clip cuts where its owner draws").containsExactly(100, 50, 200, 150, 8);
+
+        DrawList b = list.baked();
+        assertThat(b.floatAt(a, Primitive.X0)).isEqualTo(120);
+        assertThat(b.floatAt(a, Primitive.WIDTH)).as("the border scaled").isEqualTo(2);
+        assertThat(Float.float16ToFloat((short) b.intAt(a, Primitive.RADII))).isEqualTo(4);
+        assertThat(Rgba.a(b.colorAt(a, Primitive.COLOR_A))).isCloseTo(0.4f, Offset.offset(1e-3f));
+        assertThat(Rgba.a(b.colorAt(a, Primitive.BORDER_COLOR))).isEqualTo(0.5f);
+        assertThat(b.floatAt(a + 1, Primitive.PIXEL_RANGE)).isEqualTo(4);
+        assertThat(Rgba.a(b.colorAt(a + 1, Primitive.COLOR_B))).as("the outline faded too").isEqualTo(0.5f);
+        assertThat(b.transformOf(a)).isZero();
+        assertThat(b.clips()[clip * DrawList.CLIP_FLOATS + 2]).isEqualTo(200);
+        assertThat(b.clipOffsetY(clip)).isZero();
+        assertThat(b.drawnX(a, Primitive.X0)).isEqualTo(120);
+
+        list.clean();
+        list.setTransform(t, 2, 100, 50, 0.5f); // as it is
+        assertThat(list.transformRanges().isEmpty()).isTrue();
+        assertThatThrownBy(() -> list.setTransform(0, 1, 0, 0, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setTransform(9, 1, 0, 0, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setClipTransform(clip, 9)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setClipTransform(0, t)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.useTransform(9)).isInstanceOf(IllegalArgumentException.class);
+        long generation = list.generation();
+        list.reset();
+        assertThat(list.generation()).isGreaterThan(generation);
+        assertThat(list.transformCount()).isEqualTo(1);
+        assertThat(list.transformScale(0)).isEqualTo(1);
+        assertThat(list.transformOpacity(0)).isEqualTo(1);
+    }
+
+    @Test
+    void theTransformTableGrows() {
+        DrawList list = new DrawList();
+        for (int i = 1; i < 100; i++) {
+            assertThat(list.addTransform()).isEqualTo(i);
+        }
+        list.setTransform(99, 3, 0, 0, 1);
+        assertThat(list.transformScale(99)).isEqualTo(3);
+        assertThat(list.transforms().length).isGreaterThanOrEqualTo(100 * DrawList.TRANSFORM_FLOATS);
+    }
+
+    @Test
+    void changesFarApartAreSeparateDirtyRanges() {
+        DrawList list = new DrawList();
+        int a = list.allocate(1000);
+        list.clean();
+        record(list, a + 10, 1);
+        record(list, a + 900, 2);
+        record(list, a + 905, 3); // close to the last: merged with it
+        DirtyRanges r = list.dirtyRanges();
+        assertThat(r.count()).isEqualTo(2);
+        assertThat(r.from(0)).isEqualTo(a + 10);
+        assertThat(r.to(0)).isEqualTo(a + 11);
+        assertThat(r.from(1)).isEqualTo(a + 900);
+        assertThat(r.to(1)).isEqualTo(a + 906);
+        assertThat(list.dirtyFrom()).isEqualTo(a + 10);
+        assertThat(list.dirtyTo()).isEqualTo(a + 906);
+        list.clean();
+        assertThat(r.isEmpty()).isTrue();
     }
 
     private static void record(DrawList list, int start, float x) {

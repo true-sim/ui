@@ -7,7 +7,8 @@ import java.util.Arrays;
 
 /**
  * The primitives of one UI layer as data: {@link Primitive}'s 64-byte records packed in an {@code int[]}, plus a table
- * of clip rectangles. Recorded by the UI, uploaded by the engine's renderer, compared as data by golden tests.
+ * of clip rectangles and a table of transforms. Recorded by the UI, uploaded by the engine's renderer, compared as data
+ * by golden tests.
  *
  * <p><b>Ranges.</b> Each element owns a range of the list ({@link #allocate}), recorded in tree order so that later
  * ranges draw over earlier ones. An element records into its range again only when its look changed
@@ -15,38 +16,60 @@ import java.util.Arrays;
  * A range that needs more than its capacity reports it ({@link #end} returns false), and its owner rebuilds the list
  * in tree order, with larger capacities ({@link #reset}).
  *
- * <p><b>Dirty words.</b> Writes compare before they write: only words that really change widen the dirty range
- * ({@link #dirtyFrom()}, {@link #dirtyTo()}), so re-recording an unchanged element dirties nothing, and a frame where
- * nothing changed uploads nothing. Recording allocates nothing once the arrays have grown.
+ * <p><b>Dirty words.</b> Writes compare before they write: only primitives that really change are marked, in a few
+ * sorted ranges ({@link #dirtyRanges()}: changes far apart upload apart, close ones merge, see {@link DirtyRanges}),
+ * so re-recording an unchanged element dirties nothing, and a frame where nothing changed uploads nothing. Recording
+ * allocates nothing once the arrays have grown.
+ *
+ * <p><b>Transforms.</b> Each primitive names an entry of the transform table ({@link Primitive#TRANSFORM}; design 6.1,
+ * "the per-element transform table, one 32-byte entry"): a scale, an offset and an opacity ({@link #TRANSFORM_FLOATS}
+ * floats). Entry 0 is the identity. A primitive's coordinates and sizes are recorded in its own space and drawn at
+ * {@code scale * (p + clip offset) + offset}, its sizes (radii, border, line and outline widths, shadow blur, glyph
+ * pixel range, outline and weight, nine-slice insets) times the scale, its colours' alpha times the opacity. An element
+ * whose opacity, scale or drawn offset animates owns an entry its subtree shares, so the animation rewrites that entry
+ * ({@link #setTransform}: 32 bytes, in dirty ranges of their own, {@link #transformRanges()}), not the primitives. A
+ * clip names a transform too ({@link #setClipTransform}): it cuts where its owner draws, scaled and moved with it.
  *
  * <p><b>Clips and their offsets.</b> Each primitive names a clip of the clip table: a rounded rectangle it is cut to,
- * in pixels of the screen, and an offset added to the primitive's own coordinates when it is drawn
- * ({@link #setClipOffset}). A scrolled region records its content once, unscrolled, under a clip of its own; scrolling
- * moves that clip's offset (seven floats) instead of recording the content again. Everything that reads positions
- * back (picking, previews, goldens) adds the offset: {@link #clipOffsetX}, {@link #clipOffsetY}.
+ * and an offset added to the primitive's own coordinates before its transform ({@link #setClipOffset}). A scrolled
+ * region records its content once, unscrolled, under a clip of its own; scrolling moves that clip's offset instead of
+ * recording the content again. Everything that reads positions back applies the offset and the transform:
+ * {@link #drawnX}, {@link #drawnY}, {@link #drawnScale}, {@link #drawnOpacity}, {@link #drawnClip}, or reads
+ * {@link #baked()}, a copy with both applied (CPU previews, checks, goldens).
  */
 public final class DrawList {
 
-    /** Floats per clip: x0, y0, x1, y1, corner radius, then the offset x, y of its primitives. */
-    public static final int CLIP_FLOATS = 7;
+    /**
+     * Floats per clip (32 bytes): x0, y0, x1, y1, corner radius (in the space of its transform), the offset x, y added
+     * to its primitives' coordinates, then the index of the transform its rectangle is drawn by (a float).
+     */
+    public static final int CLIP_FLOATS = 8;
     /** The clip that clips nothing, always at index 0. */
     public static final int NO_CLIP = 0;
+    /** Floats per transform table entry (32 bytes): scale, offset x, offset y, opacity, then four reserved (0). */
+    public static final int TRANSFORM_FLOATS = 8;
+    /** The identity transform (scale 1, no offset, opaque), always at index 0. */
+    public static final int NO_TRANSFORM = 0;
 
     private int[] words;
     private int size; // primitives in use: the end of the last range
     private float[] clips;
     private int clipCount;
     private boolean clipsDirty;
-    private int dirtyFrom;
-    private int dirtyTo;
+    private final DirtyRanges dirty = new DirtyRanges();
+    private float[] transforms;
+    private int transformCount;
+    private final DirtyRanges transformsDirty = new DirtyRanges();
     private long version;
+    private long generation; // grows with every reset: transforms and clips handed out before are gone
 
     // the range being recorded
     private int cursor = -1;
     private int rangeEnd;
     private int needed;
     private int clip;
-    private float scale = 1; // the range's transform: x' = scale * x + offsetX
+    private int transform;
+    private float scale = 1; // a transform baked while recording: x' = scale * x + offsetX
     private float offsetX;
     private float offsetY;
     private final int[] scratch = new int[WORDS];
@@ -56,24 +79,32 @@ public final class DrawList {
     public DrawList() {
         words = new int[256 * WORDS];
         clips = new float[16 * CLIP_FLOATS];
+        transforms = new float[16 * TRANSFORM_FLOATS];
         reset();
     }
 
-    /** Forgets every range and clip: the list is recorded again from the start, all of it dirty. */
+    /** Forgets every range, clip and transform: the list is recorded again from the start, all of it dirty. */
     public void reset() {
         size = 0;
         clipCount = 1;
+        Arrays.fill(clips, 0, CLIP_FLOATS, 0);
         clips[0] = -Float.MAX_VALUE;
         clips[1] = -Float.MAX_VALUE;
         clips[2] = Float.MAX_VALUE;
         clips[3] = Float.MAX_VALUE;
-        clips[4] = 0;
-        clips[5] = 0;
-        clips[6] = 0;
         clipsDirty = true;
-        dirtyFrom = 0;
-        dirtyTo = 0;
+        dirty.clear();
+        transformCount = 1;
+        identity(0);
+        transformsDirty.clear();
+        transformsDirty.add(0, 1);
         version++;
+        generation++;
+    }
+
+    /** Grows with every {@link #reset}: transform entries and clips handed out before it are gone. */
+    public long generation() {
+        return generation;
     }
 
     /** A new range of {@code capacity} primitives at the end of the list, all empty: its first primitive's index. */
@@ -86,7 +117,7 @@ public final class DrawList {
         return start;
     }
 
-    /** Starts recording the range at {@code start} of {@code capacity} primitives, unclipped. */
+    /** Starts recording the range at {@code start} of {@code capacity} primitives, unclipped and untransformed. */
     public void begin(int start, int capacity) {
         if (start < 0 || start + capacity > size) {
             throw new IllegalArgumentException("not a range of this list");
@@ -95,6 +126,7 @@ public final class DrawList {
         rangeEnd = start + capacity;
         needed = 0;
         clip = NO_CLIP;
+        transform = NO_TRANSFORM;
         scale = 1;
         offsetX = 0;
         offsetY = 0;
@@ -127,12 +159,19 @@ public final class DrawList {
         this.clip = index;
     }
 
+    /** The transform table entry the next primitives of the range name ({@link #NO_TRANSFORM} after {@link #begin}). */
+    public void useTransform(int index) {
+        if (index < 0 || index >= transformCount) {
+            throw new IllegalArgumentException("no transform " + index);
+        }
+        this.transform = index;
+    }
+
     /**
-     * Transforms the next primitives of the range (until {@link #begin} starts another): every point maps to
-     * {@code scale * p + (offsetX, offsetY)}, and radii, border, line and outline widths, shadow blur, glyph pixel
-     * ranges and nine-slice insets scale with it. An element's {@code scale} style and animated offsets draw this way
-     * (a per-element transform kept in the primitives themselves, so the renderer needs nothing new); clip rectangles
-     * are not transformed.
+     * Bakes a transform into the next primitives of the range as they are recorded (until {@link #begin} starts
+     * another): every point maps to {@code scale * p + (offsetX, offsetY)}, and radii, border, line and outline widths,
+     * shadow blur, glyph pixel ranges and nine-slice insets scale with it. The UI records into its clip's content space
+     * this way (an offset); what animates belongs in the transform table ({@link #useTransform}), not here.
      */
     public void transform(float scale, float offsetX, float offsetY) {
         this.scale = scale;
@@ -140,7 +179,86 @@ public final class DrawList {
         this.offsetY = offsetY;
     }
 
-    /** A new clip rectangle with rounded corners: its index. */
+    // ---------------------------------------------------------------- the transform table
+
+    /** A new transform table entry, the identity: its index. */
+    public int addTransform() {
+        if ((transformCount + 1) * TRANSFORM_FLOATS > transforms.length) {
+            transforms = grow(transforms, transforms.length * 2);
+        }
+        int index = transformCount++;
+        identity(index);
+        transformsDirty.add(index, index + 1);
+        version++;
+        return index;
+    }
+
+    private void identity(int index) {
+        int o = index * TRANSFORM_FLOATS;
+        Arrays.fill(transforms, o, o + TRANSFORM_FLOATS, 0);
+        transforms[o] = 1;
+        transforms[o + 3] = 1;
+    }
+
+    /**
+     * Sets transform entry {@code index}: its primitives draw at {@code scale * p + (x, y)} (their clip's offset added
+     * to {@code p} first), their sizes times {@code scale}, their colours' alpha times {@code opacity}. Marks the entry
+     * dirty only when it changed.
+     */
+    public void setTransform(int index, float scale, float x, float y, float opacity) {
+        if (index <= NO_TRANSFORM || index >= transformCount) {
+            throw new IllegalArgumentException("no transform " + index);
+        }
+        int o = index * TRANSFORM_FLOATS;
+        if (transforms[o] != scale || transforms[o + 1] != x || transforms[o + 2] != y
+            || transforms[o + 3] != opacity) {
+            transforms[o] = scale;
+            transforms[o + 1] = x;
+            transforms[o + 2] = y;
+            transforms[o + 3] = opacity;
+            transformsDirty.add(index, index + 1);
+            version++;
+        }
+    }
+
+    /** The scale of transform entry {@code index}. */
+    public float transformScale(int index) {
+        return transforms[index * TRANSFORM_FLOATS];
+    }
+
+    /** The x offset of transform entry {@code index}. */
+    public float transformX(int index) {
+        return transforms[index * TRANSFORM_FLOATS + 1];
+    }
+
+    /** The y offset of transform entry {@code index}. */
+    public float transformY(int index) {
+        return transforms[index * TRANSFORM_FLOATS + 2];
+    }
+
+    /** The opacity of transform entry {@code index}. */
+    public float transformOpacity(int index) {
+        return transforms[index * TRANSFORM_FLOATS + 3];
+    }
+
+    /** The packed transform table: {@link #transformCount()} entries of {@link #TRANSFORM_FLOATS} floats. */
+    public float[] transforms() {
+        return transforms;
+    }
+
+    /** Transform entries, the identity included. */
+    public int transformCount() {
+        return transformCount;
+    }
+
+    /** The transform entries changed since {@link #clean()}, as ranges of entries: what a renderer uploads. */
+    public DirtyRanges transformRanges() {
+        return transformsDirty;
+    }
+
+    // ---------------------------------------------------------------- clips
+
+    /** A new clip rectangle with rounded corners, drawn by the identity transform: its index. */
     public int addClip(float x0, float y0, float x1, float y1, float radius) {
         if ((clipCount + 1) * CLIP_FLOATS > clips.length) {
             clips = grow(clips, clips.length * 2);
@@ -149,6 +267,7 @@ public final class DrawList {
         int o = index * CLIP_FLOATS;
         clips[o + 5] = 0;
         clips[o + 6] = 0;
+        clips[o + 7] = NO_TRANSFORM;
         clips[o] = Float.NaN; // compared unequal: set below
         setClip(index, x0, y0, x1, y1, radius);
         return index;
@@ -171,6 +290,44 @@ public final class DrawList {
         }
     }
 
+    /**
+     * Makes clip {@code index}'s rectangle and radius drawn by transform entry {@code transform} (its owner's: the clip
+     * cuts where its owner draws). Marks the clip table dirty only when it changed.
+     */
+    public void setClipTransform(int index, int transform) {
+        if (index <= NO_CLIP || index >= clipCount) {
+            throw new IllegalArgumentException("no clip " + index);
+        }
+        if (transform < 0 || transform >= transformCount) {
+            throw new IllegalArgumentException("no transform " + transform);
+        }
+        int o = index * CLIP_FLOATS;
+        if (clips[o + 7] != transform) {
+            clips[o + 7] = transform;
+            clipsDirty = true;
+            version++;
+        }
+    }
+
+    /** The transform entry clip {@code index}'s rectangle is drawn by. */
+    public int clipTransform(int index) {
+        return (int) clips[index * CLIP_FLOATS + 7];
+    }
+
+    /** Where clip {@code index} cuts, its transform applied, into {@code out}: x0, y0, x1, y1, radius. */
+    public void drawnClip(int index, float[] out) {
+        int o = index * CLIP_FLOATS;
+        int t = clipTransform(index);
+        float s = transformScale(t);
+        float tx = transformX(t);
+        float ty = transformY(t);
+        out[0] = clips[o] * s + tx;
+        out[1] = clips[o + 1] * s + ty;
+        out[2] = clips[o + 2] * s + tx;
+        out[3] = clips[o + 3] * s + ty;
+        out[4] = clips[o + 4] * s;
+    }
+
     /** The horizontal offset of clip {@code index}'s primitives ({@link #setClipOffset}). */
     public float clipOffsetX(int index) {
         return clips[index * CLIP_FLOATS + 5];
@@ -181,17 +338,7 @@ public final class DrawList {
         return clips[index * CLIP_FLOATS + 6];
     }
 
-    /** Where primitive {@code index}'s word {@code word} (an x coordinate) draws: plus its clip's offset. */
-    public float drawnX(int index, int word) {
-        return floatAt(index, word) + clipOffsetX(Primitive.clip(header(index)));
-    }
-
-    /** Where primitive {@code index}'s word {@code word} (a y coordinate) draws: plus its clip's offset. */
-    public float drawnY(int index, int word) {
-        return floatAt(index, word) + clipOffsetY(Primitive.clip(header(index)));
-    }
-
-    /** Moves clip {@code index}. */
+    /** Moves clip {@code index} (in the space of its transform). */
     public void setClip(int index, float x0, float y0, float x1, float y1, float radius) {
         if (index <= NO_CLIP || index >= clipCount) {
             throw new IllegalArgumentException("no clip " + index);
@@ -207,6 +354,37 @@ public final class DrawList {
             version++;
         }
     }
+
+    // ---------------------------------------------------------------- where primitives draw
+
+    /** Where primitive {@code index}'s word {@code word} (an x coordinate) draws: its clip's offset, then transform. */
+    public float drawnX(int index, int word) {
+        int t = transformOf(index);
+        return (floatAt(index, word) + clipOffsetX(Primitive.clip(header(index)))) * transformScale(t) + transformX(t);
+    }
+
+    /** Where primitive {@code index}'s word {@code word} (a y coordinate) draws: its clip's offset, then transform. */
+    public float drawnY(int index, int word) {
+        int t = transformOf(index);
+        return (floatAt(index, word) + clipOffsetY(Primitive.clip(header(index)))) * transformScale(t) + transformY(t);
+    }
+
+    /** The scale primitive {@code index}'s sizes draw at: its transform's. */
+    public float drawnScale(int index) {
+        return transformScale(transformOf(index));
+    }
+
+    /** The opacity primitive {@code index}'s colours draw at: its transform's. */
+    public float drawnOpacity(int index) {
+        return transformOpacity(transformOf(index));
+    }
+
+    /** The transform table entry primitive {@code index} names. */
+    public int transformOf(int index) {
+        return words[index * WORDS + Primitive.TRANSFORM];
+    }
+
+    // ---------------------------------------------------------------- primitives
 
     /** A rounded box: {@code fill}, radii from the top left clockwise, a border of {@code borderWidth} pixels. */
     public void box(float x0, float y0, float x1, float y1, long fill, float topLeft, float topRight, float bottomRight,
@@ -347,12 +525,13 @@ public final class DrawList {
         p[Primitive.COLOR_A + 1] = (int) (a >>> 32);
         p[Primitive.COLOR_B] = (int) b;
         p[Primitive.COLOR_B + 1] = (int) (b >>> 32);
+        p[Primitive.TRANSFORM] = transform;
         return p;
     }
 
     private void emit(int[] p) {
         if (scale != 1) {
-            scaleSizes(p);
+            scaleSizes(p, scale);
         }
         needed++;
         if (cursor < rangeEnd) {
@@ -361,36 +540,36 @@ public final class DrawList {
         cursor++;
     }
 
-    /** Scales the sizes of primitive {@code p} (not its corners: {@link #start} moved those) by the transform. */
-    private void scaleSizes(int[] p) {
+    /** Scales the sizes of primitive {@code p} (not its corners) by {@code scale}. */
+    private static void scaleSizes(int[] p, float scale) {
         int kind = Primitive.kind(p[Primitive.HEADER]);
         switch (kind) {
             case Primitive.BOX, Primitive.SHADOW -> {
-                p[Primitive.RADII] = scaleHalves(p[Primitive.RADII]);
-                p[Primitive.RADII + 1] = scaleHalves(p[Primitive.RADII + 1]);
-                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+                p[Primitive.RADII] = scaleHalves(p[Primitive.RADII], scale);
+                p[Primitive.RADII + 1] = scaleHalves(p[Primitive.RADII + 1], scale);
+                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH], scale);
             }
             case Primitive.GLYPH -> {
-                p[Primitive.PIXEL_RANGE] = scaleFloat(p[Primitive.PIXEL_RANGE]);
-                p[Primitive.OUTLINE] = scaleFloat(p[Primitive.OUTLINE]);
-                p[Primitive.WEIGHT] = scaleFloat(p[Primitive.WEIGHT]);
+                p[Primitive.PIXEL_RANGE] = scaleFloat(p[Primitive.PIXEL_RANGE], scale);
+                p[Primitive.OUTLINE] = scaleFloat(p[Primitive.OUTLINE], scale);
+                p[Primitive.WEIGHT] = scaleFloat(p[Primitive.WEIGHT], scale);
             }
             case Primitive.NINE_SLICE -> {
-                p[Primitive.INSETS] = scaleHalves(p[Primitive.INSETS]);
-                p[Primitive.INSETS + 1] = scaleHalves(p[Primitive.INSETS + 1]);
+                p[Primitive.INSETS] = scaleHalves(p[Primitive.INSETS], scale);
+                p[Primitive.INSETS + 1] = scaleHalves(p[Primitive.INSETS + 1], scale);
             }
-            case Primitive.LINE -> p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH]);
+            case Primitive.LINE -> p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH], scale);
             default -> {
                 // images: the quad alone
             }
         }
     }
 
-    private int scaleFloat(int bits) {
+    private static int scaleFloat(int bits, float scale) {
         return Float.floatToRawIntBits(Float.intBitsToFloat(bits) * scale);
     }
 
-    private int scaleHalves(int word) {
+    private static int scaleHalves(int word, float scale) {
         return Primitive.halves(Float.float16ToFloat((short) word) * scale,
             Float.float16ToFloat((short) (word >>> 16)) * scale);
     }
@@ -411,13 +590,7 @@ public final class DrawList {
     }
 
     private void markDirty(int from, int to) {
-        if (dirtyFrom == dirtyTo) {
-            dirtyFrom = from;
-            dirtyTo = to;
-        } else {
-            dirtyFrom = Math.min(dirtyFrom, from);
-            dirtyTo = Math.max(dirtyTo, to);
-        }
+        dirty.add(from, to);
     }
 
     private void ensure(int primitives) {
@@ -456,14 +629,22 @@ public final class DrawList {
         return clipCount;
     }
 
-    /** The first primitive changed since {@link #clean()}. */
+    /** The first primitive changed since {@link #clean()}: the start of the first {@linkplain #dirtyRanges range}. */
     public int dirtyFrom() {
-        return dirtyFrom;
+        return dirty.first();
     }
 
-    /** The primitive after the last changed since {@link #clean()}; equal to {@link #dirtyFrom()} if none changed. */
+    /**
+     * The primitive after the last changed since {@link #clean()} (the end of the last {@linkplain #dirtyRanges range});
+     * equal to {@link #dirtyFrom()} if none changed.
+     */
     public int dirtyTo() {
-        return dirtyTo;
+        return dirty.end();
+    }
+
+    /** The primitives changed since {@link #clean()}, as a few sorted ranges: what a renderer uploads. */
+    public DirtyRanges dirtyRanges() {
+        return dirty;
     }
 
     /** Whether the clip table changed since {@link #clean()}. */
@@ -471,10 +652,10 @@ public final class DrawList {
         return clipsDirty;
     }
 
-    /** Marks everything uploaded: the renderer calls it after copying the dirty words and clips. */
+    /** Marks everything uploaded: the renderer calls it after copying the dirty primitives, clips and transforms. */
     public void clean() {
-        dirtyFrom = 0;
-        dirtyTo = 0;
+        dirty.clear();
+        transformsDirty.clear();
         clipsDirty = false;
     }
 
@@ -501,5 +682,64 @@ public final class DrawList {
     /** Colour words {@code word, word + 1} of primitive {@code index}. */
     public long colorAt(int index, int word) {
         return words[index * WORDS + word] & 0xFFFFFFFFL | (long) words[index * WORDS + word + 1] << 32;
+    }
+
+    /**
+     * A copy of this list as it draws, for CPU previews, layout checks and goldens (not for frames): every primitive's
+     * clip offset and transform applied to its coordinates, sizes and colours (its transform then the identity, its
+     * clip's offset 0), every clip's transform applied to its rectangle and radius. Read it with the plain accessors.
+     */
+    @AllowAllocation("previews, checks and goldens")
+    public DrawList baked() {
+        DrawList b = new DrawList();
+        b.words = Arrays.copyOf(words, words.length);
+        b.size = size;
+        b.clips = Arrays.copyOf(clips, clips.length);
+        b.clipCount = clipCount;
+        int[] p = new int[WORDS];
+        for (int i = 0; i < size; i++) {
+            int kind = Primitive.kind(header(i));
+            if (kind == Primitive.EMPTY) {
+                continue;
+            }
+            System.arraycopy(words, i * WORDS, p, 0, WORDS);
+            p[Primitive.X0] = Float.floatToRawIntBits(drawnX(i, Primitive.X0));
+            p[Primitive.Y0] = Float.floatToRawIntBits(drawnY(i, Primitive.Y0));
+            p[Primitive.X1] = Float.floatToRawIntBits(drawnX(i, Primitive.X1));
+            p[Primitive.Y1] = Float.floatToRawIntBits(drawnY(i, Primitive.Y1));
+            float s = drawnScale(i);
+            if (s != 1) {
+                scaleSizes(p, s);
+            }
+            float opacity = drawnOpacity(i);
+            if (opacity != 1) {
+                fade(p, Primitive.COLOR_A, opacity);
+                fade(p, Primitive.COLOR_B, opacity);
+                if (kind == Primitive.BOX) {
+                    fade(p, Primitive.BORDER_COLOR, opacity);
+                }
+            }
+            p[Primitive.TRANSFORM] = NO_TRANSFORM;
+            System.arraycopy(p, 0, b.words, i * WORDS, WORDS);
+        }
+        float[] r = new float[5];
+        for (int c = 1; c < clipCount; c++) {
+            drawnClip(c, r);
+            int o = c * CLIP_FLOATS;
+            System.arraycopy(r, 0, b.clips, o, 5);
+            b.clips[o + 5] = 0;
+            b.clips[o + 6] = 0;
+            b.clips[o + 7] = NO_TRANSFORM;
+        }
+        return b;
+    }
+
+    private static void fade(int[] p, int word, float opacity) {
+        long c = p[word] & 0xFFFFFFFFL | (long) p[word + 1] << 32;
+        if (c != 0) {
+            long f = Rgba.fade(c, opacity);
+            p[word] = (int) f;
+            p[word + 1] = (int) (f >>> 32);
+        }
     }
 }

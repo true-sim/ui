@@ -11,7 +11,7 @@ package com.truesim.ui.core.draw;
  *  1-4  x0, y0, x1, y1: the rectangle in pixels, y down (a line's two end points)
  *  5-6  colour A (linear, straight alpha, four half floats, {@link Rgba}): fill, glyph or tint colour
  *  7-8  colour B: a gradient's end colour, a glyph's outline colour
- *  15   reserved (0): a transform and opacity index, later
+ *  15   transform: the index of its entry in the list's transform table (0: none), which scales, moves and fades it
  *
  * word  BOX                     SHADOW                 GLYPH                      IMAGE, NINE_SLICE         LINE
  *  9-10 radii (4 half floats:   radii                  uv (4 x unorm16:           uv (4 x unorm16)          -
@@ -79,7 +79,7 @@ public final class Primitive {
     public static final int GRADIENT_ANGLE = 14;
     public static final int WEIGHT = 14;
     public static final int SOURCE_INSETS = 14;
-    public static final int RESERVED = 15;
+    public static final int TRANSFORM = 15;
 
     private Primitive() {
     }
