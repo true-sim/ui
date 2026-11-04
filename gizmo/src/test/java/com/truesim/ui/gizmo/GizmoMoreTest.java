@@ -6,6 +6,8 @@ import static org.assertj.core.data.Offset.offset;
 import com.truesim.common.math.Quat;
 import com.truesim.common.math.Vec3;
 import com.truesim.scene.core.Mobility;
+import com.truesim.ui.core.draw.DrawList;
+import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.scene.SceneRig;
@@ -13,6 +15,88 @@ import org.junit.jupiter.api.Test;
 
 /** Gizmos' less travelled paths: typed numbers, every space, every view cube target, hands letting go. */
 class GizmoMoreTest {
+
+    @Test
+    void depthTestedHandlesCarryTheirViewDepthsAndTheThemesOccludedOpacityAndAskNoOcclusion() {
+        SceneRig r = GizmoTest.rig(0, 0, 0);
+        long node = r.box(0, 0, 0, 0.5, Mobility.DYNAMIC);
+        int[] asked = {0};
+        Gizmo g = new Gizmo(r.picking, r.view, null).mode(GizmoMode.UNIVERSAL)
+            .occlusion((view, x, y, z) -> ++asked[0] > 0);
+        g.select(node);
+        r.frames(2);
+        assertThat(asked[0]).as("the CPU occlusion decides without a depth test").isPositive();
+        assertThat(depthTested(r, new int[Primitive.KINDS])).isZero();
+
+        g.depthTest(true);
+        asked[0] = 0;
+        r.frames(2);
+        assertThat(g.depthTest()).isTrue();
+        assertThat(asked[0]).as("the renderer decides").isZero();
+        int[] kinds = new int[Primitive.KINDS];
+        assertThat(depthTested(r, kinds)).isPositive();
+        assertThat(kinds[Primitive.LINE]).as("axes and rings").isPositive();
+        assertThat(kinds[Primitive.TRIANGLE]).as("arrow tips and planes").isPositive();
+        assertThat(kinds[Primitive.BOX]).as("scale cubes").isPositive();
+        double centre = r.view.depth(0, 0, 0);
+        double reach = g.size() * 1.5;
+        for (int l = 0; l < r.ui.layerCount(); l++) {
+            DrawList list = r.ui.layers()[l];
+            for (int i = 0; i < list.size(); i++) {
+                if ((Primitive.flags(list.header(i)) & Primitive.FLAG_DEPTH) == 0) {
+                    continue;
+                }
+                int word = list.intAt(i, Primitive.DEPTH);
+                assertThat(Primitive.occludedOpacityOf(word)).isCloseTo(0.28f, offset(0.003f)); // gizmo-occluded
+                assertThat((double) Primitive.depthOf(word)).isCloseTo(centre, offset(reach));
+                float x = list.drawnX(i, Primitive.X0);
+                float y = list.drawnY(i, Primitive.Y0);
+                assertThat((double) list.depthAt(i, x, y, false)).isCloseTo(centre, offset(reach));
+            }
+        }
+        // a line's ends are at the depths of the points it projects
+        float[] tip = GizmoTest.screen(r, g.origin(0) + g.size(), 0, 0);
+        assertThat(nearestDepth(r, tip[0], tip[1])).isCloseTo(r.view.depth(g.size(), 0, 0), offset(0.05));
+    }
+
+    private static int depthTested(SceneRig r, int[] kinds) {
+        int n = 0;
+        for (int l = 0; l < r.ui.layerCount(); l++) {
+            DrawList list = r.ui.layers()[l];
+            for (int i = 0; i < list.size(); i++) {
+                if ((Primitive.flags(list.header(i)) & Primitive.FLAG_DEPTH) != 0) {
+                    kinds[Primitive.kind(list.header(i))]++;
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    /** The depth of the depth tested line nearest to UI point {@code x, y}, there. */
+    private static double nearestDepth(SceneRig r, float x, float y) {
+        double best = Double.POSITIVE_INFINITY;
+        double depth = Double.NaN;
+        for (int l = 0; l < r.ui.layerCount(); l++) {
+            DrawList list = r.ui.layers()[l];
+            for (int i = 0; i < list.size(); i++) {
+                int h = list.header(i);
+                if (Primitive.kind(h) != Primitive.LINE || (Primitive.flags(h) & Primitive.FLAG_DEPTH) == 0) {
+                    continue;
+                }
+                for (int end = 0; end < 2; end++) {
+                    float ex = list.drawnX(i, end == 0 ? Primitive.X0 : Primitive.X1);
+                    float ey = list.drawnY(i, end == 0 ? Primitive.Y0 : Primitive.Y1);
+                    double d = Math.hypot(ex - x, ey - y);
+                    if (d < best) {
+                        best = d;
+                        depth = list.depthAt(i, ex, ey, false);
+                    }
+                }
+            }
+        }
+        return depth;
+    }
 
     @Test
     void typedNumbersAreParsedAsTheyAreTyped() {

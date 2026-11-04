@@ -29,6 +29,24 @@ package com.truesim.ui.core.draw;
  * ({@link #XA} to {@link #YC}), in the same space as the box (transformed alike, moved by its clip's offset alike).
  * Its flags say which edges are anti-aliased ({@link #EDGE_AB}, {@link #EDGE_BC}, {@link #EDGE_CA}): a polygon's
  * outline, not the edges triangles of one shape share (those are hard, so no seam shows between them).
+ *
+ * <p><b>Depth tested</b> ({@link #FLAG_DEPTH}; a solid {@link #BOX}, a {@link #LINE} or a {@link #TRIANGLE} of a 3D
+ * handle, a gizmo's): the primitive is a projection of something in the scene the UI is drawn over, and the renderer
+ * fades it where the scene's depth of the frame being drawn is in front of it, per pixel, multiplying its colour by its
+ * occluded opacity there. Words 7-8 (colour B, which none of these kinds use) then hold its view depth (distance along
+ * the view's forward axis, scene units) at its corners:
+ *
+ * <pre>
+ * word  BOX                      LINE                       TRIANGLE
+ *  7    depth (float, its low 8 mantissa bits the occluded opacity as unorm8; {@link #depthWord}): one for the box,
+ *       at the line's first end, at the triangle's corner a
+ *  8    0                        depth at the second end    halves: depth at b over depth at a minus 1, the same for c
+ *                                (float)                    ({@link #halves})
+ * </pre>
+ *
+ * Between corners the renderer interpolates the reciprocal of the depth under a perspective view and the depth itself
+ * under an orthographic one (what is linear on the screen). Transforms and clip offsets move and scale such a
+ * primitive like any other but leave its depth as it is.
  */
 public final class Primitive {
 
@@ -67,6 +85,11 @@ public final class Primitive {
      * own colours. Pixel range, outline and weight are 0.
      */
     public static final int FLAG_COLOR = 4;
+    /**
+     * Flag: the primitive is depth tested against the scene drawn under the UI (a solid box, a line or a triangle; its
+     * depth in words {@link #DEPTH} and {@link #DEPTH_B}): where the scene is nearer, it draws at its occluded opacity.
+     */
+    public static final int FLAG_DEPTH = 128;
 
     /** Flag of a {@link #TRIANGLE}: its edge from a to b is anti-aliased. */
     public static final int EDGE_AB = 1;
@@ -102,6 +125,10 @@ public final class Primitive {
     public static final int YB = 12;
     public static final int XC = 13;
     public static final int YC = 14;
+    /** A depth tested primitive's depth at its first corner, with its occluded opacity ({@link #FLAG_DEPTH}). */
+    public static final int DEPTH = 7;
+    /** A depth tested line's depth at its second end, or a triangle's depths at b and c relative to a's. */
+    public static final int DEPTH_B = 8;
 
     private Primitive() {
     }
@@ -134,6 +161,25 @@ public final class Primitive {
     private static int unorm16(float v) {
         float c = v < 0 ? 0 : (v > 1 ? 1 : v);
         return (int) (c * 65535f + 0.5f);
+    }
+
+    /**
+     * A depth tested primitive's word {@link #DEPTH}: {@code depth} (positive) as a float whose lowest 8 mantissa bits
+     * hold {@code occludedOpacity} (0 to 1) as unorm8 instead; the depth keeps 15 bits of mantissa (3e-5 relative).
+     */
+    public static int depthWord(float depth, float occludedOpacity) {
+        float o = occludedOpacity < 0 ? 0 : (occludedOpacity > 1 ? 1 : occludedOpacity);
+        return Float.floatToRawIntBits(depth) & ~0xFF | (int) (o * 255f + 0.5f);
+    }
+
+    /** The depth of a word {@link #DEPTH}. */
+    public static float depthOf(int word) {
+        return Float.intBitsToFloat(word & ~0xFF);
+    }
+
+    /** The occluded opacity of a word {@link #DEPTH}. */
+    public static float occludedOpacityOf(int word) {
+        return (word & 0xFF) / 255f;
     }
 
     /** Two floats as halves, the first in the low bits. */

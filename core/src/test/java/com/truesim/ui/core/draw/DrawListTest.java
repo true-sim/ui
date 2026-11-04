@@ -224,6 +224,66 @@ class DrawListTest {
     }
 
     @Test
+    void depthTestedPrimitivesCarryTheirDepthsAndOccludedOpacityInWordsSevenAndEight() {
+        DrawList list = new DrawList();
+        int t = list.addTransform();
+        list.setTransform(t, 2, 5, 0, 0.5f);
+        int start = list.allocate(3);
+        list.begin(start, 3);
+        list.useTransform(t);
+        list.depthBox(0, 0, 10, 10, 4, Rgba.WHITE, 5, 5, 5, 5, 0, 0, 0.3f);
+        list.depthLine(0, 0, 2, 100, 0, 6, 3, Rgba.WHITE, 0.3f);
+        list.depthTriangle(0, 0, 4, 100, 0, 5, 0, 100, 3, Rgba.WHITE, Primitive.EDGE_AB, 0.3f);
+        assertThat(list.end()).isTrue();
+
+        for (int i = start; i < start + 3; i++) {
+            assertThat(Primitive.flags(list.header(i)) & Primitive.FLAG_DEPTH).isNotZero();
+            assertThat(Primitive.occludedOpacityOf(list.intAt(i, Primitive.DEPTH))).isCloseTo(0.3f,
+                Offset.offset(0.002f));
+        }
+        assertThat(Primitive.flags(list.header(start + 2)) & 7).isEqualTo(Primitive.EDGE_AB);
+        assertThat(Primitive.depthOf(list.intAt(start, Primitive.DEPTH))).isCloseTo(4, Offset.offset(1e-3f));
+        assertThat(list.intAt(start, Primitive.DEPTH_B)).isZero();
+        assertThat(list.floatAt(start + 1, Primitive.DEPTH_B)).isEqualTo(6);
+        // where they draw (transform: scale 2, x + 5) the depths are where they were recorded
+        assertThat(list.depthAt(start, 15, 10, false)).isCloseTo(4, Offset.offset(1e-3f));
+        // a line: the reciprocals interpolated under perspective, the depths under an orthographic view
+        assertThat(list.depthAt(start + 1, 105, 0, false)).isCloseTo(1 / (0.5f / 2 + 0.5f / 6), Offset.offset(1e-3f));
+        assertThat(list.depthAt(start + 1, 105, 0, true)).isCloseTo(4, Offset.offset(1e-3f));
+        assertThat(list.depthAt(start + 1, -50, 0, true)).as("clamped to the segment").isCloseTo(2,
+            Offset.offset(1e-3f));
+        // a triangle: its corners' depths by barycentric weights
+        assertThat(list.depthAt(start + 2, 5, 0, true)).isCloseTo(4, Offset.offset(1e-3f));
+        assertThat(list.depthAt(start + 2, 205, 0, true)).isCloseTo(5, Offset.offset(1e-2f));
+        assertThat(list.depthAt(start + 2, 5, 200, true)).isCloseTo(3, Offset.offset(1e-2f));
+        assertThat(list.depthAt(start + 2, 105, 100, true)).isCloseTo(4, Offset.offset(1e-2f));
+        assertThat(list.depthAt(start + 2, 105, 0, false)).isCloseTo(1 / (0.5f / 4 + 0.5f / 5),
+            Offset.offset(1e-2f));
+
+        // baked: faded and scaled as it draws, its depth words left as they are (not faded as a colour)
+        DrawList baked = list.baked();
+        for (int i = start; i < start + 3; i++) {
+            assertThat(baked.intAt(i, Primitive.DEPTH)).isEqualTo(list.intAt(i, Primitive.DEPTH));
+            assertThat(baked.intAt(i, Primitive.DEPTH_B)).isEqualTo(list.intAt(i, Primitive.DEPTH_B));
+        }
+        assertThat(Rgba.a(baked.colorAt(start, Primitive.COLOR_A))).isEqualTo(0.5f);
+        assertThat(baked.floatAt(start + 1, Primitive.WIDTH)).isEqualTo(6);
+        assertThat(list.depthAt(start, 0, 0, false)).isEqualTo(baked.depthAt(start, 0, 0, false));
+    }
+
+    @Test
+    void depthIsNotForPrimitivesWithoutIt() {
+        DrawList list = new DrawList();
+        int start = list.allocate(1);
+        list.begin(start, 1);
+        list.line(0, 0, 10, 0, 1, Rgba.WHITE);
+        list.end();
+        assertThat(list.depthAt(start, 0, 0, false)).isNaN();
+        assertThat(Primitive.depthWord(1, -1) & 0xFF).isZero();
+        assertThat(Primitive.depthWord(1, 2) & 0xFF).isEqualTo(255);
+    }
+
+    @Test
     void recordingAllocatesNothing() {
         DrawList list = new DrawList();
         int a = list.allocate(4);
@@ -232,6 +292,8 @@ class DrawListTest {
             list.begin(a, 4);
             list.box(0, 0, i[0]++ & 63, 10, Rgba.WHITE, 2, 2, 2, 2, 1, Rgba.BLACK);
             list.glyph(0, 0, 8, 8, 0, 0, 1, 1, 1, 2, Rgba.WHITE, 0, 0, 0);
+            list.depthLine(0, 0, 2, 10, 0, 3, 2, Rgba.WHITE, 0.3f);
+            list.depthTriangle(0, 0, 2, 10, 0, 3, 0, 10, 4, Rgba.WHITE, Primitive.EDGE_AB, 0.3f);
             list.end();
             list.clean();
         });

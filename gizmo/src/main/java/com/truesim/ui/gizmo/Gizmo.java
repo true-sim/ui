@@ -49,8 +49,12 @@ import java.util.List;
  * scaling and turning.
  *
  * <p><b>Drawing.</b> Projected 2D primitives on the {@code overlay} layer, a screen-constant size (the theme's
- * {@code gizmo-size} height in pixels), on top of the scene with the parts the scene hides faded (UI26: a
- * {@link GizmoOcclusion} says what is hidden, the theme's {@code gizmo-occluded} opacity how faded). Every colour,
+ * {@code gizmo-size} height in pixels), on top of the scene with the parts the scene hides faded (UI26), the theme's
+ * {@code gizmo-occluded} opacity how faded. What is hidden is decided per pixel by the renderer in the same frame when
+ * the gizmo is {@linkplain #depthTest depth tested} (its handles recorded with their view depth,
+ * {@link com.truesim.ui.core.draw.Primitive#FLAG_DEPTH}, compared with the scene's depth of the frame drawn: exact, no
+ * delay; the engine's renderer does it for its main view), or per part on the CPU by a {@link GizmoOcclusion}
+ * (by the scene's boxes, {@link RayOcclusion}: for views whose depth the renderer does not have). Every colour,
  * width, size and the looks of hovered and grabbed handles come from style parts of the {@code gizmo} element:
  * {@code gizmo-axis#x #y #z}, {@code gizmo-plane#xy #yz #zx}, {@code gizmo-ring#x #y #z #view},
  * {@code gizmo-trackball}, {@code gizmo-center}, {@code gizmo-tip}, {@code gizmo-bounds}, {@code gizmo-bounds-handle}
@@ -116,6 +120,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     private final double[] cursor = new double[3];
     private GizmoListener listener;
     private GizmoOcclusion occlusion;
+    private boolean depthTest;
     private boolean visible = true;
     private final double[] head = new double[3];
     private boolean hasHead;
@@ -150,6 +155,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     private final double[] n = new double[3];
     private final float[] sa = new float[3];
     private final float[] quad = new float[8]; // a projected square handle's corners
+    private final float[] quadDepth = new float[4]; // their view depths
     private final float[] sb = new float[3];
     private long signature;
     private final UiListener events = this::handle;
@@ -269,6 +275,28 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         occlusion = value;
         ui.repaint(element);
         return this;
+    }
+
+    /** What says which parts the scene hides, or null. */
+    public GizmoOcclusion occlusion() {
+        return occlusion;
+    }
+
+    /**
+     * Whether its handles are depth tested by the renderer (default false): recorded with their view depth
+     * ({@link com.truesim.ui.core.draw.Primitive#FLAG_DEPTH}), faded per pixel where the scene drawn under the UI in the
+     * same frame is nearer; its {@link #occlusion} is then not asked. For a gizmo of the view whose depth the renderer
+     * draws the UI over (the engine's main view). Returns this.
+     */
+    public Gizmo depthTest(boolean value) {
+        depthTest = value;
+        ui.repaint(element);
+        return this;
+    }
+
+    /** Whether its handles are depth tested by the renderer. */
+    public boolean depthTest() {
+        return depthTest;
     }
 
     /** Sets the view it draws through and sizes itself for; returns this. */
@@ -1023,10 +1051,15 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
                     if (l > 0.5f) {
                         float nx = -dy / l * tip / 2;
                         float ny = dx / l * tip / 2;
-                        boolean hidden = occlusion != null && occlusion.occluded(view, (p[0] + q[0]) / 2,
-                            (p[1] + q[1]) / 2, (p[2] + q[2]) / 2);
-                        triangle(list, sb[0], sb[1], sa[0] + nx, sa[1] + ny, sa[0] - nx, sa[1] - ny,
-                            color(part, hidden ? opacity * fade : opacity));
+                        if (depthTest) {
+                            list.depthTriangle(sb[0], sb[1], sb[2], sa[0] + nx, sa[1] + ny, sa[2], sa[0] - nx,
+                                sa[1] - ny, sa[2], color(part, opacity),
+                                Primitive.EDGE_AB | Primitive.EDGE_BC | Primitive.EDGE_CA, fade);
+                        } else {
+                            boolean hidden = occluded((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2);
+                            triangle(list, sb[0], sb[1], sa[0] + nx, sa[1] + ny, sa[0] - nx, sa[1] - ny,
+                                color(part, hidden ? opacity * fade : opacity));
+                        }
                     }
                 }
             }
@@ -1061,8 +1094,12 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             // the back half of an axis ring is behind the gizmo's ball: drawn as hidden
             boolean back = ring != GizmoHandle.ROTATE_VIEW && view.depth(mx, my, mz) > depth + 1e-9 * depth;
             if (view.project(p[0], p[1], p[2], sa) && view.project(q[0], q[1], q[2], sb)) {
-                boolean hidden = back || occlusion != null && occlusion.occluded(view, mx, my, mz);
-                list.line(sa[0], sa[1], sb[0], sb[1], w, color(part, hidden ? opacity * fade : opacity));
+                if (depthTest && !back) {
+                    list.depthLine(sa[0], sa[1], sa[2], sb[0], sb[1], sb[2], w, color(part, opacity), fade);
+                } else {
+                    boolean hidden = back || !depthTest && occluded(mx, my, mz);
+                    list.line(sa[0], sa[1], sb[0], sb[1], w, color(part, hidden ? opacity * fade : opacity));
+                }
             }
             p[0] = q[0];
             p[1] = q[1];
@@ -1083,7 +1120,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         double cx = shapes.origin[0] + (au[0] + av[0]) * mid * s;
         double cy = shapes.origin[1] + (au[1] + av[1]) * mid * s;
         double cz = shapes.origin[2] + (au[2] + av[2]) * mid * s;
-        boolean hidden = occlusion != null && occlusion.occluded(view, cx, cy, cz);
+        boolean hidden = !depthTest && occluded(cx, cy, cz);
         long fill = color(part, hidden ? opacity * fade : opacity);
         // the square's corners (lo, lo), (hi, lo), (hi, hi), (lo, hi) in u, v: two triangles
         for (int k = 0; k < 4; k++) {
@@ -1097,8 +1134,18 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             }
             quad[2 * k] = sa[0];
             quad[2 * k + 1] = sa[1];
+            quadDepth[k] = sa[2];
         }
-        quad(list, quad, fill);
+        if (depthTest) {
+            float[] xy = quad;
+            float[] z = quadDepth;
+            list.depthTriangle(xy[0], xy[1], z[0], xy[2], xy[3], z[1], xy[4], xy[5], z[2], fill,
+                Primitive.EDGE_AB | Primitive.EDGE_BC, fade);
+            list.depthTriangle(xy[0], xy[1], z[0], xy[4], xy[5], z[2], xy[6], xy[7], z[3], fill,
+                Primitive.EDGE_BC | Primitive.EDGE_CA, fade);
+        } else {
+            quad(list, quad, fill);
+        }
     }
 
     /**
@@ -1149,9 +1196,17 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         if (!view.project(a[0], a[1], a[2], sa) || !view.project(bx, by, bz, sb)) {
             return;
         }
-        boolean hidden = occlusion != null && occlusion.occluded(view, (a[0] + bx) / 2, (a[1] + by) / 2,
-            (a[2] + bz) / 2);
+        if (depthTest) {
+            list.depthLine(sa[0], sa[1], sa[2], sb[0], sb[1], sb[2], width, color(part, opacity), fade);
+            return;
+        }
+        boolean hidden = occluded((a[0] + bx) / 2, (a[1] + by) / 2, (a[2] + bz) / 2);
         list.line(sa[0], sa[1], sb[0], sb[1], width, color(part, hidden ? opacity * fade : opacity));
+    }
+
+    /** Whether its {@link #occlusion} says world point {@code x, y, z} is hidden (never without one). */
+    private boolean occluded(double x, double y, double z) {
+        return occlusion != null && occlusion.occluded(view, x, y, z);
     }
 
     /** A square (or round, by its radius) handle of {@code size} pixels at {@code at}. */
@@ -1159,9 +1214,14 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         if (!view.project(at[0], at[1], at[2], sa)) {
             return;
         }
-        boolean hidden = occlusion != null && occlusion.occluded(view, at[0], at[1], at[2]);
         float h = size / 2;
         float r = Math.min(radius, h);
+        if (depthTest) {
+            list.depthBox(sa[0] - h, sa[1] - h, sa[0] + h, sa[1] + h, sa[2], color(part, opacity), r, r, r, r, 0, 0,
+                fade);
+            return;
+        }
+        boolean hidden = occluded(at[0], at[1], at[2]);
         list.box(sa[0] - h, sa[1] - h, sa[0] + h, sa[1] + h, color(part, hidden ? opacity * fade : opacity), r, r, r,
             r, 0, 0);
     }

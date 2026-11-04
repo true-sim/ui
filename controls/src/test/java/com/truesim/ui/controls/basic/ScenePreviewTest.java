@@ -2,6 +2,8 @@ package com.truesim.ui.controls.basic;
 
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.draw.Rgba;
+import com.truesim.scene.core.SpatialIndex;
+import com.truesim.ui.gizmo.Gizmo;
 import com.truesim.ui.gizmo.SceneGallery;
 import com.truesim.ui.style.tss.Tss;
 import com.truesim.ui.text.AtlasSettings;
@@ -39,6 +41,28 @@ class ScenePreviewTest {
             new CpuPreview(1280, 720, bg).draw(ui.layers(), ui.layerCount(), ui.textures())
                 .save(Path.of(dir, garish ? "scene-gallery-test-theme.png" : "scene-gallery.png"));
             g.frames(1);
+            // the same gizmos depth tested, faded per pixel by the depth of the gallery's boxes (as the engine's
+            // renderer fades them by the scene's depth)
+            for (Gizmo gizmo : g.gizmos) {
+                gizmo.depthTest(true);
+            }
+            g.frames(1);
+            new CpuPreview(1280, 720, bg).depth(boxDepth(g), false).draw(ui.layers(), ui.layerCount(), ui.textures())
+                .save(Path.of(dir, garish ? "scene-gallery-depth-test-theme.png" : "scene-gallery-depth.png"));
         }
+    }
+
+    /** The view depth of the gallery's nearest box under each UI pixel (infinite where none is). */
+    static CpuPreview.SceneDepth boxDepth(SceneGallery g) {
+        double[] ray = new double[6];
+        SpatialIndex.Hit hit = new SpatialIndex.Hit();
+        return (x, y) -> {
+            g.view.ray(x, y, ray);
+            if (!g.index.raycast(ray[0], ray[1], ray[2], ray[3], ray[4], ray[5], 1e6, -1, hit)) {
+                return Double.POSITIVE_INFINITY;
+            }
+            return hit.distance() * (ray[3] * g.view.forward(0) + ray[4] * g.view.forward(1)
+                + ray[5] * g.view.forward(2));
+        };
     }
 }

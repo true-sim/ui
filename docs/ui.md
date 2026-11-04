@@ -1191,7 +1191,9 @@ O(log n) per point, and only the new pixel columns are re-decimated.
 - **Picking**: the pointer ray against analytic shapes (capsules, tori, quads), with a screen-space tolerance in
   pixels. This is part of the same pointer pipeline, and gizmos come before scene objects.
 - **Screen-constant size**: scaled per view by distance × tan(fov/2) × setting.
-- **Depth**: drawn on top with the occluded parts faded, a style choice.
+- **Depth**: drawn on top with the occluded parts faded, a style choice. The fade is decided per pixel by the
+  renderer against the scene's depth of the frame being drawn (`Gizmo.depthTest`, `Primitive.FLAG_DEPTH`), or per
+  part on the CPU (`GizmoOcclusion`) where the renderer has no depth for the view.
 - **Math in doubles** (D37) with camera-relative drawing (`CameraRelative`), so no jitter far from the origin.
 - **Space**: local, world, parent, view. **Pivot**: median, individual origins, active, cursor, bounds centre. The
   selection is multi-node.
@@ -1749,6 +1751,41 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3, occl (2026-11-04): local branch a3-occl
+
+Gizmo occlusion exact in the same frame: the UI's primitives can carry a depth, and the renderer fades them per
+pixel against the scene depth it draws over. Engine branch `ui-rest-occl` (from `ui-rest`).
+
+| Part | Built | Where |
+|---|---|---|
+| Depth tested primitives | `Primitive.FLAG_DEPTH` (flag 128, header bit 15) on a solid `BOX`, a `LINE` or a `TRIANGLE`; words 7-8 (colour B, unused by these kinds otherwise) hold its view depth (distance along the view's forward axis): word 7 the depth at the first corner (box: its one depth; line: its first end; triangle: a) as a float whose low 8 mantissa bits are the occluded opacity as unorm8 (`Primitive.depthWord`: 15 mantissa bits left, 3e-5 relative); word 8 a line's second end's depth (float), a triangle's `halves(zb / za - 1, zc / za - 1)`, a box's 0. Recorded by `DrawList.depthBox`, `depthLine`, `depthTriangle`; transforms and clip offsets move and scale them, never their depth (`baked()` no longer fades words 7-8 of these); `DrawList.depthAt` is the CPU reference of the shader's interpolation (reciprocals under perspective, depths under an orthographic view; a line clamped to its segment, a triangle by barycentric weights past its edges) | `Primitive`, `DrawList` |
+| Gizmo | `Gizmo.depthTest(true)`: axes, rings (but their back halves, faded on the CPU as before), arrow tips, plane squares, scale cubes and bounds handles recorded depth tested with the theme's `gizmo-occluded` opacity; its `GizmoOcclusion` is then not asked. `GizmoOcclusion`/`RayOcclusion` stay for views the renderer has no depth for (camera views), headless and tests. Trackball and centre discs are not faded (as before) | `Gizmo` |
+| Previews and dumps | `DrawListDump` writes `depth=` and `occluded=` for these; the controls' `CpuPreview` draws triangles and fades depth tested primitives by a `SceneDepth`; `ScenePreviewTest` adds `scene-gallery-depth*.png` (the gallery's gizmos depth tested, faded by the depth of its boxes ray cast per pixel) | `testkit`, `controls` tests |
+| Engine | `draw.slang` (uber and box, line, triangle entry points): `depthTest` reads `Keys.SCENE_DEPTH` of the same frame (`GpuUiRenderer` reads it with `g.optional`, after transparency), the image pixel scaled to the depth's render region (dynamic resolution included), reverse depth to view depth by `GpuUiRenderer.depthCamera` (near / depth, or (1 - depth) x range orthographic), faded where farther than the scene by more than `ui.gizmo.depthBias` (1e-4 relative); the plugin sets the camera from its scene bridge's; `UiScene.update` follows the camera again (the game may move it in its update). `DepthOcclusion` and `ui.gizmo.depthLevel` removed | engine-ui |
+
+#### Decisions
+
+- *Depth in colour B's words* rather than a per-primitive plane or new words: lines, triangles and boxes of a gizmo
+  never use colour B, a triangle has no other free word, and the format change stays two words and one flag. The
+  occluded opacity rides in the depth's lowest mantissa bits (a triangle has no ninth word).
+- *View depth, not the device's depth*: the UI records what its `SceneView` knows; the renderer turns its depth into
+  the same quantity with the camera's projection, so the UI needs no knowledge of reverse or infinite depth.
+- *Opt-in per gizmo*: the renderer can test only against the view it draws the UI over; a gizmo in a camera view
+  keeps the CPU occlusion.
+
+#### Tests
+
+`DrawListTest` (packing, `depthAt` under both projections, `baked`, allocation), `GizmoMoreTest` (depth tested
+handles: every kind, the theme's opacity, depths at their ends, no CPU occlusion asked), engine
+`GizmoOcclusionGpuTest` (a box moved in front of the X arrow: faded to 0.28 exactly in the frame it moved in, to two
+pixels of its silhouette, and whole again the frame it moved away), the shader constants test. Screenshot
+`integ/gizmo-depth-occlusion.png`.
+
+#### Left
+
+- Depth tested primitives on world panels (no depth bound there) and in XR views; a gradient box cannot be depth
+  tested (its colour B is the gradient's).
+
 ### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
 
 The seven areas below were built in parallel on their own branches from `a3-remaining` (b7aed4b: the new
@@ -1775,7 +1812,7 @@ The seven areas below were built in parallel on their own branches from `a3-rema
 | Renderer | The transform table and dirty ranges (`GpuUiRenderer`, `draw.slang`); `TRIANGLE` in the uber and per-kind paths (anti-aliased flagged edges, a half-open rule on the others: no seams); world panels drawn directly (`worldVertexMain`/`worldFragmentMain`) or into a texture (`WorldPanelRenderer`) |
 | Input | Every new command bound (`ui.docking.windowMove` Alt+F7, `windowResize` Alt+F8, tabs, `CHART_RESET`, gizmos, console toggle without typing the grave; completion and history only while the console's line has the text, `UiCommands.console`), mnemonics and pointer modifiers (`UiKeyboard`, `Pointer.GIZMO_SNAP`), touch, pen, XR-ray and virtual-cursor pointers |
 | Eyedropper | `GpuScreenSampler`: a block of scene colour before the display transform (HDR kept), read back without waiting; the game hands `UiPlugin.screenSampler()` to its `Controls` |
-| Scene | `UiPlugin.scene(graph, index)`: picking through `ScenePicking` with the camera of the frame (no delay), `PickMeshes`, `DepthOcclusion` for gizmos (a level of the depth pyramid, a frame or more old), `GpuCameraView` (the minimap: a view of the same graph into a bound texture, the same frame), `GpuPicking` (ID buffer: 0.007 ms GPU, a frame late; the CPU path stays the default) |
+| Scene | `UiPlugin.scene(graph, index)`: picking through `ScenePicking` with the camera of the frame (no delay), `PickMeshes`, ~~`DepthOcclusion` for gizmos (a level of the depth pyramid, a frame or more old)~~ gizmo occlusion by the depth of the same frame (group A3, occl), `GpuCameraView` (the minimap: a view of the same graph into a bound texture, the same frame), `GpuPicking` (ID buffer: 0.007 ms GPU, a frame late; the CPU path stays the default) |
 | Console | `UiPlugin.console(...)`: `ConsoleLogProvider` (SLF4J 2), `SettingVariables` over the engine's settings with the constraint overlay's reasons, `FileHistoryStore`, `FolderScripts`, `FolderAssets`, `NamedNodes`, `SettingPermissions` |
 | Inspectors | `SettingsSource`/`SettingsScreen` (the generated settings screen), `MaterialParametersSource`; nodes wait for the component stores (D46) |
 | Settings | Every A3 tunable a setting (`UiPlugin.tunables(ui)`, the console's included) |

@@ -14,14 +14,27 @@ import javax.imageio.ImageIO;
 
 /**
  * A rough CPU preview of draw lists (tests only; the engine's GPU renderer is the real one): rounded boxes with
- * borders and linear gradients, soft shadows, images, lines and clips per layer, then the layer's glyphs through
- * {@link SoftwareGlyphRenderer} (so text draws over its layer's boxes). Linear light, written as sRGB PNG.
+ * borders and linear gradients, soft shadows, images, lines, triangles and clips per layer, then the layer's glyphs
+ * through {@link SoftwareGlyphRenderer} (so text draws over its layer's boxes). Linear light, written as sRGB PNG.
+ * Depth tested primitives ({@link Primitive#FLAG_DEPTH}: a gizmo's) are faded as the engine's shader fades them where
+ * a {@link SceneDepth} given by {@link #depth} is nearer; without one they draw unfaded.
  */
 final class CpuPreview {
 
     private final int w;
     private final int h;
     private final float[] rgb;
+    private SceneDepth scene;
+    private boolean orthographic;
+
+    /** The view depth of the scene under UI pixel {@code x, y}: infinite where it shows nothing. */
+    @FunctionalInterface
+    interface SceneDepth {
+        double at(float x, float y);
+    }
+
+    /** As the engine's default {@code ui.gizmo.depthBias}: how much farther (relative) a part must be to be hidden. */
+    static final float DEPTH_BIAS = 1e-4f;
 
     CpuPreview(int width, int height, long background) {
         w = width;
@@ -32,6 +45,23 @@ final class CpuPreview {
             rgb[i * 3 + 1] = Rgba.g(background);
             rgb[i * 3 + 2] = Rgba.b(background);
         }
+    }
+
+    /** Fades depth tested primitives where {@code depth}, the scene under the UI, is nearer; returns this. */
+    CpuPreview depth(SceneDepth depth, boolean orthographicView) {
+        scene = depth;
+        orthographic = orthographicView;
+        return this;
+    }
+
+    /** As the engine's shader: the occluded opacity of primitive {@code i} where the scene is nearer, else 1. */
+    private float depthTest(DrawList list, int i, float px, float py) {
+        if (scene == null || (Primitive.flags(list.header(i)) & Primitive.FLAG_DEPTH) == 0) {
+            return 1;
+        }
+        float z = list.depthAt(i, px, py, orthographic);
+        return z > scene.at(px, py) * (1 + DEPTH_BIAS)
+            ? Primitive.occludedOpacityOf(list.intAt(i, Primitive.DEPTH)) : 1;
     }
 
     /** Draws the layers back to front. */
@@ -45,6 +75,7 @@ final class CpuPreview {
                     case Primitive.SHADOW -> shadow(list, i);
                     case Primitive.IMAGE -> image(list, i, textures);
                     case Primitive.LINE -> line(list, i);
+                    case Primitive.TRIANGLE -> triangle(list, i);
                     default -> {
                         // glyphs after the layer's shapes; nine-slices are not previewed
                     }
@@ -124,7 +155,8 @@ final class CpuPreview {
         float[] radii = {half(ra, false), half(ra, true), half(rb, false), half(rb, true)};
         float bw = list.floatAt(i, Primitive.WIDTH);
         long a = list.colorAt(i, Primitive.COLOR_A);
-        long b = list.colorAt(i, Primitive.COLOR_B);
+        boolean depthTested = (Primitive.flags(list.header(i)) & Primitive.FLAG_DEPTH) != 0;
+        long b = depthTested ? 0 : list.colorAt(i, Primitive.COLOR_B);
         long border = list.colorAt(i, Primitive.BORDER_COLOR);
         boolean gradient = (Primitive.flags(list.header(i)) & Primitive.FLAG_GRADIENT) != 0;
         float angle = list.floatAt(i, Primitive.GRADIENT_ANGLE);
@@ -152,7 +184,7 @@ final class CpuPreview {
                 }
                 boolean inBorder = bw > 0 && d > -bw;
                 long c = inBorder ? border : fill;
-                blend(x, y, Rgba.r(c), Rgba.g(c), Rgba.b(c), Rgba.a(c) * cover);
+                blend(x, y, Rgba.r(c), Rgba.g(c), Rgba.b(c), Rgba.a(c) * cover * depthTest(list, i, px, py));
             }
         }
     }
@@ -246,7 +278,44 @@ final class CpuPreview {
                 float distance = Math.max(Math.abs(lx * ax + ly * ay - len * 0.5f) - len * 0.5f,
                     Math.abs(-lx * ay + ly * ax) - extent);
                 float coverage = Math.max(0, Math.min(1, 0.5f - distance)) * faint;
-                blend(x, y, Rgba.r(c), Rgba.g(c), Rgba.b(c), Rgba.a(c) * coverage);
+                blend(x, y, Rgba.r(c), Rgba.g(c), Rgba.b(c),
+                    Rgba.a(c) * coverage * depthTest(list, i, x + 0.5f, y + 0.5f));
+            }
+        }
+    }
+
+    /** A filled triangle by its three edges' distances, every edge anti-aliased (shared edges may show a faint seam). */
+    private void triangle(DrawList list, int i) {
+        float[] c = {list.floatAt(i, Primitive.XA), list.floatAt(i, Primitive.YA), list.floatAt(i, Primitive.XB),
+            list.floatAt(i, Primitive.YB), list.floatAt(i, Primitive.XC), list.floatAt(i, Primitive.YC)};
+        float area = (c[2] - c[0]) * (c[5] - c[1]) - (c[3] - c[1]) * (c[4] - c[0]);
+        if (area == 0) {
+            return;
+        }
+        float winding = area > 0 ? 1 : -1;
+        int edges = Primitive.flags(list.header(i));
+        long color = list.colorAt(i, Primitive.COLOR_A);
+        for (int y = (int) Math.floor(list.floatAt(i, Primitive.Y0)) - 1; y <= Math.ceil(list.floatAt(i, Primitive.Y1));
+            y++) {
+            for (int x = (int) Math.floor(list.floatAt(i, Primitive.X0)) - 1;
+                x <= Math.ceil(list.floatAt(i, Primitive.X1)); x++) {
+                float px = x + 0.5f;
+                float py = y + 0.5f;
+                if (clipped(list, i, px, py)) {
+                    continue;
+                }
+                float coverage = 1;
+                for (int e = 0; e < 3; e++) {
+                    float ax = c[2 * e];
+                    float ay = c[2 * e + 1];
+                    float dx = c[(2 * e + 2) % 6] - ax;
+                    float dy = c[(2 * e + 3) % 6] - ay;
+                    float d = (dx * (py - ay) - dy * (px - ax)) * winding / (float) Math.hypot(dx, dy);
+                    boolean smooth = (edges & 1 << e) != 0;
+                    coverage *= smooth ? Math.max(0, Math.min(1, d + 0.5f)) : (d >= 0 ? 1 : 0);
+                }
+                blend(x, y, Rgba.r(color), Rgba.g(color), Rgba.b(color),
+                    Rgba.a(color) * coverage * depthTest(list, i, px, py));
             }
         }
     }

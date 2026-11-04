@@ -509,17 +509,65 @@ public final class DrawList {
      * edges its triangles share.
      */
     public void triangle(float xa, float ya, float xb, float yb, float xc, float yc, long color, int edges) {
+        emit(startTriangle(xa, ya, xb, yb, xc, yc, color, edges & 7));
+    }
+
+    private int[] startTriangle(float xa, float ya, float xb, float yb, float xc, float yc, long color, int flags) {
         float x0 = Math.min(xa, Math.min(xb, xc));
         float y0 = Math.min(ya, Math.min(yb, yc));
         float x1 = Math.max(xa, Math.max(xb, xc));
         float y1 = Math.max(ya, Math.max(yb, yc));
-        int[] p = start(Primitive.TRIANGLE, edges & 7, x0, y0, x1, y1, color, 0);
+        int[] p = start(Primitive.TRIANGLE, flags, x0, y0, x1, y1, color, 0);
         p[Primitive.XA] = Float.floatToRawIntBits(scale * xa + offsetX); // the corners move as the box does
         p[Primitive.YA] = Float.floatToRawIntBits(scale * ya + offsetY);
         p[Primitive.XB] = Float.floatToRawIntBits(scale * xb + offsetX);
         p[Primitive.YB] = Float.floatToRawIntBits(scale * yb + offsetY);
         p[Primitive.XC] = Float.floatToRawIntBits(scale * xc + offsetX);
         p[Primitive.YC] = Float.floatToRawIntBits(scale * yc + offsetY);
+        return p;
+    }
+
+    /**
+     * A solid rounded box depth tested against the scene drawn under the UI ({@link Primitive#FLAG_DEPTH}): a 3D
+     * handle's dot at view depth {@code depth} (distance along the view's forward axis, scene units), drawn at
+     * {@code occludedOpacity} times its colour where the scene is nearer. Otherwise as {@link #box}.
+     */
+    public void depthBox(float x0, float y0, float x1, float y1, float depth, long fill, float topLeft, float topRight,
+        float bottomRight, float bottomLeft, float borderWidth, long borderColor, float occludedOpacity) {
+        int[] p = start(Primitive.BOX, Primitive.FLAG_DEPTH, x0, y0, x1, y1, fill, 0);
+        p[Primitive.RADII] = Primitive.halves(topLeft, topRight);
+        p[Primitive.RADII + 1] = Primitive.halves(bottomRight, bottomLeft);
+        p[Primitive.WIDTH] = Float.floatToRawIntBits(borderWidth);
+        p[Primitive.BORDER_COLOR] = (int) borderColor;
+        p[Primitive.BORDER_COLOR + 1] = (int) (borderColor >>> 32);
+        p[Primitive.DEPTH] = Primitive.depthWord(depth, occludedOpacity);
+        emit(p);
+    }
+
+    /**
+     * A line depth tested against the scene drawn under the UI ({@link Primitive#FLAG_DEPTH}): a projected 3D segment
+     * whose ends lie at view depths {@code depthA} and {@code depthB}, drawn at {@code occludedOpacity} times its
+     * colour where the scene is nearer. Otherwise as {@link #line}.
+     */
+    public void depthLine(float xa, float ya, float depthA, float xb, float yb, float depthB, float width, long color,
+        float occludedOpacity) {
+        int[] p = start(Primitive.LINE, Primitive.FLAG_DEPTH, xa, ya, xb, yb, color, 0);
+        p[Primitive.WIDTH] = Float.floatToRawIntBits(width);
+        p[Primitive.DEPTH] = Primitive.depthWord(depthA, occludedOpacity);
+        p[Primitive.DEPTH_B] = Float.floatToRawIntBits(depthB);
+        emit(p);
+    }
+
+    /**
+     * A triangle depth tested against the scene drawn under the UI ({@link Primitive#FLAG_DEPTH}): a projected 3D
+     * triangle whose corners lie at view depths {@code depthA}, {@code depthB}, {@code depthC}, drawn at
+     * {@code occludedOpacity} times its colour where the scene is nearer. Otherwise as {@link #triangle}.
+     */
+    public void depthTriangle(float xa, float ya, float depthA, float xb, float yb, float depthB, float xc, float yc,
+        float depthC, long color, int edges, float occludedOpacity) {
+        int[] p = startTriangle(xa, ya, xb, yb, xc, yc, color, edges & 7 | Primitive.FLAG_DEPTH);
+        p[Primitive.DEPTH] = Primitive.depthWord(depthA, occludedOpacity);
+        p[Primitive.DEPTH_B] = Primitive.halves(depthB / depthA - 1, depthC / depthA - 1);
         emit(p);
     }
 
@@ -705,6 +753,61 @@ public final class DrawList {
     }
 
     /**
+     * The view depth depth tested primitive {@code index} ({@link Primitive#FLAG_DEPTH}) has at pixel {@code x, y}
+     * (where it draws), as the renderer works it out: a box's one depth; along a line, its ends' depths interpolated at
+     * the pixel's projection onto it (clamped to the segment); over a triangle, its corners' by the pixel's barycentric
+     * weights (extended past its edges). Under a perspective view the reciprocals are interpolated, under an
+     * {@code orthographic} one the depths. For CPU previews and tests; NaN for a primitive not depth tested.
+     */
+    public float depthAt(int index, float x, float y, boolean orthographic) {
+        int header = header(index);
+        if ((Primitive.flags(header) & Primitive.FLAG_DEPTH) == 0) {
+            return Float.NaN;
+        }
+        float za = Primitive.depthOf(intAt(index, Primitive.DEPTH));
+        int kind = Primitive.kind(header);
+        if (kind == Primitive.LINE) {
+            float zb = floatAt(index, Primitive.DEPTH_B);
+            float ax = drawnX(index, Primitive.X0);
+            float ay = drawnY(index, Primitive.Y0);
+            float dx = drawnX(index, Primitive.X1) - ax;
+            float dy = drawnY(index, Primitive.Y1) - ay;
+            float squared = dx * dx + dy * dy;
+            float t = squared > 0 ? Math.clamp(((x - ax) * dx + (y - ay) * dy) / squared, 0f, 1f) : 0;
+            return interpolated(za, zb, 0, 1 - t, t, 0, orthographic);
+        }
+        if (kind == Primitive.TRIANGLE) {
+            int r = intAt(index, Primitive.DEPTH_B);
+            float zb = za * (1 + Float.float16ToFloat((short) r));
+            float zc = za * (1 + Float.float16ToFloat((short) (r >>> 16)));
+            float ax = drawnX(index, Primitive.XA);
+            float ay = drawnY(index, Primitive.YA);
+            float bx = drawnX(index, Primitive.XB) - ax;
+            float by = drawnY(index, Primitive.YB) - ay;
+            float cx = drawnX(index, Primitive.XC) - ax;
+            float cy = drawnY(index, Primitive.YC) - ay;
+            float area = bx * cy - by * cx;
+            if (area == 0) {
+                return za;
+            }
+            float px = x - ax;
+            float py = y - ay;
+            float wb = (px * cy - py * cx) / area;
+            float wc = (bx * py - by * px) / area;
+            return interpolated(za, zb, zc, 1 - wb - wc, wb, wc, orthographic);
+        }
+        return za;
+    }
+
+    private static float interpolated(float za, float zb, float zc, float wa, float wb, float wc,
+        boolean orthographic) {
+        if (orthographic) {
+            return wa * za + wb * zb + wc * zc;
+        }
+        return 1 / (wa / za + wb / zb + (wc == 0 ? 0 : wc / zc));
+    }
+
+    /**
      * A copy of this list as it draws, for CPU previews, layout checks and goldens (not for frames): every primitive's
      * clip offset and transform applied to its coordinates, sizes and colours (its transform then the identity, its
      * clip's offset 0), every clip's transform applied to its rectangle and radius. Read it with the plain accessors.
@@ -740,7 +843,9 @@ public final class DrawList {
             float opacity = drawnOpacity(i);
             if (opacity != 1) {
                 fade(p, Primitive.COLOR_A, opacity);
-                fade(p, Primitive.COLOR_B, opacity);
+                if ((Primitive.flags(p[Primitive.HEADER]) & Primitive.FLAG_DEPTH) == 0) {
+                    fade(p, Primitive.COLOR_B, opacity); // a depth tested primitive's words 7-8 are its depth
+                }
                 if (kind == Primitive.BOX) {
                     fade(p, Primitive.BORDER_COLOR, opacity);
                 }

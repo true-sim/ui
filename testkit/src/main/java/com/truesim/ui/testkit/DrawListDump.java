@@ -48,7 +48,17 @@ public final class DrawListDump {
                 .append(' ').append(n(list.drawnX(i, Primitive.X1))).append(',').append(n(list.drawnY(i, Primitive.Y1)))
                 .append(" a=").append(color(list.colorAt(i, Primitive.COLOR_A)));
             long b = list.colorAt(i, Primitive.COLOR_B);
-            if (b != 0) {
+            if ((Primitive.flags(header) & Primitive.FLAG_DEPTH) != 0) { // words 7-8 are its depth, not colour B
+                int d = list.intAt(i, Primitive.DEPTH);
+                int e = list.intAt(i, Primitive.DEPTH_B);
+                out.append(" depth=").append(n(Primitive.depthOf(d)));
+                if (kind == Primitive.LINE) {
+                    out.append(',').append(n(Float.intBitsToFloat(e)));
+                } else if (kind == Primitive.TRIANGLE) {
+                    out.append(',').append(halves(e));
+                }
+                out.append(" occluded=").append(n(Primitive.occludedOpacityOf(d)));
+            } else if (b != 0) {
                 out.append(" b=").append(color(b));
             }
             switch (kind) {
