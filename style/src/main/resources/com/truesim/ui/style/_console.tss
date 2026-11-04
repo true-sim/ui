@@ -2,7 +2,7 @@
 // closed place above the screen, `console:expanded` the open one, and the offsets transition animates between them.
 // Element types: console, console-bar, console-level (:checked for shown levels), console-input, log-view, log-body,
 // log-row ([level=trace|debug|info|warn|error|command]), console-completions, console-hint, console-completion
-// (:selected). Labels by style name: console-logger (the logger filter chip), console-prompt, log-time, log-level,
+// (:selected). Labels by style name: console-logger (the logger filter chip), console-prompt, log-clock (log-time, log-millis), log-level,
 // log-logger, log-message, log-count, log-source, hint-before, hint-current, hint-after, completion-text,
 // completion-detail; the fields textfield.console (the command line) and textfield.console-search.
 
@@ -75,7 +75,8 @@ log-row {
   &:hover { background: box(rgba(#8b949e, 0.08)); }
 
   label { font-family: tokens.$font-numbers; font-size: 12px; line-height: 1.2; color: var(--fg); text-wrap: false; }
-  label.log-time { color: var(--fg-muted); width: 84px; shrink: 0; }
+  log-clock { layout: flex; direction: row; width: 84px; shrink: 0; }
+  label.log-time, label.log-millis { color: var(--fg-muted); shrink: 0; }
   label.log-level { width: 64px; shrink: 0; font-weight: 600; color: var(--fg-muted); }
   label.log-logger {
     width: 120px;

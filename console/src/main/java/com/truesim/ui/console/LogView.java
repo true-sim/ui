@@ -63,13 +63,16 @@ public final class LogView extends VirtualView<LogRecord> {
 
     /** One row's parts and its text buffers. */
     private static final class Row {
+        Element clock; // the time in two labels: seconds change seldom, milliseconds repeat (both shaped once, cached)
         Element time;
+        Element millis;
         Element level;
         Element logger;
         Element message;
         Element count;
         Element source;
         final StringBuilder timeText = new StringBuilder(12);
+        final StringBuilder millisText = new StringBuilder(4);
         final StringBuilder countText = new StringBuilder(8);
         int shownLevel = -1;
         long shownSeq = -1;
@@ -119,7 +122,10 @@ public final class LogView extends VirtualView<LogRecord> {
     protected Element createRow(int kind) {
         Element row = ui.element("log-row", null);
         Row r = new Row();
+        r.clock = ui.element("log-clock", null);
         r.time = ui.label("log-time", "");
+        r.millis = ui.label("log-millis", "");
+        r.clock.add(r.time).add(r.millis);
         r.level = ui.label("log-level", "");
         r.logger = ui.label("log-logger", "");
         r.message = ui.label("log-message", "");
@@ -127,7 +133,7 @@ public final class LogView extends VirtualView<LogRecord> {
         r.source = ui.label("log-source", "");
         interaction.pickable(r.logger, PointerEvents.ALL);
         interaction.pickable(r.source, PointerEvents.ALL);
-        row.add(r.time).add(r.level).add(r.logger).add(r.message).add(r.count).add(r.source);
+        row.add(r.clock).add(r.level).add(r.logger).add(r.message).add(r.count).add(r.source);
         int slot = row.slot();
         if (slot >= bySlot.length) {
             bySlot = Arrays.copyOf(bySlot, Math.max(slot + 1, bySlot.length * 2));
@@ -147,8 +153,11 @@ public final class LogView extends VirtualView<LogRecord> {
         if (r.shownSeq != value.seq() || r.shownVersion != value.version()) {
             r.shownSeq = value.seq();
             r.shownVersion = value.version();
-            time(r.timeText, value.time() + offsetMillis);
+            long at = value.time() + offsetMillis;
+            seconds(r.timeText, at);
             ui.text(r.time, r.timeText);
+            millis(r.millisText, at);
+            ui.text(r.millis, r.millisText);
             ui.text(r.logger, shortName(value.loggerIndex()));
             ui.text(r.message, value.message());
             int count = value.count();
@@ -183,6 +192,24 @@ public final class LogView extends VirtualView<LogRecord> {
         String name = source.ring().loggerName(logger);
         shortNames[logger] = name.substring(name.lastIndexOf('.') + 1);
         return shortNames[logger];
+    }
+
+    /** {@code HH:mm:ss} of local {@code millis}, into {@code out}. */
+    static void seconds(StringBuilder out, long millis) {
+        long m = Math.floorMod(millis, DAY);
+        out.setLength(0);
+        two(out, (int) (m / 3_600_000));
+        out.append(':');
+        two(out, (int) (m / 60_000 % 60));
+        out.append(':');
+        two(out, (int) (m / 1000 % 60));
+    }
+
+    /** {@code .SSS} of {@code millis}, into {@code out}. */
+    static void millis(StringBuilder out, long millis) {
+        int ms = (int) Math.floorMod(millis, 1000L);
+        out.setLength(0);
+        out.append('.').append((char) ('0' + ms / 100)).append((char) ('0' + ms / 10 % 10)).append((char) ('0' + ms % 10));
     }
 
     /** {@code HH:mm:ss.SSS} of local {@code millis}, into {@code out}. */

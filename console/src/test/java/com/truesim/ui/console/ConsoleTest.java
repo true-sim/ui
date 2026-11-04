@@ -353,5 +353,9 @@ class ConsoleTest {
         StringBuilder t = new StringBuilder();
         LogView.time(t, 3_723_004L);
         assertThat(t.toString()).isEqualTo("01:02:03.004");
+        LogView.seconds(t, 3_723_004L);
+        assertThat(t.toString()).as("a row's time in two labels: seconds").isEqualTo("01:02:03");
+        LogView.millis(t, 3_723_004L);
+        assertThat(t.toString()).as("and milliseconds").isEqualTo(".004");
     }
 }

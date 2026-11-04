@@ -44,7 +44,8 @@ log-row {
   background: box(#330033);
   &:hover { background: box($hot); }
   label { font-size: 13px; line-height: 1.6; color: $lime; scale: 1; text-outline: 0px black; text-wrap: false; }
-  label.log-time { width: 110px; shrink: 0; color: $cyan; }
+  log-clock { layout: flex; direction: row; width: 110px; shrink: 0; }
+  label.log-time, label.log-millis { shrink: 0; color: $cyan; }
   label.log-level { width: 70px; shrink: 0; color: $sun; }
   label.log-logger { width: 90px; shrink: 0; clip: true; color: #ff6600; }
   label.log-message { grow: 1; shrink: 1; width: 0px; clip: true; }
