@@ -14,4 +14,24 @@ public interface TextShaper {
      */
     void shape(char[] text, int length, int start, int end, FontFace face, float sizePx, boolean rightToLeft,
         String language, ShapedGlyphs out);
+
+    /**
+     * Shapes {@code text[start, end)}, a part of the run {@code text[runStart, runEnd)}, as that run would shape it:
+     * the run gives the script (its first character of a script of its own), so a part of only common characters
+     * shapes as the run does. Incremental reshaping shapes parts of long runs again this way; the default ignores
+     * the run.
+     */
+    default void shape(char[] text, int length, int runStart, int runEnd, int start, int end, FontFace face,
+        float sizePx, boolean rightToLeft, String language, ShapedGlyphs out) {
+        shape(text, length, start, end, face, sizePx, rightToLeft, language, out);
+    }
+
+    /**
+     * Whether the glyphs carry {@link ShapedGlyphs#UNSAFE_TO_BREAK} and {@link ShapedGlyphs#UNSAFE_TO_CONCAT} where
+     * they apply (HarfBuzz): a glyph without them starts a cluster where the text may be split and shaped apart.
+     * Without them, incremental reshaping splits runs only after white space.
+     */
+    default boolean marksUnsafeBreaks() {
+        return false;
+    }
 }
