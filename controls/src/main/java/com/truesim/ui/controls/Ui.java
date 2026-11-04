@@ -8,6 +8,7 @@ import com.truesim.ui.core.Layer;
 import com.truesim.ui.core.Layers;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.Tunable;
+import com.truesim.ui.core.TunableHolder;
 import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Rgba;
@@ -49,6 +50,7 @@ import com.truesim.ui.text.TextSystem;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ServiceLoader;
 
 /**
  * One retained UI: its elements, style resolution, layout, text and drawing, updated once a frame. The frame does
@@ -1399,6 +1401,9 @@ public final class Ui {
         all.addAll(com.truesim.ui.controls.windows.Tooltips.tunables());
         all.addAll(com.truesim.ui.controls.windows.Popovers.tunables());
         all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());
+        for (TunableHolder holder : ServiceLoader.load(TunableHolder.class, Ui.class.getClassLoader())) {
+            all.addAll(holder.tunables()); // modules above the controls: the scene bridge, gizmos
+        }
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());
         }

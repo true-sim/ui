@@ -33,6 +33,9 @@ project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
 include("ui-fonts-emoji") // colour emoji, optional for its size
 project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
+include("ui-scene", "ui-gizmo") // the scene bridge (picking, world panels, camera views) and 3D gizmos: need scene-core
+project(":ui-scene").projectDir = file("scene")
+project(":ui-gizmo").projectDir = file("gizmo")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {

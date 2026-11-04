@@ -2,7 +2,8 @@ package com.truesim.ui.core.input;
 
 /**
  * One pointer (design 4.7): a mouse, a finger, a pen, a gamepad's virtual cursor, an XR ray. Reused: sources write it
- * every frame, so events are never allocated. Screen pointers have a position in UI pixels; rays come with world panels.
+ * every frame, so events are never allocated. Screen pointers have a position in UI pixels; XR pointers (and screen
+ * pointers over a 3D view) also have a {@linkplain #ray world ray}, which scene picking and world panels test.
  */
 public final class Pointer {
 
@@ -38,6 +39,13 @@ public final class Pointer {
     private float scrollX;
     private float scrollY;
     private int modifiers;
+    private boolean hasRay;
+    private double rayOriginX;
+    private double rayOriginY;
+    private double rayOriginZ;
+    private double rayDirectionX;
+    private double rayDirectionY;
+    private double rayDirectionZ;
 
     void reset(int newId, Kind newKind) {
         id = newId;
@@ -49,6 +57,7 @@ public final class Pointer {
         scrollX = 0;
         scrollY = 0;
         modifiers = 0;
+        hasRay = false;
     }
 
     /** Sets where it is, in UI pixels; returns this. */
@@ -118,5 +127,64 @@ public final class Pointer {
     /** The modifiers held. */
     public int modifiers() {
         return modifiers;
+    }
+
+    /**
+     * Gives the pointer a ray in world space for this frame: an XR controller's aim, or a screen pointer's camera ray
+     * when the engine knows it (otherwise the scene bridge makes one from its view). Scene picking and world panels
+     * test it; screen layers use {@link #x()}, {@link #y()}. Doubles, so it is exact far from the origin. The
+     * direction need not be unit length; distances along it are in its units. Returns this.
+     */
+    public Pointer ray(double originX, double originY, double originZ, double directionX, double directionY,
+        double directionZ) {
+        hasRay = true;
+        rayOriginX = originX;
+        rayOriginY = originY;
+        rayOriginZ = originZ;
+        rayDirectionX = directionX;
+        rayDirectionY = directionY;
+        rayDirectionZ = directionZ;
+        return this;
+    }
+
+    /** Takes the pointer's ray away (a screen pointer again); returns this. */
+    public Pointer clearRay() {
+        hasRay = false;
+        return this;
+    }
+
+    /** Whether the pointer has a {@linkplain #ray world ray}. */
+    public boolean hasRay() {
+        return hasRay;
+    }
+
+    /** The ray's origin x. */
+    public double rayOriginX() {
+        return rayOriginX;
+    }
+
+    /** The ray's origin y. */
+    public double rayOriginY() {
+        return rayOriginY;
+    }
+
+    /** The ray's origin z. */
+    public double rayOriginZ() {
+        return rayOriginZ;
+    }
+
+    /** The ray's direction x. */
+    public double rayDirectionX() {
+        return rayDirectionX;
+    }
+
+    /** The ray's direction y. */
+    public double rayDirectionY() {
+        return rayDirectionY;
+    }
+
+    /** The ray's direction z. */
+    public double rayDirectionZ() {
+        return rayDirectionZ;
     }
 }

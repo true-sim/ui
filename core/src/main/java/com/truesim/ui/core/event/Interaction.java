@@ -92,6 +92,7 @@ public final class Interaction {
     private final Layers layers;
     private final PickGeometry geometry;
     private final Picking picking;
+    private WorldPicking world;
 
     // per slot
     private int[] seenGen = new int[0];
@@ -638,8 +639,11 @@ public final class Interaction {
         kinds[p] = pointer.kind();
         lastModifiers[p] = pointer.modifiers();
         int n = picking.pick(x, y, hits[p]);
-        hitCount[p] = n;
         blocked[p] = picking.blockedBy() >= 0;
+        if (world != null && !blocked[p] && n < MAX_HITS) {
+            n = world.pick(pointer, hits[p], n);
+        }
+        hitCount[p] = n;
         int top = n > 0 ? hits[p][0] : UiStore.NONE;
         if (hover(p, top, x, y)) {
             restTime[p] = now;
@@ -2111,6 +2115,19 @@ public final class Interaction {
     }
 
     // ================================================================ access
+
+    /**
+     * Sets what pointers hit beyond the screen layers (world panels, scene objects: the scene bridge), or null for
+     * nothing. Its hits follow the screen layers' in every pointer's hit list.
+     */
+    public void worldPicking(WorldPicking value) {
+        world = value;
+    }
+
+    /** What pointers hit beyond the screen layers, or null. */
+    public WorldPicking worldPicking() {
+        return world;
+    }
 
     /** The hit test. */
     public Picking picking() {
