@@ -8,7 +8,8 @@ import com.truesim.ui.style.ResolvedStyle;
  * A line through the samples (style part {@code chart-line}), straight or as stairs ({@link Step}), with markers when
  * the theme gives it a {@code marker}, and filled down to a baseline when it is an area ({@link #fill(double)}, part
  * {@code chart-area}). Many samples draw as their min-max envelope per pixel column (exact: the same pixels as every
- * segment); markers then show LTTB's picks.
+ * segment), recorded as one primitive over a vertex per column ({@link Canvas#columns}), its fill another over the
+ * same vertices; markers then show LTTB's picks. Fewer samples draw as a path the GPU strokes.
  */
 public class LineSeries extends XYSeries {
 
@@ -81,12 +82,13 @@ public class LineSeries extends XYSeries {
         long fill = c.fade(fill(s, 0));
         if (envelope(b - a, pixels)) {
             envelope(a, b, c);
-            if (area) {
-                envelopeFill(c, fill);
+            int at = envelopeColumns(c);
+            if (area && at >= 0) {
+                c.fillColumns(at, envelopeCount, envelopeX, envelopeStep, yAxis.toPixel(baseline), fill);
             }
             c.stroke(s, color);
-            if (c.stroking()) {
-                envelopeLine(c, a, b);
+            if (c.stroking() && at >= 0) {
+                envelopeLine(c, a, b, at);
             }
         } else if (sorted() && lttb(b - a, pixels) && decimation == Decimation.LTTB) {
             pick(a, b, pixels);
@@ -175,63 +177,85 @@ public class LineSeries extends XYSeries {
     }
 
     /**
-     * The envelope as a line: into each column at its first sample, a vertical stroke over its minimum to maximum,
-     * out at its last sample; the samples just outside the plot join it at the ends.
+     * The envelope's pixel columns as vertices ({@link Canvas#columns}): every column from the first to the last with
+     * samples, each its first, last, lowest and highest sample; a column without samples between two with them lies on
+     * the line joining them (level, then up or down, for stairs), so connectors cross it as one segment would. Returns
+     * the first vertex, or -1 without columns; {@link #envelopeCount}, {@link #envelopeX}, {@link #envelopeStep} say
+     * where they lie.
      */
-    private void envelopeLine(Canvas c, long a, long b) {
+    private int envelopeColumns(Canvas c) {
         int n = decimator.columns();
+        envelopeCount = 0;
         if (n == 0) {
-            return;
+            return -1;
         }
-        float px = Float.NaN;
-        float py = Float.NaN;
+        float p0 = decimator.pixel(0);
+        float pn = decimator.pixel(n - 1);
+        envelopeStep = pn >= p0 ? 1 : -1; // an inverted axis: columns leftwards, in the data's order
+        envelopeX = p0;
+        int count = Math.round(Math.abs(pn - p0)) + 1;
+        int at = c.columns(count);
+        int prev = -1;
+        float prevLast = Float.NaN;
+        for (int o = 0; o < n; o++) {
+            int k = Math.round(Math.abs(decimator.pixel(o) - p0));
+            float first = yAxis.toPixel(decimator.firstY(o));
+            float last = yAxis.toPixel(decimator.lastY(o));
+            float yMin = yAxis.toPixel(decimator.minY(o));
+            float yMax = yAxis.toPixel(decimator.maxY(o));
+            for (int g = prev + 1; g < k; g++) {
+                float y;
+                if (prev < 0 || prevLast != prevLast || first != first) {
+                    y = Float.NaN;
+                } else if (step != Step.NONE) {
+                    y = prevLast;
+                } else {
+                    y = prevLast + (first - prevLast) * (g - prev) / (k - prev);
+                }
+                c.column(at, g, y, y, y, y);
+            }
+            c.column(at, k, first, last, Math.min(yMin, yMax), Math.max(yMin, yMax));
+            prev = k;
+            prevLast = last;
+        }
+        envelopeCount = count;
+        return at;
+    }
+
+    private int envelopeCount;
+    private float envelopeX;
+    private float envelopeStep;
+
+    /**
+     * The envelope as a line: its columns stroked (a vertical stroke over each column's span, a connector from the last
+     * column's last sample to its first where their spans do not touch), and the samples just outside the plot joined
+     * to its ends.
+     */
+    private void envelopeLine(Canvas c, long a, long b, int at) {
+        int n = decimator.columns();
         long firstIn = decimator.from(0);
         if (firstIn > a && finite(y.get(firstIn - 1))) {
-            px = xAxis.toPixel(x.get(firstIn - 1));
-            py = yAxis.toPixel(y.get(firstIn - 1));
-        }
-        float w = c.strokeWidth();
-        float prevLo = Float.NaN;
-        float prevHi = Float.NaN;
-        for (int k = 0; k < n; k++) {
-            float cx = decimator.pixel(k);
-            float yFirst = yAxis.toPixel(decimator.firstY(k));
-            float yLast = yAxis.toPixel(decimator.lastY(k));
-            float yMin = yAxis.toPixel(decimator.minY(k));
-            float yMax = yAxis.toPixel(decimator.maxY(k));
-            float lo = Math.min(yMin, yMax);
-            float hi = Math.max(yMin, yMax);
-            boolean tall = hi - lo >= 0.5f;
-            // the connector from the last column: needed unless both columns are strokes whose spans overlap, as
-            // adjacent pixel columns then touch already (every segment between them lies within the two spans)
-            boolean touching = tall && prevHi - prevLo >= 0.5f && prevLo <= hi + w && lo <= prevHi + w
-                && cx - px <= 1.5f;
-            if (px == px && yFirst == yFirst && !touching) {
-                if (step == Step.NONE) {
-                    c.line(px, py, cx, yFirst);
-                } else {
-                    c.line(px, py, cx, py);
-                    c.line(cx, py, cx, yFirst);
-                }
+            float yFirst = yAxis.toPixel(decimator.firstY(0));
+            if (yFirst == yFirst) {
+                connector(c, xAxis.toPixel(x.get(firstIn - 1)), yAxis.toPixel(y.get(firstIn - 1)),
+                    decimator.pixel(0), yFirst);
             }
-            if (tall) {
-                c.line(cx, lo - w * 0.5f, cx, hi + w * 0.5f); // butt ends: grow by half the width to meet the joins
-            }
-            prevLo = lo;
-            prevHi = hi;
-            px = cx;
-            py = yLast;
         }
+        c.strokeColumns(at, envelopeCount, envelopeX, envelopeStep, step != Step.NONE);
         long lastIn = decimator.to(n - 1);
-        if (lastIn < b && px == px && finite(y.get(lastIn))) {
-            float sx = xAxis.toPixel(x.get(lastIn));
-            float sy = yAxis.toPixel(y.get(lastIn));
-            if (step == Step.NONE) {
-                c.line(px, py, sx, sy);
-            } else {
-                c.line(px, py, sx, py);
-                c.line(sx, py, sx, sy);
-            }
+        float py = yAxis.toPixel(decimator.lastY(n - 1));
+        if (lastIn < b && py == py && finite(y.get(lastIn))) {
+            connector(c, decimator.pixel(n - 1), py, xAxis.toPixel(x.get(lastIn)), yAxis.toPixel(y.get(lastIn)));
+        }
+    }
+
+    /** A segment from {@code px, py} to {@code cx, cy}, or stairs. */
+    private void connector(Canvas c, float px, float py, float cx, float cy) {
+        if (step == Step.NONE) {
+            c.line(px, py, cx, cy);
+        } else {
+            c.line(px, py, cx, py);
+            c.line(cx, py, cx, cy);
         }
     }
 
@@ -296,19 +320,6 @@ public class LineSeries extends XYSeries {
         }
         // a (top left), b (top right), b' and a' on the baseline: the line and the baseline are its outline
         c.quad(xa, ya, xb, yb, xb, base, xa, base, fill, 1 | 4);
-    }
-
-    /** The envelope's fill: each column from the baseline to its farthest sample (both ways when it crosses). */
-    private void envelopeFill(Canvas c, long fill) {
-        float base = yAxis.toPixel(baseline);
-        for (int k = 0; k < decimator.columns(); k++) {
-            float cx = decimator.pixel(k);
-            float yMin = yAxis.toPixel(decimator.minY(k));
-            float yMax = yAxis.toPixel(decimator.maxY(k));
-            float lo = Math.min(base, Math.min(yMin, yMax));
-            float hi = Math.max(base, Math.max(yMin, yMax));
-            c.box(cx - 0.5f, lo, cx + 0.5f, hi, fill, 0, 0, 0);
-        }
     }
 
     @Override

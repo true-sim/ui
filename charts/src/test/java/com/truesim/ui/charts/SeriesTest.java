@@ -39,6 +39,19 @@ class SeriesTest {
         return n;
     }
 
+    /** The vertices of the plot's first primitive of {@code kind} (a path, columns), or -1 without one. */
+    private int plotVertices(int kind, Chart chart) {
+        DrawList list = rig.ui.layers()[0];
+        int start = rig.ui.store().rangeStart(chart.plotElement().slot());
+        int end = start + rig.ui.store().rangeCapacity(chart.plotElement().slot());
+        for (int i = start; i < end; i++) {
+            if (Primitive.kind(list.header(i)) == kind) {
+                return list.intAt(i, Primitive.VERTEX_COUNT);
+            }
+        }
+        return -1;
+    }
+
     /** The plot's primitives of {@code kind}, its own background box left out. */
     private int plotCount(int kind, Chart chart) {
         int n = kind == Primitive.BOX ? -1 : 0;
@@ -65,17 +78,20 @@ class SeriesTest {
         LineSeries line = c.line("zigzag", Columns.of(x), Columns.of(y));
         rig.settle();
         assertThat(line.sorted()).isTrue();
-        assertThat(plotCount(Primitive.LINE, c)).isEqualTo(19);
+        assertThat(plotCount(Primitive.PATH, c)).as("one path").isEqualTo(1);
+        assertThat(plotVertices(Primitive.PATH, c)).isEqualTo(20);
+        assertThat(plotCount(Primitive.LINE, c)).isZero();
         Hit h = new Hit();
         float px = c.x().toPixel(7.2);
         assertThat(c.hitTest(px, c.y().toPixel(1), h)).isTrue();
         assertThat(h.series).isSameAs(line);
         assertThat(h.index).isEqualTo(7);
         assertThat(h.toString()).contains("zigzag");
-        // stairs, area and dashes add primitives
+        // stairs add vertices, areas primitives
         line.step(LineSeries.Step.POST);
         rig.run();
-        assertThat(plotCount(Primitive.LINE, c)).isEqualTo(38);
+        assertThat(plotCount(Primitive.PATH, c)).isEqualTo(1);
+        assertThat(plotVertices(Primitive.PATH, c)).isEqualTo(39);
         line.step(LineSeries.Step.MID).fill(0);
         rig.run();
         assertThat(plotCount(Primitive.BOX, c)).isGreaterThanOrEqualTo(38);
@@ -95,7 +111,10 @@ class SeriesTest {
         c.fitAll();
         rig.run(2);
         float plotW = c.plotRight() - c.plotLeft();
-        assertThat(plotCount(Primitive.LINE, c)).isLessThanOrEqualTo((int) (plotW * 2 + 4));
+        assertThat(plotCount(Primitive.COLUMNS, c)).as("the envelope: one primitive").isEqualTo(1);
+        assertThat(plotVertices(Primitive.COLUMNS, c)).as("a vertex per pixel column")
+            .isBetween((int) (plotW * 0.8f), (int) plotW + 1); // the data, within the fit's padding
+        assertThat(plotCount(Primitive.LINE, c)).as("into and out of the plot at most").isLessThanOrEqualTo(2);
         line.decimation(Decimation.NONE);
         rig.run();
         assertThat(line.decimation()).isEqualTo(Decimation.NONE);
@@ -104,7 +123,7 @@ class SeriesTest {
         line.decimation(Decimation.MIN_MAX);
         line.fill(-1);
         rig.run();
-        assertThat(plotCount(Primitive.BOX, c)).isGreaterThan(100); // the envelope's fill by columns
+        assertThat(plotCount(Primitive.COLUMNS, c)).as("the envelope's fill and line over its columns").isEqualTo(2);
     }
 
     @Test

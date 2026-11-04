@@ -3,22 +3,42 @@ package com.truesim.ui.charts;
 import com.truesim.ui.controls.charts.ChartStyles;
 import com.truesim.ui.controls.charts.LineJoin;
 import com.truesim.ui.controls.charts.Marker;
+import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.math.Maths;
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.style.ResolvedStyle;
 import com.truesim.ui.text.TextBlock;
+import java.util.Arrays;
 import java.util.List;
 
 /**
  * What series draw with: the draw list's primitives in pixels of the chart's content box (moved to where the chart's
- * element records), faded by the element's opacity, plus what the primitives lack: polylines with dash patterns
- * carried across segments and round joins, segments clipped to the plot (so zoomed-in data never makes huge or
- * invisible primitives), markers of every {@link Marker} shape, triangles and quads for areas, and pie wedges.
- * Allocates nothing.
+ * element records), faded by the element's opacity, plus what the primitives lack: polylines recorded as paths the
+ * GPU strokes ({@link Primitive#PATH}: joins, dashes carried along the polyline, one primitive and a vertex per point),
+ * min-max envelopes as pixel columns ({@link Primitive#COLUMNS}: stroked or filled, a vertex per column), segments
+ * clipped to the plot (so zoomed-in data never makes huge or invisible primitives), markers of every {@link Marker}
+ * shape, triangles and quads for areas, and pie wedges. Allocates nothing once its buffers and vertex blocks have
+ * grown.
+ *
+ * <p><b>Vertices.</b> Each painter owns a block of the draw list's vertex table ({@link Vertices}), written from its
+ * start each time the painter records: unchanged points upload nothing. A painter calls {@link #end()} when it is done,
+ * which records the polyline still open.
  */
 public final class Canvas {
+
+    /**
+     * A painter's block of its draw list's vertex table: taken when first needed, again (larger) when a recording
+     * needs more or the list was rebuilt.
+     */
+    static final class Vertices {
+        private DrawList list;
+        private long generation;
+        private int first;
+        private int capacity;
+        private int used;
+    }
 
     private DrawList list;
     private float ox;
@@ -39,17 +59,30 @@ public final class Canvas {
     private float dashTotal;
     private int dashIndex;
     private float dashLeft;
-    private boolean round;
+    private int join = Primitive.JOIN_NONE;
+    private float miterLimit = 4;
     private boolean hasPoint;
-    private boolean drawnSegment;
     private float lastX;
     private float lastY;
     private int primitives;
+    // the open polyline: x, y and its length from the polyline's start, per point (content-box pixels)
+    private float[] points = new float[3 * 256];
+    private int pointCount;
+    private double pathLength; // along the polyline since its moveTo: dashes carry on across clipped-away parts
+    private double subPathStart;
+    private Vertices block = new Vertices();
 
-    /** Starts drawing into {@code target}: content-box pixels plus {@code ox, oy}; culled to {@code x0..y1}. */
+    /**
+     * Starts drawing into {@code target}: content-box pixels plus {@code ox, oy}; culled to {@code x0..y1}; vertices
+     * into {@code vertices}, the painter's block.
+     */
     void begin(DrawList target, float offsetX, float offsetY, float cullX0, float cullY0, float cullX1, float cullY1,
-        float fade, float uiScale) {
+        float fade, float uiScale, Vertices vertices) {
         list = target;
+        block = vertices;
+        block.used = 0;
+        pointCount = 0;
+        hasPoint = false;
         ox = offsetX;
         oy = offsetY;
         x0 = cullX0;
@@ -116,14 +149,32 @@ public final class Canvas {
 
     // ---------------------------------------------------------------- strokes
 
-    /** Strokes from now on with {@code style}'s {@code line-width}, {@code line-dash} and {@code line-join}. */
+    /** Records what is still open (a polyline): call when the painter is done. */
+    void end() {
+        flushPath();
+    }
+
+    /**
+     * Strokes from now on with {@code style}'s {@code line-width}, {@code line-dash}, {@code line-join} and
+     * {@code line-miter-limit}.
+     */
     public void stroke(ResolvedStyle style, long strokeColor) {
+        LineJoin j = style.get(ChartStyles.LINE_JOIN);
         stroke(style.getFloat(ChartStyles.LINE_WIDTH) * scale, strokeColor, style.get(ChartStyles.LINE_DASH),
-            style.get(ChartStyles.LINE_JOIN) == LineJoin.ROUND);
+            j == LineJoin.ROUND);
+        join = switch (j) {
+            case ROUND -> Primitive.JOIN_ROUND;
+            case MITER -> Primitive.JOIN_MITER;
+            case BEVEL -> Primitive.JOIN_BEVEL;
+            default -> Primitive.JOIN_NONE;
+        };
+        miterLimit = style.getFloat(ChartStyles.LINE_MITER_LIMIT);
     }
 
     /** Strokes from now on {@code lineWidth} pixels wide in {@code strokeColor}, dashed by {@code pattern}. */
     public void stroke(float lineWidth, long strokeColor, List<Float> pattern, boolean roundJoins) {
+        flushPath();
+        join = roundJoins ? Primitive.JOIN_ROUND : Primitive.JOIN_NONE;
         width = lineWidth;
         color = Rgba.fade(strokeColor, opacity);
         dashCount = 0;
@@ -137,7 +188,6 @@ public final class Canvas {
         if (dashTotal > 0.5f) {
             dashCount = n;
         }
-        round = roundJoins && lineWidth > 1.5f;
         hasPoint = false;
     }
 
@@ -153,17 +203,22 @@ public final class Canvas {
 
     /** Starts a new polyline at {@code x, y} (the dash pattern starts over). */
     public void moveTo(float x, float y) {
+        flushPath();
         lastX = x;
         lastY = y;
         hasPoint = x == x && y == y;
-        drawnSegment = false;
+        pathLength = 0;
         dashIndex = 0;
         dashLeft = dashCount > 0 ? dash[0] : Float.POSITIVE_INFINITY;
     }
 
-    /** Continues the polyline to {@code x, y} (a NaN point breaks it). */
+    /**
+     * Continues the polyline to {@code x, y} (a NaN point breaks it). The polyline is recorded as paths: one for each
+     * part within the plot (grown by the stroke), cut where it leaves.
+     */
     public void lineTo(float x, float y) {
         if (x != x || y != y) {
+            flushPath();
             hasPoint = false;
             return;
         }
@@ -171,16 +226,140 @@ public final class Canvas {
             moveTo(x, y);
             return;
         }
-        if (round && drawnSegment && inside(lastX, lastY, width)) {
-            disc(lastX, lastY, width * 0.5f, color);
+        float dx = x - lastX;
+        float dy = y - lastY;
+        double length = Math.sqrt((double) dx * dx + (double) dy * dy);
+        clip(lastX, lastY, x, y, margin());
+        float t0 = tLow;
+        float t1 = tHigh;
+        if (t1 >= t0) {
+            if (pointCount == 0 || t0 > 0) { // (re-)entering the plot: a path of its own, the dashes carried on
+                flushPath();
+                point(lastX + dx * t0, lastY + dy * t0, pathLength + t0 * length);
+            }
+            point(lastX + dx * t1, lastY + dy * t1, pathLength + t1 * length);
+            if (t1 < 1) {
+                flushPath(); // leaving it
+            }
+        } else {
+            flushPath();
         }
-        segment(lastX, lastY, x, y);
+        pathLength += length;
         lastX = x;
         lastY = y;
     }
 
+    /** How far beyond the plot a path's segments are kept: its width and miters. */
+    private float margin() {
+        return Math.max(width, 1) * (join == Primitive.JOIN_MITER ? Math.max(1, miterLimit) : 1) + 2;
+    }
+
+    /** Appends a point to the open polyline (not a repeat of the last). */
+    private void point(float x, float y, double length) {
+        int o = pointCount * 3;
+        if (pointCount > 0 && points[o - 3] == x && points[o - 2] == y) {
+            return;
+        }
+        if (o + 3 > points.length) {
+            points = grow(points);
+        }
+        points[o] = x;
+        points[o + 1] = y;
+        if (pointCount == 0) {
+            subPathStart = length;
+        }
+        points[o + 2] = (float) (length - subPathStart);
+        pointCount++;
+    }
+
+    @AllowAllocation("a longer polyline than ever before")
+    private static float[] grow(float[] a) {
+        return Arrays.copyOf(a, a.length * 2);
+    }
+
+    /** Records the open polyline as a path, if it has a segment. */
+    private void flushPath() {
+        int n = pointCount;
+        pointCount = 0;
+        if (n < 2 || list == null) {
+            return;
+        }
+        int at = reserve(n);
+        float phase = 0;
+        float d1 = 0;
+        float g1 = 0;
+        float d2 = 0;
+        float g2 = 0;
+        if (dashCount > 0) {
+            phase = (float) (subPathStart % dashTotal);
+            d1 = dash[0];
+            g1 = dash[1];
+            if (dashCount > 2) { // the GPU's pattern holds two dashes and their gaps
+                d2 = dash[2];
+                g2 = dash[3];
+            }
+        }
+        for (int k = 0; k < n; k++) {
+            list.pathVertex(at + k, points[k * 3] + ox, points[k * 3 + 1] + oy, points[k * 3 + 2]);
+        }
+        list.path(at, n, width, color, join, miterLimit, d1, g1, d2, g2, phase);
+        primitives++;
+    }
+
+    /** {@code n} vertices of the painter's block: the first one's index in the list's vertex table. */
+    int reserve(int n) {
+        Vertices v = block;
+        if (v.list != list || v.generation != list.generation()) { // first use, or the list was rebuilt
+            v.list = list;
+            v.generation = list.generation();
+            v.capacity = Math.max(256, Math.max(n, v.capacity));
+            v.first = list.allocateVertices(v.capacity);
+            v.used = 0;
+        } else if (v.used + n > v.capacity) { // more than ever: a larger block from here on (this one stays drawn)
+            v.capacity = Math.max(v.capacity * 2, v.used + n * 2);
+            v.first = list.allocateVertices(v.capacity);
+            v.used = 0;
+        }
+        int at = v.first + v.used;
+        v.used += n;
+        return at;
+    }
+
+    // ---------------------------------------------------------------- envelope columns
+
+    /** {@code count} envelope columns' vertices (written by {@link #column}): their first index. */
+    int columns(int count) {
+        flushPath();
+        return reserve(count);
+    }
+
+    /** Column {@code k} of those at {@code at}: its first, last, lowest and highest sample's y (NaN: none). */
+    void column(int at, int k, float first, float last, float low, float high) {
+        list.columnVertex(at + k, first + oy, last + oy, low + oy, high + oy);
+    }
+
+    /**
+     * Strokes {@code count} columns at {@code at} with the current stroke, the first centred at {@code x}, the next
+     * {@code step} pixels on each (1, or -1 on an inverted axis); {@code steps}: connectors as stairs.
+     */
+    void strokeColumns(int at, int count, float x, float step, boolean steps) {
+        if (count > 0 && stroking()) {
+            list.columns(at, count, x + ox, step, width, color, 0, steps);
+            primitives++;
+        }
+    }
+
+    /** Fills {@code count} columns at {@code at} from {@code base} to their farthest samples in {@code fill}. */
+    void fillColumns(int at, int count, float x, float step, float base, long fill) {
+        if (count > 0 && Rgba.a(fill) > 0) {
+            list.columns(at, count, x + ox, step, 0, fill, base + oy, false);
+            primitives++;
+        }
+    }
+
     /** One stroked segment (dashed with the current phase; the polyline's position is not changed). */
     public void line(float xa, float ya, float xb, float yb) {
+        flushPath();
         if (dashCount == 0) {
             clipped(xa, ya, xb, yb);
             return;
@@ -191,7 +370,6 @@ public final class Canvas {
     }
 
     private void segment(float xa, float ya, float xb, float yb) {
-        drawnSegment = true;
         if (dashCount == 0) {
             clipped(xa, ya, xb, yb);
             return;
@@ -335,6 +513,7 @@ public final class Canvas {
 
     /** A box {@code bx0..by1} (content-box pixels) in {@code fill} (already faded), corners rounded by {@code r}. */
     public void box(float bx0, float by0, float bx1, float by1, long fill, float r, float border, long borderColor) {
+        flushPath();
         float ax = Math.min(bx0, bx1);
         float bx = Math.max(bx0, bx1);
         float ay = Math.min(by0, by1);
@@ -354,12 +533,14 @@ public final class Canvas {
 
     /** A disc of radius {@code r} at {@code x, y} in {@code fill} (already faded). */
     public void disc(float x, float y, float r, long fill) {
+        flushPath();
         list.box(x - r + ox, y - r + oy, x + r + ox, y + r + oy, fill, r, r, r, r, 0, 0);
         primitives++;
     }
 
     /** A triangle (content-box pixels) in {@code fill} (already faded), anti-aliased on {@code edges}. */
     public void triangle(float xa, float ya, float xb, float yb, float xc, float yc, long fill, int edges) {
+        flushPath();
         float minX = Math.min(xa, Math.min(xb, xc));
         float maxX = Math.max(xa, Math.max(xb, xc));
         float minY = Math.min(ya, Math.min(yb, yc));
@@ -426,6 +607,7 @@ public final class Canvas {
      * colour (or the fill when there is no outline) and at least a pixel.
      */
     public void marker(Marker shape, float x, float y, float size, long fill, float outline, long outlineColor) {
+        flushPath();
         if (shape == Marker.NONE || !(size > 0) || !inside(x, y, size)) {
             return;
         }
@@ -503,20 +685,23 @@ public final class Canvas {
     }
 
     /** Text at {@code x, y} (the block's top left, content-box pixels) in {@code textColor} (already faded). */
-    public void text(TextBlock block, float x, float y, long textColor) {
-        block.record(list, x + ox, y + oy, textColor, 0, 0, 0);
-        primitives += block.glyphCount();
+    public void text(TextBlock text, float x, float y, long textColor) {
+        flushPath();
+        text.record(list, x + ox, y + oy, textColor, 0, 0, 0);
+        primitives += text.glyphCount();
     }
 
     /** An image of texture {@code texture}'s region {@code u0..v1} over the box (content-box pixels). */
     public void image(float bx0, float by0, float bx1, float by1, float u0, float v0, float u1, float v1, int texture,
         long tint) {
+        flushPath();
         list.image(bx0 + ox, by0 + oy, bx1 + ox, by1 + oy, u0, v0, u1, v1, texture, tint);
         primitives++;
     }
 
     /** The draw list (for what the helpers above do not cover). */
     DrawList list() {
+        flushPath();
         return list;
     }
 

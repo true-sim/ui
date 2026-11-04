@@ -16,7 +16,9 @@ import javax.imageio.ImageIO;
  * A CPU preview of draw lists for the charts (tests only; the engine's GPU renderer is the real one), as ui-controls'
  * but with what charts draw most: anti-aliased line segments with butt ends (as the engine's shader), triangles with
  * anti-aliased and hard edges (a hard edge covers by the half-open rule, so triangles sharing it never cover a pixel
- * twice), images with their texture regions, and clips. Linear light, written as sRGB PNG.
+ * twice), images with their texture regions, clips, and the primitives over vertices (paths with joins, caps and
+ * dashes, envelope columns) by the same coverage the engine's shader works out. Linear light, written as sRGB
+ * PNG.
  */
 final class CpuPreview {
 
@@ -37,7 +39,7 @@ final class CpuPreview {
 
     CpuPreview draw(DrawList[] layers, int count, UiTextures textures) {
         for (int l = 0; l < count; l++) {
-            DrawList list = layers[l];
+            DrawList list = layers[l].baked(); // as it draws: clip offsets and transforms applied
             for (int i = 0; i < list.size(); i++) {
                 switch (Primitive.kind(list.header(i))) {
                     case Primitive.BOX -> box(list, i);
@@ -45,6 +47,8 @@ final class CpuPreview {
                     case Primitive.IMAGE -> image(list, i, textures);
                     case Primitive.LINE -> line(list, i);
                     case Primitive.TRIANGLE -> triangle(list, i);
+                    case Primitive.PATH -> path(list, i);
+                    case Primitive.COLUMNS -> columns(list, i);
                     default -> {
                         // glyphs after the layer's shapes
                     }
@@ -239,6 +243,33 @@ final class CpuPreview {
                 }
             }
         }
+    }
+
+    private static float sat(float v) {
+        return Math.max(0, Math.min(1, v));
+    }
+
+    /** A primitive over vertices: its coverage (the union of its pieces, as the shader works it out), blended once. */
+    private void vertexKind(DrawList list, int i) {
+        long c = list.colorAt(i, Primitive.COLOR_A);
+        VertexCoverage cover = new VertexCoverage(w, h);
+        cover.of(list, i);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                float a = cover.at(x, y);
+                if (a > 0 && !clipped(list, i, x + 0.5f, y + 0.5f)) {
+                    blend(x, y, c, a);
+                }
+            }
+        }
+    }
+
+    private void path(DrawList list, int i) {
+        vertexKind(list, i);
+    }
+
+    private void columns(DrawList list, int i) {
+        vertexKind(list, i);
     }
 
     /** A triangle: anti-aliased edges by distance, hard edges by the half-open rule. */

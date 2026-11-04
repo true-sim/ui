@@ -1752,6 +1752,8 @@ public final class Chart implements Ui.FrameListener, UiListener {
     /** The chart's own content: grid, axes, ticks, labels, titles. */
     private final class FramePainter implements Painter {
 
+        private final Canvas.Vertices vertices = new Canvas.Vertices(); // its block of the vertex table
+
         @Override
         public long measure(int slot, float w, int widthMode, float h, int heightMode) {
             return Measure.size(0, 0);
@@ -1766,7 +1768,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
         public void paint(int slot, DrawList list, float x0, float y0, float x1, float y1, float opacity) {
             frameTextSeen = textVersions(0); // before recording: a glyph arriving meanwhile records again
             Canvas c = canvas;
-            c.begin(list, x0, y0, -1e6f, -1e6f, 1e6f, 1e6f, opacity, scale);
+            c.begin(list, x0, y0, -1e6f, -1e6f, 1e6f, 1e6f, opacity, scale, vertices);
             grid(c, gridMinorPart, false);
             grid(c, gridPart, true);
             for (int i = 0; i < axes.size(); i++) {
@@ -1781,6 +1783,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 float tx = Math.max(0, Math.min(width - titleBlock.width(), centred));
                 c.text(titleBlock, tx, 0, c.fade(ts.rgba(Styles.COLOR)));
             }
+            c.end();
         }
 
         private void grid(Canvas c, Element part, boolean majors) {
@@ -1919,6 +1922,8 @@ public final class Chart implements Ui.FrameListener, UiListener {
     /** The plot's content: the series. */
     private final class PlotPainter implements Painter {
 
+        private final Canvas.Vertices vertices = new Canvas.Vertices(); // its block of the vertex table
+
         @Override
         public long measure(int slot, float w, int widthMode, float h, int heightMode) {
             return Measure.size(0, 0);
@@ -1934,7 +1939,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
             // the plot element's box is the plot rectangle: content-box pixels plus this offset
             plotTextSeen = textVersions(2);
             Canvas c = canvas;
-            c.begin(list, x0 - plotX0, y0 - plotY0, plotX0, plotY0, plotX1, plotY1, opacity, scale);
+            c.begin(list, x0 - plotX0, y0 - plotY0, plotX0, plotY0, plotX1, plotY1, opacity, scale, vertices);
             digitalSlot = 0;
             for (int i = 0; i < series.size(); i++) {
                 Series s = series.get(i);
@@ -1943,6 +1948,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 }
             }
             dataChanged = false;
+            c.end();
         }
     }
 
@@ -1950,6 +1956,8 @@ public final class Chart implements Ui.FrameListener, UiListener {
 
     /** Over everything: drag tools, annotations, crosshair, highlights, boxes, legend, tooltip. */
     private final class OverlayPainter implements Painter {
+
+        private final Canvas.Vertices vertices = new Canvas.Vertices(); // its block of the vertex table
 
         @Override
         public long measure(int slot, float w, int widthMode, float h, int heightMode) {
@@ -1965,7 +1973,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
         public void paint(int slot, DrawList list, float x0, float y0, float x1, float y1, float opacity) {
             overlayTextSeen = textVersions(1);
             Canvas c = canvas;
-            c.begin(list, x0, y0, plotX0, plotY0, plotX1, plotY1, opacity, scale);
+            c.begin(list, x0, y0, plotX0, plotY0, plotX1, plotY1, opacity, scale, vertices);
             for (int i = 0; i < tools.size(); i++) {
                 DragTool t = tools.get(i);
                 if (t.enabled()) {
@@ -2006,6 +2014,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
             c.cull(-1e6f, -1e6f, 1e6f, 1e6f);
             legendPaint(c);
             tooltipPaint(c);
+            c.end();
         }
 
         private void legendPaint(Canvas c) {
