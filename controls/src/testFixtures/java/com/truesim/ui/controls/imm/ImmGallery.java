@@ -58,6 +58,14 @@ public final class ImmGallery {
         this.height = height;
     }
 
+    /**
+     * The gallery over {@code ui} as a live UI runs it: no frames run; call {@link #tool()} in each frame between the
+     * UI's input and its update.
+     */
+    public static ImmGallery live(Ui ui) {
+        return new ImmGallery(ui, 0, 0);
+    }
+
     /** Builds the gallery into {@code ui} and runs frames until it settles. */
     public static ImmGallery build(Ui ui, float width, float height) {
         ImmGallery g = new ImmGallery(ui, width, height);
