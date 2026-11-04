@@ -195,6 +195,27 @@ class ProfilerInteractionTest {
     }
 
     @Test
+    void anEmptyRecordingShowsNothingAndLiveFramesFillIt() {
+        Ui ui = ProfilerViewTest.ui("default");
+        Recording r = new Recording();
+        ProfilerView view = new ProfilerView(new com.truesim.ui.controls.basic.Controls(ui), r);
+        ui.root().add(view.element());
+        ProfilerViewTest.Runner run = new ProfilerViewTest.Runner(ui, new SyntheticInput(), new UiInput(4));
+        view.timeline().live(true);
+        run.settle();
+        assertThat(view.flameGraph().tree().count()).isEqualTo(1);
+        int main = r.lane("main", LaneKind.THREAD);
+        for (int f = 0; f < 10; f++) {
+            r.zone(main, f * 16_000_000L, f * 16_000_000L + 5_000_000, r.name("frame"), 0);
+            r.frame(f, f * 16_000_000L, f * 16_000_000L + 5_000_000, 0, false);
+            r.commit();
+            run.frame();
+        }
+        run.settle();
+        assertThat(view.flameGraph().tree().count()).isEqualTo(2);
+    }
+
+    @Test
     void recordingEdges() {
         Recording r = new Recording(16, 16, 16);
         assertThat(r.startTime()).isEqualTo(Long.MAX_VALUE);

@@ -82,6 +82,16 @@ public final class FlameTree {
         return this;
     }
 
+    /** Empties the tree to a span of {@code nanos} without nodes (nothing to show). Returns this. */
+    public FlameTree empty(long nanos) {
+        count = 0;
+        dropped = 0;
+        maxDepth = 0;
+        node(-1, -1, 0);
+        time[0] = Math.max(0, nanos);
+        return this;
+    }
+
     private int find(int p, int n) {
         for (int c = firstChild[p]; c >= 0; c = nextSibling[c]) {
             if (name[c] == n) {

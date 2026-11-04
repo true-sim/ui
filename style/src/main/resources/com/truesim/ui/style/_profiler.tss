@@ -168,3 +168,15 @@ profiler-table-row {
 scroll-pane.profiler-counters { grow: 1; min-height: 80px; }
 scroll-pane.profiler-counters scroll-content { layout: flex; direction: row; wrap: wrap; gap: tokens.$space-s; }
 chart.profiler-counter { width: 360px; height: 170px; }
+
+// the engine's host of both views on the profiler layer: the frame graph at the top left, the profiler below it
+panel.profiler-host {
+  layout: flex;
+  direction: column;
+  align-items: start;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+  width: 100%;
+  height: 100%;
+}
+panel.profiler-host > profiler { align-self: stretch; grow: 1; }

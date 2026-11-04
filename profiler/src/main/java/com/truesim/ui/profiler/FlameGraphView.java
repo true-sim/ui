@@ -51,7 +51,7 @@ public final class FlameGraphView extends PaintedView {
         if (lane >= 0 && lane < recording.lanes()) {
             tree.build(recording, lane, from, to, (int) ProfilerTunables.MAX_NODES.get());
         } else {
-            tree.build(recording, 0, 0, 0, 1);
+            tree.empty(to - from);
         }
         if (focus >= tree.count()) {
             focus = 0;
