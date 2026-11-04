@@ -39,6 +39,36 @@ class BindingTest {
     private final ChangeClock clock = new ChangeClock();
 
     @Test
+    void aGetterThatThrowsBreaksTheBindingNotTheFrame() {
+        VersionedValue<Waypoint> model = clock.value(new Waypoint("a", new Position(1, 2)));
+        VersionedDouble slider = clock.doubleValue(0);
+        Lens<Position, Double> picky = Lens.of(p -> {
+            if (p.x() < 0) {
+                throw new IllegalStateException("negative");
+            }
+            return p.x();
+        }, Position::withX);
+        Bindings bindings = new Bindings();
+        Binding<Double, Double> b = bindings.bind(Bindable.of(slider), Bindable.through(model, POSITION.then(picky)));
+        model.set(new Waypoint("a", new Position(-1, 2)));
+        assertThat(bindings.poll()).as("no exception escapes").isZero();
+        assertThat(b.broken()).hasMessage("negative");
+        assertThat(bindings.broken()).isOne();
+        assertThat(b.valid()).isFalse();
+        assertThat(b.message()).isEqualTo("negative");
+        assertThat(bindings.poll()).as("quiet until an end changes").isZero();
+        slider.set(4); // an edit while broken: tried again, the getter still throws
+        assertThat(bindings.poll()).isZero();
+        assertThat(b.broken()).isNotNull();
+        model.set(new Waypoint("a", new Position(3, 2)));
+        assertThat(bindings.poll()).isEqualTo(1);
+        assertThat(b.broken()).isNull();
+        assertThat(bindings.broken()).isZero();
+        assertThat(slider.get()).isEqualTo(3.0);
+        assertThat(b.valid()).isTrue();
+    }
+
+    @Test
     void bothDirections() {
         VersionedValue<Waypoint> model = clock.value(new Waypoint("a", new Position(1, 2)));
         VersionedDouble slider = clock.doubleValue(0);

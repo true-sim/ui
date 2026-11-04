@@ -20,6 +20,10 @@ import java.util.Objects;
  * Both directions compare versions, so a frame where nothing changed costs two loads and allocates nothing. An edit
  * and a model change in the same frame: the edit is written first, then the model (now holding it) is shown.
  *
+ * <p><b>Failures.</b> A getter, wither, converter or control that throws does not stop the frame: the binding is
+ * {@linkplain #broken() broken} (its element shows {@code :invalid}, {@link #message()} says why, the failure is
+ * logged once), and it tries again when either end changes.
+ *
  * <pre>{@code
  * Binding<Double, Double> b = ui.bindings().bind(Bindable.of(slider.model()),
  *     Bindable.through(material, MaterialProperties.ROUGHNESS));
@@ -47,6 +51,9 @@ public final class Binding<M, C> {
     private long modelSeen;
     private M shownModel;
     private long controlSeen;
+    private RuntimeException broken; // the failure of the last poll, or null
+    private long brokenModel = -1;
+    private long brokenControl = -1;
 
     /** Binds {@code control} to {@code model} through {@code converter}; the control shows the model's value now. */
     @AllowAllocation("bindings are made when a UI is built")
@@ -105,8 +112,45 @@ public final class Binding<M, C> {
         show();
     }
 
-    /** Brings both ends up to date: an edit into the model, then a model change into the control. */
+    /**
+     * Brings both ends up to date: an edit into the model, then a model change into the control. A failure breaks the
+     * binding instead of escaping ({@link #broken()}); returns whether anything changed.
+     */
     public boolean poll() {
+        if (broken != null) {
+            if (model.version() == brokenModel && control.version() == brokenControl) {
+                return false; // nothing changed since it failed
+            }
+            broken = null;
+        }
+        try {
+            return pollEnds();
+        } catch (RuntimeException e) {
+            fail(e);
+            return false;
+        }
+    }
+
+    /** Breaks the binding on {@code e}: disabled until an end changes, its element invalid, the failure logged. */
+    @AllowAllocation("a binding failing: logged and shown, not per frame")
+    private void fail(RuntimeException e) {
+        brokenModel = model.version();
+        brokenControl = control.version();
+        modelSeen = brokenModel;
+        controlSeen = brokenControl;
+        LOG.log(System.Logger.Level.WARNING, "A binding failed and is disabled until an end changes: " + e, e);
+        broken = e;
+        invalid(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+    }
+
+    /** The failure that broke it (a getter, wither, converter or control that threw), or null while it works. */
+    public RuntimeException broken() {
+        return broken;
+    }
+
+    private static final System.Logger LOG = System.getLogger(Binding.class.getName());
+
+    private boolean pollEnds() {
         boolean changed = false;
         if (control.version() != controlSeen) {
             controlSeen = control.version();

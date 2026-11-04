@@ -29,6 +29,7 @@ public final class Property<T, V> implements Lens<T, V> {
     private final boolean inPlace;
     private final Annotations annotations;
     private final int index;
+    private final Class<?> owner; // the type it is a property of (its model's), or null: any
 
     private Property(Builder<T, V> b) {
         this.name = b.name;
@@ -40,6 +41,7 @@ public final class Property<T, V> implements Lens<T, V> {
         this.inPlace = b.inPlace;
         this.annotations = b.annotations;
         this.index = b.index;
+        this.owner = b.owner;
     }
 
     /** A property named {@code name} of declared type {@code type} (a primitive class for primitives). */
@@ -65,6 +67,11 @@ public final class Property<T, V> implements Lens<T, V> {
     /** The key type of a map, or null. */
     public Class<?> keyType() {
         return keyType;
+    }
+
+    /** The type it is a property of (its model's type), or null where it was not told. */
+    public Class<?> owner() {
+        return owner;
     }
 
     /** The place in declaration order. */
@@ -116,15 +123,27 @@ public final class Property<T, V> implements Lens<T, V> {
         return b.toString();
     }
 
+    /**
+     * The value of {@code whole}; null where {@code whole} is not of its {@link #owner} type: a lens into a
+     * polymorphic element read after the element there changed type (a list reordered, an item replaced), before its
+     * rows were rebuilt for the new one, reads nothing instead of casting it.
+     */
     @Override
     public V get(T whole) {
+        if (owner != null && whole != null && !owner.isInstance(whole)) {
+            return null;
+        }
         return getter.apply(whole);
     }
 
+    /** A copy of {@code whole} with the value; {@code whole} unchanged where it is not of its {@link #owner} type. */
     @Override
     public T with(T whole, V value) {
         if (wither == null) {
             throw new UnsupportedOperationException(name + " is read-only");
+        }
+        if (owner != null && whole != null && !owner.isInstance(whole)) {
+            return whole;
         }
         return wither.apply(whole, value);
     }
@@ -146,6 +165,7 @@ public final class Property<T, V> implements Lens<T, V> {
         b.inPlace = inPlace;
         b.annotations = annotations;
         b.index = index;
+        b.owner = owner;
         return b;
     }
 
@@ -172,6 +192,7 @@ public final class Property<T, V> implements Lens<T, V> {
         private boolean inPlace;
         private Annotations annotations = Annotations.NONE;
         private int index = -1;
+        private Class<?> owner;
 
         Builder(String name, Class<?> type) {
             this.name = Objects.requireNonNull(name, "name");
@@ -222,6 +243,12 @@ public final class Property<T, V> implements Lens<T, V> {
         /** The annotations. */
         public Builder<T, V> annotations(Annotations value) {
             annotations = value == null ? Annotations.NONE : value;
+            return this;
+        }
+
+        /** The type it is a property of (by default: the type of the model it is added to). */
+        public Builder<T, V> owner(Class<?> value) {
+            owner = value;
             return this;
         }
 

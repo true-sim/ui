@@ -164,6 +164,9 @@ public final class PropertyModel<T> {
             if (property.index() < 0) {
                 property = property.toBuilder().index(properties.size()).build();
             }
+            if (property.owner() == null && type != Object.class) {
+                property = property.toBuilder().owner(type).build(); // its getter checks what it is given
+            }
             for (Property<T, ?> p : properties) {
                 if (p.name().equals(property.name())) {
                     throw new IllegalArgumentException(type.getSimpleName() + " has two properties " + p.name());
