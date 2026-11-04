@@ -339,4 +339,127 @@ class DrawListTest {
         list.box(x, 0, x + 10, 10, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
         list.end();
     }
+    @Test
+    void pathsAndColumnsDrawVerticesOfTheVertexTable() {
+        DrawList list = new DrawList();
+        int start = list.allocate(3);
+        int at = list.allocateVertices(3);
+        assertThat(at).isZero();
+        assertThat(list.vertexCount()).isEqualTo(3);
+        assertThat(list.vertexRanges().count()).isEqualTo(1);
+        list.begin(start, 3);
+        list.transform(2, 10, 20); // a range's baked transform applies to its vertices too
+        list.pathVertex(at, 0, 0, 0);
+        list.pathVertex(at + 1, 10, 0, 10);
+        list.pathVertex(at + 2, Float.NaN, 5, 0); // a break: left out of the box
+        list.path(at, 3, 1.5f, Rgba.WHITE, Primitive.JOIN_MITER | Primitive.CAP_ROUND, 4, 3, 2, 0, 0, 1);
+        int columns = list.allocateVertices(2);
+        list.columnVertex(columns, 1, 2, 0, 3);
+        list.columnVertex(columns + 1, Float.NaN, Float.NaN, Float.NaN, Float.NaN);
+        list.columns(columns, 2, 5.5f, -1, 1, Rgba.WHITE, 0, true);
+        list.columns(columns, 2, 5.5f, -1, 0, Rgba.WHITE, 8, false);
+        assertThat(list.end()).isTrue();
+        assertThat(list.vertexAt(at + 1, 0)).isEqualTo(30); // 2 * 10 + 10
+        assertThat(list.vertexAt(at + 1, 1)).isEqualTo(20);
+        assertThat(list.vertexAt(at + 1, 2)).as("lengths scale").isEqualTo(20);
+        assertThat(list.vertexAt(columns, 3)).isEqualTo(26);
+        assertThat(Primitive.kind(list.header(start))).isEqualTo(Primitive.PATH);
+        assertThat(list.intAt(start, Primitive.FIRST_VERTEX)).isEqualTo(at);
+        assertThat(list.intAt(start, Primitive.VERTEX_COUNT)).isEqualTo(3);
+        assertThat(list.intAt(start, Primitive.STROKE)).isEqualTo(Primitive.JOIN_MITER | Primitive.CAP_ROUND);
+        assertThat(list.floatAt(start, Primitive.WIDTH)).as("sizes scale").isEqualTo(3);
+        assertThat(list.floatAt(start, Primitive.DASH_PHASE)).isEqualTo(2);
+        assertThat(list.intAt(start, Primitive.DASHES)).isEqualTo(Primitive.halves(6, 4));
+        assertThat(list.intAt(start, Primitive.DASHES + 1)).as("one pair repeats").isEqualTo(Primitive.halves(6, 4));
+        assertThat(list.floatAt(start, Primitive.X0)).as("the box: the points and the miters' reach")
+            .isLessThan(10 - 1.5f * 4);
+        assertThat(list.floatAt(start, Primitive.X1)).isGreaterThan(30 + 1.5f * 4);
+        int stroke = start + 1;
+        assertThat(Primitive.kind(list.header(stroke))).isEqualTo(Primitive.COLUMNS);
+        assertThat(list.floatAt(stroke, Primitive.COLUMN_X)).isEqualTo(21);
+        assertThat(list.floatAt(stroke, Primitive.COLUMN_STEP)).isEqualTo(-2);
+        assertThat(list.intAt(stroke, Primitive.STROKE)).isEqualTo(Primitive.COLUMNS_STEPS);
+        assertThat(list.floatAt(stroke, Primitive.X0)).as("leftwards").isLessThan(19);
+        assertThat(list.floatAt(stroke, Primitive.X1)).isGreaterThan(21);
+        assertThat(list.floatAt(stroke, Primitive.Y0)).isLessThan(20);
+        assertThat(list.floatAt(stroke, Primitive.Y1)).isGreaterThan(26);
+        int fill = start + 2;
+        assertThat(list.intAt(fill, Primitive.STROKE)).isEqualTo(Primitive.COLUMNS_FILL);
+        assertThat(list.floatAt(fill, Primitive.BASELINE)).isEqualTo(36);
+        assertThat(list.floatAt(fill, Primitive.WIDTH)).isZero();
+        assertThat(list.floatAt(fill, Primitive.Y1)).as("down to the baseline").isGreaterThan(36);
+        // written again unchanged: nothing dirty; a vertex changed: that vertex
+        list.clean();
+        long version = list.version();
+        list.columnVertex(columns + 1, Float.NaN, Float.NaN, Float.NaN, Float.NaN);
+        list.pathVertex(at, 10, 20, 0); // outside a range: as given (where the range's transform put it)
+        assertThat(list.version()).isEqualTo(version);
+        assertThat(list.vertexRanges().isEmpty()).isTrue();
+        list.pathVertex(at + 2, 1, 1, 1);
+        assertThat(list.vertexRanges().from(0)).isEqualTo(at + 2);
+        assertThat(list.vertexRanges().to(0)).isEqualTo(at + 3);
+        // baked: the clip offset and the transform entry applied, the colours words 7-8 left alone
+        int t = list.addTransform();
+        list.setTransform(t, 0.5f, 100, 0, 0.5f);
+        list.begin(start, 3);
+        list.useTransform(t);
+        list.path(at, 2, 2, Rgba.WHITE, 0, 4, 4, 4, 2, 2, 0);
+        list.columns(columns, 1, 0, 1, 2, Rgba.WHITE, 10, false);
+        list.end();
+        DrawList baked = list.baked();
+        assertThat(baked.vertexAt(at + 1, 0)).isEqualTo(30 * 0.5f + 100);
+        assertThat(baked.vertexAt(at + 1, 2)).isEqualTo(10);
+        assertThat(baked.vertexAt(columns, 3)).isEqualTo(13);
+        assertThat(baked.floatAt(start, Primitive.WIDTH)).isEqualTo(1);
+        assertThat(baked.intAt(start, Primitive.DASHES + 1)).isEqualTo(Primitive.halves(1, 1));
+        assertThat(baked.intAt(start, Primitive.VERTEX_COUNT)).as("not faded as a colour").isEqualTo(2);
+        assertThat(baked.floatAt(start + 1, Primitive.COLUMN_X)).isEqualTo(100);
+        assertThat(baked.floatAt(start + 1, Primitive.BASELINE)).isEqualTo(5);
+        assertThat(baked.floatAt(start + 1, Primitive.COLUMN_STEP)).isEqualTo(0.5f);
+        // misuse; a reset forgets the table
+        assertThatThrownBy(() -> list.pathVertex(99, 0, 0, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.allocateVertices(-1)).isInstanceOf(IllegalArgumentException.class);
+        list.begin(start, 3);
+        assertThatThrownBy(() -> list.path(4, 10, 1, Rgba.WHITE, 0, 4, 0, 0, 0, 0, 0))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.columns(4, 10, 0, 1, 1, Rgba.WHITE, 0, false))
+            .isInstanceOf(IllegalArgumentException.class);
+        list.end();
+        long generation = list.generation();
+        list.reset();
+        assertThat(list.generation()).isGreaterThan(generation);
+        assertThat(list.vertexCount()).isZero();
+        int big = list.allocateVertices(1000); // grows
+        assertThat(list.vertices().length).isGreaterThanOrEqualTo(1000 * DrawList.VERTEX_FLOATS);
+        assertThat(big).isZero();
+        int empty = list.allocate(2);
+        list.begin(empty, 2);
+        list.path(0, 0, 1, Rgba.WHITE, 0, 4, 0, 0, 0, 0, 0); // no points: an empty box
+        list.columns(0, 0, 0, 1, 1, Rgba.WHITE, 0, false);
+        list.end();
+        assertThat(list.floatAt(empty, Primitive.X1)).isZero();
+    }
+
+    @Test
+    void writingVerticesAllocatesNothing() {
+        DrawList list = new DrawList();
+        int start = list.allocate(2);
+        int at = list.allocateVertices(100);
+        int[] n = {0};
+        Runnable frame = () -> {
+            int k = n[0]++;
+            list.begin(start, 2);
+            for (int i = 0; i < 100; i++) {
+                list.columnVertex(at + i, i + k % 3, i, i - 1, i + 1);
+            }
+            list.columns(at, 100, 0.5f, 1, 1, Rgba.WHITE, 0, false);
+            list.path(at, 50, 1, Rgba.WHITE, Primitive.JOIN_ROUND, 4, 0, 0, 0, 0, 0);
+            list.end();
+            list.clean();
+        };
+        for (int i = 0; i < 2000; i++) {
+            frame.run();
+        }
+        AllocationAssertions.assertAllocationFree(frame);
+    }
 }

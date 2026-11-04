@@ -29,6 +29,31 @@ package com.truesim.ui.core.draw;
  * ({@link #XA} to {@link #YC}), in the same space as the box (transformed alike, moved by its clip's offset alike).
  * Its flags say which edges are anti-aliased ({@link #EDGE_AB}, {@link #EDGE_BC}, {@link #EDGE_CA}): a polygon's
  * outline, not the edges triangles of one shape share (those are hard, so no seam shows between them).
+ *
+ * <p><b>Primitives over vertices</b> ({@link #PATH}, {@link #COLUMNS}: a chart's lines and dense areas) draw
+ * {@link #VERTEX_COUNT} vertices of the list's vertex table from {@link #FIRST_VERTEX} on ({@link DrawList#vertices()},
+ * {@link DrawList#VERTEX_FLOATS} floats each), expanded on the GPU into a quad per segment or column: one primitive and
+ * a few floats per point instead of a primitive per segment, and a stream appending points rewrites only their
+ * vertices. Their words 1-4 hold the box they may draw in (what clips, picking and checks read).
+ *
+ * <pre>
+ * word  PATH                                       COLUMNS
+ *  5-6  stroke colour                              stroke or fill colour
+ *  7    first vertex                               first vertex
+ *  8    vertex count                               vertex count (columns)
+ *  9    miter limit (a multiple of the width)      baseline y (filled)
+ *  10   dash phase (px)                            x of the first column's centre
+ *  11   width (px)                                 stroke width (px; 0 filled)
+ *  12-13 dash pattern (4 half floats: dash, gap,   12: column spacing (px)
+ *       dash, gap; 0: solid)
+ *  14   stroke: join (bits 0-1), cap (bits 2-3)    {@link #COLUMNS_FILL}, {@link #COLUMNS_STEPS}
+ * </pre>
+ *
+ * A PATH vertex is {@code x, y, length} (the path's length up to it, for dashes) and a spare float; NaN
+ * coordinates break the path. A COLUMNS vertex is a pixel column's first, last, lowest and highest y (NaN: no
+ * samples): stroked, each column draws a vertical stroke over its span and a connector from the last column's last
+ * sample to its first where their spans do not touch (the M4 envelope's look); filled, the span from the baseline to
+ * the farthest sample.
  */
 public final class Primitive {
 
@@ -53,8 +78,12 @@ public final class Primitive {
     public static final int LINE = 6;
     /** A filled triangle (corners in words 9-14), anti-aliased on the edges its flags name. */
     public static final int TRIANGLE = 7;
+    /** A stroked polyline through vertices of the vertex table: joins, caps and dashes drawn on the GPU. */
+    public static final int PATH = 8;
+    /** Pixel columns of a min-max envelope (vertices: first, last, lowest, highest y), stroked or filled. */
+    public static final int COLUMNS = 9;
     /** How many kinds exist (kinds are below this). */
-    public static final int KINDS = 8;
+    public static final int KINDS = 10;
 
     /** Flag: a box's fill is a linear gradient from colour A to colour B. */
     public static final int FLAG_GRADIENT = 1;
@@ -95,6 +124,35 @@ public final class Primitive {
     public static final int WEIGHT = 14;
     public static final int SOURCE_INSETS = 14;
     public static final int TRANSFORM = 15;
+    /** Primitives over vertices: the first vertex, the vertex count. */
+    public static final int FIRST_VERTEX = 7;
+    public static final int VERTEX_COUNT = 8;
+    /** A {@link #PATH}'s miter limit; a filled {@link #COLUMNS}' baseline. */
+    public static final int MITER_LIMIT = 9;
+    public static final int BASELINE = 9;
+    /** A {@link #PATH}'s dash phase; the x of a {@link #COLUMNS}' first column. */
+    public static final int DASH_PHASE = 10;
+    public static final int COLUMN_X = 10;
+    /** A {@link #PATH}'s dash pattern (words 12-13); a {@link #COLUMNS}' column spacing. */
+    public static final int DASHES = 12;
+    public static final int COLUMN_STEP = 12;
+    /** A {@link #PATH}'s join and cap; a {@link #COLUMNS}' flags. */
+    public static final int STROKE = 14;
+
+    /** {@link #STROKE} of a {@link #PATH}: joins (bits 0-1). */
+    public static final int JOIN_NONE = 0;
+    public static final int JOIN_MITER = 1;
+    public static final int JOIN_BEVEL = 2;
+    public static final int JOIN_ROUND = 3;
+    /** {@link #STROKE} of a {@link #PATH}: caps (bits 2-3). */
+    public static final int CAP_BUTT = 0;
+    public static final int CAP_SQUARE = 4;
+    public static final int CAP_ROUND = 8;
+    /** {@link #STROKE} of a {@link #COLUMNS}: filled from the baseline (else stroked). */
+    public static final int COLUMNS_FILL = 16;
+    /** {@link #STROKE} of a {@link #COLUMNS}: connectors as stairs (level, then up or down). */
+    public static final int COLUMNS_STEPS = 32;
+
     /** A {@link #TRIANGLE}'s corners. */
     public static final int XA = 9;
     public static final int YA = 10;
