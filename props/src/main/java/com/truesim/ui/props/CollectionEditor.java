@@ -88,6 +88,8 @@ public final class CollectionEditor implements PropertyEditor {
     private long seen = -1;
     private String message;
     private Dialog dialog;
+    private String lastKind;
+    private List<String> lastOps;
 
     /** A view and where it came from. */
     private record View(CollectionKind.View view, boolean main) {
@@ -219,7 +221,8 @@ public final class CollectionEditor implements PropertyEditor {
 
     /** Whether items are simple values (no properties of their own): edited by one editor each. */
     public boolean simple() {
-        return !map && elementModel(null).properties().isEmpty();
+        return !map && row.builder().models().of(elementType).properties().isEmpty()
+            && row.builder().models().of(elementType).subtypes().isEmpty();
     }
 
     /**
@@ -497,8 +500,27 @@ public final class CollectionEditor implements PropertyEditor {
 
     // ---------------------------------------------------------------- ops UI
 
-    /** A button running {@code op} on the item {@code index} gives. */
+    /** The operation button of {@code element}, or null. */
+    public Button buttonOf(Element element) {
+        for (Button b : opButtons) {
+            if (b.element() == element) {
+                return b;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A button ({@code button.props-op#<op>}, icon {@code op-<op>}, text from the style's {@code op-label}) running
+     * {@code op} on the item {@code index} gives; enabled by the operation's rule.
+     */
     public Button opButton(String op, java.util.function.IntSupplier index) {
+        for (int i = opButtons.size() - 1; i >= 0; i--) {
+            if (!opButtons.get(i).element().alive()) { // dropped with a rebuilt view
+                opButtons.remove(i).dispose();
+                opHandles.remove(i);
+            }
+        }
         String icon = "op-" + op;
         Button b = new Button(controls, icon, "", Property.words(op));
         b.element().style("props-op");
@@ -510,12 +532,22 @@ public final class CollectionEditor implements PropertyEditor {
         return b;
     }
 
-    /** An operations bar for item {@code index}: remove, up and down, duplicate, as the style offers. */
-    public Element itemOps(int index) {
+    /**
+     * Adds an operations bar for item {@code index} to {@code item}: up and down, duplicate, remove, as the style
+     * offers. With {@code ops-placement: hover} the bar has the fact {@code hover=true} and shows {@code :hover} while
+     * the pointer is over the item (a state of its own: no rule needs a state on an ancestor).
+     */
+    public Element itemOps(Element item, int index) {
         Element bar = ui.element("props", "ops");
-        ui.styles().facts(bar.slot(), Facts.of("hover", Boolean.toString(
-            placement == PropsStyles.OpsPlacement.HOVER)));
+        boolean hover = placement == PropsStyles.OpsPlacement.HOVER;
+        ui.styles().facts(bar.slot(), Facts.of("hover", Boolean.toString(hover)));
         addItemButtons(bar, () -> index);
+        item.add(bar);
+        if (hover) {
+            ui.interaction().on(item, com.truesim.ui.core.event.EventType.ENTER.bit()
+                | com.truesim.ui.core.event.EventType.EXIT.bit(), e -> com.truesim.ui.controls.basic.Control.deepState(
+                    bar, UiState.HOVER, e.type() == com.truesim.ui.core.event.EventType.ENTER));
+        }
         return bar;
     }
 
@@ -532,10 +564,14 @@ public final class CollectionEditor implements PropertyEditor {
         }
     }
 
-    /** Whether item operations go on each item (else in the header, on the main view's selection). */
+    /**
+     * Whether item operations go on each item: in views without a selection (tables of editors, foldouts, chips),
+     * at each item's end or on hover ({@code ops-placement}); views that select (lists, large tables) keep them in the
+     * header, acting on the selection.
+     */
     public boolean opsOnItems() {
         CollectionKind.View v = view();
-        return placement != PropsStyles.OpsPlacement.HEADER || v == null || !v.selects();
+        return v == null || !v.selects();
     }
 
     /** Opens the context menu of item {@code index} on {@code target}'s context event, when the style offers one. */
@@ -623,9 +659,9 @@ public final class CollectionEditor implements PropertyEditor {
             return v == null ? -1 : v.selected();
         }
         for (Element e = parent; e != null; e = e.parent()) {
-            if ("collection-item".equals(e.type())) {
-                String id = e.id();
-                return id == null ? -1 : Integer.parseInt(id.substring(5));
+            String id = e.id();
+            if (id != null && id.startsWith("item-")) { // an item's container: collection-item, chip
+                return Integer.parseInt(id.substring(5));
             }
         }
         return -1;
@@ -781,11 +817,19 @@ public final class CollectionEditor implements PropertyEditor {
 
     private void restyle() {
         ResolvedStyle s = ui.styles().styleOf(root.slot());
-        String k = chooseKind(s.isSet(PropsStyles.COLLECTION) ? s.get(PropsStyles.COLLECTION) : "");
-        List<String> o = s.isSet(PropsStyles.OPS) ? List.copyOf(s.get(PropsStyles.OPS)) : annotatedOps();
+        String styledKind = s.isSet(PropsStyles.COLLECTION) ? s.get(PropsStyles.COLLECTION) : "";
+        List<String> styledOps = s.isSet(PropsStyles.OPS) ? s.get(PropsStyles.OPS) : null;
         PropsStyles.OpsPlacement p = s.get(PropsStyles.OPS_PLACEMENT);
         int va = s.get(PropsStyles.VIRTUALIZE_ABOVE);
         confirm = s.get(PropsStyles.CONFIRM);
+        if (styledKind.equals(lastKind) && Objects.equals(styledOps, lastOps) && p == placement
+            && va == virtualizeAbove) {
+            return; // a hover restyled the editor: nothing it reads changed
+        }
+        lastKind = styledKind;
+        lastOps = styledOps;
+        String k = chooseKind(styledKind);
+        List<String> o = styledOps != null ? List.copyOf(styledOps) : annotatedOps();
         if (!k.equals(kind) || !o.equals(ops) || p != placement || va != virtualizeAbove) {
             kind = k;
             ops = o;

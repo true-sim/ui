@@ -366,13 +366,13 @@ public final class Editors {
         f.step(step(row)).decimals(decimals);
         row.bind(new FieldValue(f, row.controls().clock()), converter, f.element());
         Unit unit = row.annotation(Unit.class);
-        if (unit == null) {
-            return PropertyEditor.of(f.element());
+        Element shown = f.element();
+        if (unit != null) {
+            shown = ui.element("props", "editor");
+            shown.add(f.element());
+            shown.add(ui.label("prop-unit", unit.value()));
         }
-        Element box = ui.element("props", "editor");
-        box.add(f.element());
-        box.add(ui.label("prop-unit", unit.value()));
-        return PropertyEditor.of(box);
+        return text(shown, f.editor());
     }
 
     static PropertyEditor angle(PropertyRow row) {
@@ -491,6 +491,21 @@ public final class Editors {
         }
     }
 
+    /** An editor of {@code element} that drops {@code field}'s frame work with it. */
+    static PropertyEditor text(Element element, TextEditor field) {
+        return new PropertyEditor() {
+            @Override
+            public Element element() {
+                return element;
+            }
+
+            @Override
+            public void dispose() {
+                field.dispose();
+            }
+        };
+    }
+
     private static PropertyEditor text(PropertyRow row, TextEditor editor) {
         Binding<Object, String> b = row.bind(new TextValue(editor, row.controls().clock()),
             Converter.of(v -> v == null ? "" : v.toString(), s -> s), editor.element());
@@ -500,7 +515,7 @@ public final class Editors {
         if (row.readOnly()) {
             editor.readOnly(true);
         }
-        return PropertyEditor.of(editor.element());
+        return text(editor.element(), editor);
     }
 
     static PropertyEditor multiline(PropertyRow row) {
@@ -511,7 +526,7 @@ public final class Editors {
     static PropertyEditor password(PropertyRow row) {
         PasswordField p = PasswordField.create(row.ui(), null, row.property().label(), "Show");
         text(row, p.editor());
-        return PropertyEditor.of(p.element());
+        return text(p.element(), p.editor());
     }
 
     static PropertyEditor asset(PropertyRow row) {

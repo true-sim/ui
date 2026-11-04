@@ -17,8 +17,9 @@ class GalleryTest {
             assertThat(g.panel.rows()).hasSize(15);
             assertThat(g.panel.model().source()).isEqualTo("generated");
             assertThat(g.panel.row("waypoints").editor()).isInstanceOf(CollectionEditor.class);
-            System.out.println(g.panel.layout() + " " + g.panel.ordered());
-            System.out.println(LayoutSanity.check(r.ui));
+            assertThat(g.panel.layout()).isEqualTo(sheet == Rig.DEFAULT ? "form" : "inspector");
+            assertThat(g.home.layout()).isEqualTo("grid");
+            LayoutSanity.assertSane(r.ui, "props gallery");
         }
     }
 }

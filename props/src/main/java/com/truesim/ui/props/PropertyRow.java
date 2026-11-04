@@ -41,6 +41,7 @@ public final class PropertyRow implements Binding.Listener {
     private final List<Binding<?, ?>> bindings = new ArrayList<>();
     private PropertyEditor editor;
     private String editorName = "";
+    private String styledEditor = "";
     private String group = "";
     private int styleHandle = -2;
     private Integer styledOrder;
@@ -158,6 +159,11 @@ public final class PropertyRow implements Binding.Listener {
      */
     public <C> Binding<Object, C> bind(Bindable<C> control, Converter<Object, C> converter, Element invalid) {
         return builder().step(Steps.BIND).bind(this, control, converter, invalid);
+    }
+
+    /** The bindings of the row's editor (its control's ends). */
+    public List<Binding<?, ?>> bindings() {
+        return bindings;
     }
 
     /** Keeps {@code binding} polled by the UI until the row's editor is rebuilt. */
@@ -301,7 +307,11 @@ public final class PropertyRow implements Binding.Listener {
         }
         styleHandle = h;
         ResolvedStyle s = ui().styles().styleOf(element.slot());
-        chooseEditor(s.isSet(PropsStyles.EDITOR) ? s.get(PropsStyles.EDITOR) : "");
+        String styled = s.isSet(PropsStyles.EDITOR) ? s.get(PropsStyles.EDITOR) : "";
+        if (!styled.equals(styledEditor)) { // a hover restyles rows too: choose only when the rule changed
+            styledEditor = styled;
+            chooseEditor(styled);
+        }
         styledVisible = s.isSet(PropsStyles.VISIBLE) ? s.get(PropsStyles.VISIBLE) : null;
         applyVisibility();
         PropsStyles.LabelPlacement lp = s.get(PropsStyles.LABEL_PLACEMENT);

@@ -1445,9 +1445,21 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
 
     // ---------------------------------------------------------------- frame
 
+    /**
+     * Stops the editor's frame work (its element is destroyed or about to be): generated editors drop fields. A field
+     * whose element was destroyed stops by itself at its next frame.
+     */
+    public void dispose() {
+        ui.removeFrameListener(this);
+    }
+
     /** The caret's blink, from the frame's clock. */
     @Override
     public void frame(long nanos) {
+        if (!element.alive()) {
+            dispose();
+            return;
+        }
         now = nanos;
         if (glyphsArrived()) {
             ui.repaint(element);

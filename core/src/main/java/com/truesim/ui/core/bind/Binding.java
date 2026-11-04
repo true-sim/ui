@@ -13,7 +13,9 @@ import java.util.Objects;
  * and written into the model; a value that does not convert or validate is not written, and the bound element (if
  * any) shows {@code :invalid} with {@link #message()} saying why;
  * <li>model to UI: when the model changed (elsewhere: undo, a script, the network), its value is converted
- * ({@link Converter#to}) and shown by the control at once, with no refresh.
+ * ({@link Converter#to}) and shown by the control at once, with no refresh. A model holding more than this value (a
+ * record a lens reads a field of) may change without this value changing: the control keeps what it shows (a value
+ * typed and refused stays, marked invalid).
  * </ul>
  * Both directions compare versions, so a frame where nothing changed costs two loads and allocates nothing. An edit
  * and a model change in the same frame: the edit is written first, then the model (now holding it) is shown.
@@ -43,6 +45,7 @@ public final class Binding<M, C> {
     private Listener listener;
     private String message;
     private long modelSeen;
+    private M shownModel;
     private long controlSeen;
 
     /** Binds {@code control} to {@code model} through {@code converter}; the control shows the model's value now. */
@@ -111,8 +114,12 @@ public final class Binding<M, C> {
             changed = true;
         }
         if (model.version() != modelSeen) {
-            show();
-            changed = true;
+            modelSeen = model.version();
+            M value = model.get();
+            if (!Objects.equals(value, shownModel)) { // a model holding other fields changed, not this one
+                show();
+                changed = true;
+            }
         }
         return changed;
     }
@@ -135,6 +142,7 @@ public final class Binding<M, C> {
         M before = model.get();
         if (model.set(value)) {
             modelSeen = model.version();
+            shownModel = value;
             if (listener != null) {
                 listener.edited(this, before, value);
             }
@@ -143,7 +151,8 @@ public final class Binding<M, C> {
 
     private void show() {
         modelSeen = model.version();
-        control.set(converter.to(model.get()));
+        shownModel = model.get();
+        control.set(converter.to(shownModel));
         controlSeen = control.version();
         invalid(null);
     }

@@ -67,9 +67,12 @@ public final class PropsStyles implements StyleKeyHolder {
 
     /** Where a collection editor's operations show ({@link #OPS_PLACEMENT}). */
     public enum OpsPlacement {
-        /** In the editor's header (add, clear) and on the selected item (the rest). */
+        /**
+         * Add and clear in the editor's header; the item operations at each item's end, or, in views that select
+         * (lists, large tables), in the header acting on the selection.
+         */
         HEADER,
-        /** At the end of each item's row (add and clear stay in the header). */
+        /** As {@link #HEADER} (kept for themes that say where they want them). */
         ROW_END,
         /** At the end of each item's row, shown while the item is hovered. */
         HOVER

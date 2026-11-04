@@ -124,4 +124,13 @@ class GallerySanityTest {
     void textGallery(String theme) {
         check("text gallery", theme, ui -> TextGallery.build(ui, 1280, 720));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void propsGallery(String theme) {
+        check("props gallery", theme, ui -> {
+            com.truesim.ui.props.PropsGallery.build(new Controls(ui), ui.root());
+            settle(ui, 1280, 1700);
+        });
+    }
 }

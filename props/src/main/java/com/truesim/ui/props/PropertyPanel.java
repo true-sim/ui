@@ -49,6 +49,7 @@ public final class PropertyPanel<T> implements Ui.FrameListener {
     private final List<Edit.Listener> listeners = new ArrayList<>();
     private final List<PropertyPanel<?>> children = new ArrayList<>();
     private String layoutName = "";
+    private String styledLayout = "";
     private int styleHandle = -2;
     private long seen = -1;
     private Edit pending;
@@ -157,6 +158,11 @@ public final class PropertyPanel<T> implements Ui.FrameListener {
     /** The path from the root ({@code ""} for the outermost panel). */
     public String path() {
         return path;
+    }
+
+    /** The panels nested in this one (records, collection items). */
+    List<PropertyPanel<?>> children() {
+        return children;
     }
 
     /** The section foldouts the layout made, by group name (the inspector layout). */
@@ -349,7 +355,9 @@ public final class PropertyPanel<T> implements Ui.FrameListener {
         if (h != styleHandle) {
             styleHandle = h;
             ResolvedStyle s = ui.styles().styleOf(root.slot());
-            String name = chooseLayout(s.isSet(PropsStyles.PROPS_LAYOUT) ? s.get(PropsStyles.PROPS_LAYOUT) : "");
+            String styled = s.isSet(PropsStyles.PROPS_LAYOUT) ? s.get(PropsStyles.PROPS_LAYOUT) : "";
+            String name = styled.equals(styledLayout) ? layoutName : chooseLayout(styled);
+            styledLayout = styled;
             if (!name.equals(layoutName)) {
                 layoutName = name;
                 facts();

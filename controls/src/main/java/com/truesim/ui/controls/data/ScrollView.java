@@ -482,7 +482,10 @@ public abstract class ScrollView {
         }
     }
 
-    /** Stops the view's frame work (its elements are destroyed or about to be): generated editors drop views. */
+    /**
+     * Stops the view's frame work (its elements are destroyed or about to be): generated editors drop views. A view
+     * whose root was destroyed stops by itself at its next frame.
+     */
     public void dispose() {
         ui.removeFrameListener(updater);
     }
@@ -492,12 +495,18 @@ public abstract class ScrollView {
 
         @Override
         public void frame(long nanos) {
+            if (!root.alive()) {
+                dispose(); // destroyed without dispose: stop by itself
+                return;
+            }
             ScrollView.this.frame(nanos);
         }
 
         @Override
         public void afterLayout() {
-            laidOut();
+            if (root.alive()) {
+                laidOut();
+            }
         }
     }
 

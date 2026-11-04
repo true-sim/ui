@@ -164,7 +164,7 @@ final class CollectionViews {
                 panels.add(panel);
                 item.add(panel.element());
                 if (editor.opsOnItems()) {
-                    item.add(editor.itemOps(i));
+                    editor.itemOps(item, i);
                 }
                 root.add(item);
             }
@@ -215,7 +215,7 @@ final class CollectionViews {
                 foldouts.add(c);
                 item.add(c.element());
                 if (editor.opsOnItems()) {
-                    item.add(editor.itemOps(i));
+                    editor.itemOps(item, i);
                 }
                 root.add(item);
             }
@@ -248,7 +248,7 @@ final class CollectionViews {
     }
 
     /** Mirrors the editor's items into a versioned list for the data controls. */
-    private static void mirror(CollectionEditor editor, VersionedList<Object> mirror) {
+    private static void sync(CollectionEditor editor, VersionedList<Object> mirror) {
         List<Object> items = editor.items();
         while (mirror.size() > items.size()) {
             mirror.remove(mirror.size() - 1);
@@ -315,7 +315,7 @@ final class CollectionViews {
 
         @Override
         public void structure() {
-            mirror(editor, mirror);
+            sync(editor, mirror);
             int s = selected();
             if (s < 0 && editor.size() > 0) {
                 list.selection().select(0, mirror.get(0)); // the first item's panel shows from the start
@@ -328,7 +328,7 @@ final class CollectionViews {
 
         @Override
         public void update() {
-            mirror(editor, mirror);
+            sync(editor, mirror);
             show(false);
         }
 
@@ -440,7 +440,7 @@ final class CollectionViews {
 
         @Override
         public void structure() {
-            mirror(editor, mirror);
+            sync(editor, mirror);
             mirrorSeen = mirror.version();
         }
 
@@ -452,6 +452,16 @@ final class CollectionViews {
         @Override
         public void dispose() {
             table.dispose();
+        }
+
+        /** The table. */
+        TableView<Object> table() {
+            return table;
+        }
+
+        /** The versioned list the table shows (cell edits land here first). */
+        VersionedList<Object> mirror() {
+            return mirror;
         }
 
         @Override
@@ -474,6 +484,7 @@ final class CollectionViews {
         private final List<Button> buttons = new ArrayList<>();
         private Menu menu;
         private TextEditor input;
+        private Button add;
 
         Chips(CollectionEditor editor) {
             this.editor = editor;
@@ -497,7 +508,7 @@ final class CollectionViews {
                 });
                 root.add(input.element());
             } else if (editor.offered("add") && t.isEnum()) {
-                Button add = new Button(editor.controls(), "op-add", "", "Add " + editor.row().property().label());
+                add = new Button(editor.controls(), "op-add", "", "Add " + editor.row().property().label());
                 add.element().style("props-op");
                 add.element().id("add-chip");
                 ui.layout().visible(add.labelElement().slot(), false);
@@ -523,6 +534,16 @@ final class CollectionViews {
             return input != null || menu != null;
         }
 
+        /** The button adding an enum constant, or null. */
+        Button addButton() {
+            return add;
+        }
+
+        /** The text field adding text, or null. */
+        TextEditor input() {
+            return input;
+        }
+
         /** The menu of constants to add, or null. */
         Menu menu() {
             return menu;
@@ -545,11 +566,8 @@ final class CollectionViews {
                 chip.add(ui.label("chip-label", editor.label(i)));
                 if (editor.offered("remove")) {
                     int index = i;
-                    Button x = new Button(editor.controls(), "op-remove", "", "Remove " + editor.label(i));
-                    x.element().style("props-op");
-                    x.element().id("remove");
-                    ui.layout().visible(x.labelElement().slot(), false);
-                    x.onClick(() -> editor.run("remove", index));
+                    Button x = editor.opButton("remove", () -> index);
+                    x.name("Remove " + editor.label(i));
                     x.enabled(editor.reason("remove", index) == null);
                     chip.add(x.element());
                 }

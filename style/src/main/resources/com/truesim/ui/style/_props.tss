@@ -86,7 +86,7 @@ props.collection-view { layout: flex; direction: column; }
 
 props.ops { layout: flex; direction: row; gap: tokens.$space-xs; align-items: center; }
 props.ops[hover=true] { opacity: 0; }
-collection-item:hover props.ops[hover=true] { opacity: 1; }
+props.ops[hover=true]:hover { opacity: 1; }
 button.props-op { padding: 2px tokens.$space-s; min-height: 22px; shrink: 0; }
 image.icon#op-add { image: "icons/plus" var(--fg) contain; }
 image.icon#op-remove { image: "icons/close" var(--fg) contain; }
