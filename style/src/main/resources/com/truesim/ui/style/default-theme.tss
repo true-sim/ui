@@ -207,3 +207,4 @@ image.meter { size: 12px; }
 
 @import "windows";
 @import "oswindows"; // docking's OS windows
+@import "files"; // the file browser and its dialogs

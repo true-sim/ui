@@ -36,9 +36,16 @@ public final class DataTunables {
     public static final Tunable TYPE_AHEAD_TIMEOUT = Tunable.of("ui.list.typeAheadTimeout", 1, 0.1f, 10,
         "Seconds after which typing in a list starts a new search");
 
+    /** How fast a selection box dragged past a view's edge scrolls it: panel units per second per panel unit past. */
+    public static final Tunable BOX_SCROLL_RATE = Tunable.of("ui.list.boxScrollRate", 12, 0, 200,
+        "How fast dragging a selection box past a list's edge scrolls it");
+    /** How near a view's edge (panel units, inside it) a dragged selection box starts scrolling it. */
+    public static final Tunable BOX_SCROLL_EDGE = Tunable.of("ui.list.boxScrollEdge", 8, 0, 200,
+        "Distance from a list's edge at which a dragged selection box scrolls it");
+
     /** Every data-control tunable, for an engine to register as settings. */
     public static List<Tunable> all() {
         return List.of(FRICTION, MIN_FLING_SPEED, OVERSCROLL, BOUNCE_STIFFNESS, AUTO_HIDE_DELAY, REPEAT_DELAY,
-            REPEAT_INTERVAL, OVERSCAN, TYPE_AHEAD_TIMEOUT);
+            REPEAT_INTERVAL, OVERSCAN, TYPE_AHEAD_TIMEOUT, BOX_SCROLL_RATE, BOX_SCROLL_EDGE);
     }
 }

@@ -1763,6 +1763,11 @@ is listed under Left.
 Mnemonics, repeat buttons, logarithmic sliders, HDR colours and an eyedropper, grapheme-level password masking, spell
 checking, and windows and tabs by commands. Engine-agnostic: `ui-core` (`ScreenSampler`, command fallbacks),
 `ui-text` (`com.truesim.ui.text.spell`), `ui-controls` (`basic`, `text`, `windows`). No engine work in this branch.
+### Group A3, data (2026-11-04): local branch a3-data
+
+The data controls' leftovers of group A2 and the file browser of the plan additions: box selection, horizontal
+lists and wide rows, hidden and grouped table columns with header groups, renderers chosen by styles, records by their
+metadata, a loading look for lazy tree nodes, and open and save dialogs over an engine-agnostic file model.
 
 #### Built
 
@@ -2030,6 +2035,73 @@ changed).
   content, left for the draw-list transform work), a grace for overlays across windows. Built of the small items: a
   touch selection handle dragged past a field's or area's edge scrolls it that far, as a mouse selection does
   (`PasswordClustersTest.aTouchHandleDraggedPastAFieldsEdgeScrollsIt`).
+| Box selection | Dear ImGui 1.91's box select in every virtual view (lists, trees, tables; multiple selection): a drag from empty space (or from a row where rows do not drag: lists not reorderable, trees not draggable, tables) draws a `selection-box` over the viewport and covers rows by index range; Shift adds, the shortcut modifier toggles; past an edge the view scrolls (`ui.list.boxScrollRate`, `ui.list.boxScrollEdge`), so rows never bound are selected too; rows show the result while dragging (`Selection.previewed`), the selection changes once, on release (`Selection.box`); CANCEL (a drag ended without a release) drops it, a click in empty space selects nothing; keys unchanged. `BoxSelect` does the same on a free 2D canvas of the caller's items (rectangles and selected flags) | `VirtualView`, `Selection`, `BoxSelect`, `DataTunables` |
+| Horizontal lists, wide rows | `ListView.horizontal(true)`: items in a row, virtualized along x (a fixed `width` or measured), LEFT and RIGHT move, `[axis=horizontal]` for themes; the wheel scrolls sideways in any view that only scrolls that way. Rows of vertical lists and trees grow to their content: the widest row seen makes the content wide and every row that wide, so wide rows and deep trees scroll sideways (tables place their own cells) | `VirtualView`, `ListView`, `ScrollView` |
+| Hidden columns | `TableView.hide(column, on)` (in its place in the display order; frozen columns follow), `allColumns()`; `ColumnMenu.attach(controls, table)`: the header's context menu with a check per column, both ways | `TableView`, `basic.ColumnMenu` |
+| Layout description | `TableView.layoutDescription()`: `column "<key>" <width> [hidden]` per column in display order, `frozen <n>`, `sort "<key>" ascending/descending`, `group "<key>"`; restored by `layoutDescription(text)` (unknown keys skipped); `onLayoutChanged` for saving; `Column.key` (the header by default) | `TableView`, `Column` |
+| Grouped rows | `TableView.groupBy(columns)` (outermost first, up to four levels): a `table-group-row` before each group (`[level=n]`, `:expanded`; expander, the column's header, its cell view of the group's value, the count, an optional `groupSum`), collapsible by a click, ACCEPT, LEFT and RIGHT; headers are not selectable (`RowSource.selectable`: ranges, select-all and boxes skip them). `GroupedRows` keeps the groups incrementally from the source list's change log: leaves in order with counts and sums in Fenwick trees (a row index to a header or view position in O(log G)); changed rows leave their group and find their new one by binary search over representatives; a new or emptied group regroups from scratch (O(n)). `TableView.baseOrder` sorts before everything (folders first) | `GroupedRows`, `TableView`, `DataView.builds` |
+| Header groups | `TableView.headerGroup(title, columns)`: a `table-header-group-row` above the headers, one `table-header-group-cell` per run of adjacent shown columns of a group (split at the frozen edge, by moves and by hiding) | `TableView` |
+| Renderers by style | The style key `renderer: <name>` on `list-view`, `tree-view` or a column's `table-header-cell` chooses the renderer registered under that name (`ValueRenderers.name`; the built-ins are named `text`, `number`, `check`, `enum`, `vector`, `color`, `record`); views are made again when it changes | `DataStyles.RENDERER`, `StyledRenderer`, `Column.styled` |
+| Records by metadata | The registry's second step is now real: a record shows its components (`record-view#<Class>` of `record-field#<component>`: a `label.record-name` and the component's view through the registry, records nesting); accessors become direct calls once per class (`LambdaMetafactory`), so binding allocates nothing; built-in records (vectors, colours) keep their renderers | `RecordRenderer`, `ValueRenderers` |
+| Loading look | While a node loads its children (`TreeRows.loading`), a `tree-loading` row follows it (an indent, three `tree-loading-dot`s lit in turn per `loading-period`, a `label#loading`: `TreeView.loadingText`); never selected; type-ahead skips it | `TreeRows.placeholder`, `TreeView` |
+| Type-ahead in tables | `TableView.typeAhead(text)`; the search moved into `VirtualView.typeAhead` (lists use it too) | `VirtualView`, `TableView` |
+| File model | `FileModel`: list, stat, roots, home, parent, child, resolve, steps, create folder, rename, places (`FilePlaces`: favourites, recent at most `ui.files.recentLimit`, describe and restore), an optional watch polled once a frame. `NioFileModel` (any `java.nio` file system, its watch service), `MemoryFileModel` (roots like `/` and `D:/`, for tests and galleries) | `controls.files` |
+| File browser | `FileBrowser`: a bar (back, forward, up, `Breadcrumbs` turning into a path field, list or details, new folder), places (`ListView`), a details `TableView` (name with icon, size, modified, type; sort by header, folders first; type-ahead; rename in place) or a `ListView`, a name field, a filter `DropDown`; modes open (one or several), save, folders; Backspace goes up; the folder's watch lists it again; errors show in `label.file-error` | `FileBrowser`, `FileCells` |
+| File dialogs | `FileDialog.open`, `save`, `folder`: the browser in a `Dialog` (`dialog.file-dialog`), accept and cancel, an overwrite confirmation (`dialog.file-confirm`, opaque) when saving over a file, a filter's extension added to new names, the chosen folder first in the recent places | `FileDialog` |
+| Styles | `_data.tss`, `_data-test.tss` (appended) and new partials `_files.tss`, `_files-test.tss` (one `@import` each); icons by id: `back`, `forward`, `edit`, `new-folder`, `folder`, `file`, `home`, `drive`, `favourite`, `recent` | themes |
+| Galleries | `DataGallery` adds a grouped table (a header group, a hidden column, a collapsed group, sums), a horizontal list, a record, a loading tree node and a box-select canvas; `FilesGallery` (new): a browser, and a save dialog asking to replace a file; both in `GallerySanityTest` | `testFixtures` |
+
+#### Decisions
+
+- *Box selection previews, then commits.* The selection is a set of items, and adding entries allocates. While
+  dragging, rows show the result computed from the selection and the box (allocation-free); the set changes once on
+  release. A box covers rows by index range along the axis (rows fill the cross axis), so virtualization needs
+  nothing more.
+- *A box from rows only where rows do not drag*: reorderable lists and draggable trees keep their row drags; there a
+  box starts in empty space (Dear ImGui's choice for full-row items).
+- *Groups by comparators, not keys.* A group is a run of rows comparing equal by the group columns' comparators (the
+  order the view sorts by), found by binary search over representatives, so no key objects are made (ints are not
+  boxed). Representatives of immutable rows stay valid when the row is replaced; a representative changed in place
+  regroups.
+- *A table layout description of its own* (none existed): text lines in the style of `DockLayout`, saved by the game.
+- *The column menu lives in `basic`* (it is a `Menu`), so `data` still does not depend on `basic`.
+- *The file browser reads listings when navigating* (a user action), never per frame; per frame it compares the
+  watch, the view choice, the filter and the selection versions.
+
+#### Tests
+
+`BoxSelectionTest` (replace, add, toggle, CANCEL, a click in empty space, scrolling past the edge selecting rows never
+bound, rows that drag, tables, trees, the canvas helper, no allocation while dragging), `GroupedTableTest` (headers,
+counts, sums, collapsing by pointer and keys, two levels, incremental updates equal to regrouping from scratch over 60
+frames of 40 random changes with groups appearing, hidden columns, the column menu, the layout description round trip,
+header group runs, no allocation with rows changing), `ListsMoreTest` (horizontal lists, wide rows, loading rows and
+their dots, no allocation while loading, renderers by style, records by components without allocation),
+`FileModelTest` (memory, places, `java.nio` in a temporary folder only), `FileBrowserTest` (listing, filters, hidden
+files, sorting, navigation, breadcrumbs, the path field, Backspace, places, open, save with the overwrite
+confirmation, folders, new folder and rename, the watch, type-ahead, the real file system in a temporary folder),
+`DataThemesTest` and `GallerySanityTest` over the new parts and galleries, `DataFilesPreviewTest` (CPU previews).
+Changed: `RenderersTest` (records by metadata), `DataGalleryTest` (the tree's loading row).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; other agents were building: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Table of 100,000 rows grouped by two columns (64 groups, a sum), sorted, 100 changes a frame (most moving between groups) | ≤ 0.5 ms | 0.151 to 0.155 ms median, 0.35 to 0.39 ms p99 (`DataBenchmarkTest`) |
+| The same, regrouped from scratch (a group appearing or emptying) | — | 5.4 ms median |
+| 1,000,000-row sorted, filtered view, 100 changes a frame (unchanged code, measured again) | ≤ 0.5 ms | 0.023 to 0.026 ms median, 0.057 to 0.065 ms p99 |
+
+Allocation-free (without escape analysis): a box dragged while scrolling, a grouped table with rows changing, a
+loading row's dots, lists of records scrolling.
+
+#### Left
+
+- The CPU preview draws a layer's text after all its boxes, so a dialog over a dialog's table shows the table's text
+  in the preview; the GPU draws in order (to check in the engine's screenshots).
+- A group appearing or emptying regroups from scratch (O(n), 5 ms at 100,000 rows).
+- Box selection across the cross axis (a grid of items) and in a table's cell selection; `BoxSelect` does not scroll
+  a scrolled canvas.
+- File dialogs: no rename in the list view, no drag and drop of files, no thumbnails; listings are synchronous (a slow
+  file system should list in the background behind `FileModel`); native OS dialogs maybe later.
 
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
@@ -2216,6 +2288,12 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
   (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources
   (groundwork).
+  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), ~~renderers chosen by a style key,~~
+  ~~records by their metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look
+  for lazy tree nodes~~ (data: built, see "Group A3, data"); world panels, scene picking (`Interactive`, the mesh
+  BVH, GPU picking), touch, pen and XR pointer sources (groundwork).
 
 ### Group A1 (2026-11-03): built, local branches, not yet in CI
 

@@ -47,6 +47,14 @@ public interface RowSource<T> {
     default void refresh() {
     }
 
+    /**
+     * Whether row {@code index} can be selected: false for rows standing for something else (a table's group headers,
+     * a tree's loading placeholder). Ranges, select-all and box selection skip such rows.
+     */
+    default boolean selectable(int index) {
+        return true;
+    }
+
     /** The rows of {@code list}: keys are indices. */
     static <T> RowSource<T> of(VersionedList<T> list) {
         return new ListRows<>(list);

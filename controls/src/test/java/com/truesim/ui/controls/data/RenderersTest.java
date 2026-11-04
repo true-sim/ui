@@ -53,7 +53,9 @@ class RenderersTest {
         assertThat(r.find(Disc.class)).isSameAs(circles); // a superclass before interfaces
         r.register(Disc.class, exactDisc);
         assertThat(r.find(Disc.class)).isSameAs(exactDisc); // the exact class first
-        assertThat(r.find(Point.class).viewType()).isEqualTo("text"); // no records renderer: text
+        assertThat(r.find(Point.class).viewType()).isEqualTo("record-view"); // records by their metadata
+        assertThat(r.named("record")).isSameAs(r.find(Point.class));
+        assertThat(r.named("number")).isSameAs(r.find(Integer.class));
         r.records(records);
         assertThat(r.find(Point.class)).isSameAs(records);
         assertThat(r.find(Named.class)).isSameAs(records); // records before interfaces
@@ -98,7 +100,14 @@ class RenderersTest {
         assertThat(label(f, list, 7)).isEqualTo("0.125, 0, 0, 1");
         assertThat(label(f, list, 8)).isEqualTo("#ff8000ff");
         assertThat(label(f, list, 9)).isEmpty();
-        assertThat(label(f, list, 10)).isEqualTo("Point[x=1, y=2]");
+        // a record by its components: a record-view of record-fields (name, value)
+        Element record = content(f, list, 10);
+        assertThat(record.type()).isEqualTo("record-view");
+        assertThat(record.id()).isEqualTo("Point");
+        Element x = f.ui.store().element(f.ui.store().firstChild(record.slot()));
+        assertThat(x.id()).isEqualTo("x");
+        assertThat(f.ui.text(f.ui.store().element(f.ui.store().lastChild(x.slot()))).toString()).isEqualTo("1");
+        assertThat(f.ui.store().label(list.rowElement(10).slot())).isEqualTo("1");
         // a number becoming text changes kind: another row element
         int created = list.created();
         items.set(1, "now text");

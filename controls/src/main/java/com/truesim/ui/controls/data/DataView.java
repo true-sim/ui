@@ -54,6 +54,7 @@ public final class DataView<T> implements RowSource<T> {
     private int logStart;
     private int logSize;
     private long logFrom;
+    private int builds;
 
     /** A view of {@code source} (all rows, in source order until a filter or comparator is set), on {@code clock}. */
     @AllowAllocation("views are made when a UI is built")
@@ -187,6 +188,7 @@ public final class DataView<T> implements RowSource<T> {
     @AllowAllocation("a rebuild: a new filter, order or structure of the source")
     private void build() {
         rebuild = false;
+        builds++;
         int n = source.size();
         if (scratch.length < n) {
             scratch = new int[n];
@@ -323,6 +325,11 @@ public final class DataView<T> implements RowSource<T> {
         int slot = (logStart + logSize++) % logStamp.length;
         logStamp[slot] = stamp;
         logPosition[slot] = position;
+    }
+
+    /** How often the view was rebuilt (a derived view rebuilds with it). */
+    int builds() {
+        return builds;
     }
 
     /** Source rows the view knows (appended rows beyond are taken in at the next refresh). */

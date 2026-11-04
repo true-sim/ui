@@ -47,6 +47,8 @@ public final class ListView<T> extends VirtualView<T> {
     /** Drag and drop format of a dragged list row. */
     public static final DataFormat<Drag> ROW = DataFormat.of("ui.list.row", Drag.class);
 
+    private static final com.truesim.ui.style.Facts HORIZONTAL = com.truesim.ui.style.Facts.of("axis", "horizontal");
+
     /** Moves a row: the list's reorder action. */
     @FunctionalInterface
     public interface Reorder {
@@ -54,10 +56,8 @@ public final class ListView<T> extends VirtualView<T> {
         void move(int from, int before);
     }
 
-    private final ValueRenderer<? super T> renderer;
+    private final StyledRenderer<T> renderer;
     private final ViewContext context;
-    private final StringBuilder prefix = new StringBuilder();
-    private double lastTyped = Double.NEGATIVE_INFINITY;
     private Function<? super T, ? extends CharSequence> textOf;
     private boolean reorderable;
     private Reorder reorder;
@@ -65,12 +65,13 @@ public final class ListView<T> extends VirtualView<T> {
     private Element preview;
     private int dropBefore = -1;
     private final DragEvents dragEvents = new DragEvents();
+    private final Function<T, CharSequence> typedText = this::textOf;
 
     /** A list named {@code name} showing {@code rows} through {@code renderer}, selecting one row at most. */
     @AllowAllocation("controls are made when a UI is built")
     public ListView(Ui ui, String name, RowSource<T> rows, ValueRenderer<? super T> renderer) {
         super(ui, "list-view", "list-body", name, rows, Role.LIST_ITEM, Selection.Mode.SINGLE);
-        this.renderer = renderer;
+        this.renderer = new StyledRenderer<>(renderer, renderer instanceof ValueRenderers.Dynamic d ? d.registry() : null);
         this.context = new ViewContext(ui, "list-view");
         root.semantics(Role.LIST, name);
         interaction.textInput(root, true); // type-ahead
@@ -108,6 +109,22 @@ public final class ListView<T> extends VirtualView<T> {
         return reorderable;
     }
 
+    /**
+     * Lays the items out in a row ({@code true}: virtualized along x, each item as wide as {@code list-item}'s
+     * {@code width} or measured; LEFT and RIGHT move, the wheel scrolls sideways; the list has the fact
+     * {@code [axis=horizontal]} for themes) or in a column (the default). Returns this.
+     */
+    public ListView<T> horizontal(boolean on) {
+        horizontalAxis(on);
+        ui.styles().facts(root.slot(), on ? HORIZONTAL : com.truesim.ui.style.Facts.NONE);
+        return this;
+    }
+
+    @Override
+    protected boolean rowsDrag() {
+        return reorderable;
+    }
+
     /** Moves rows with {@code action} instead of within the source list; returns this. */
     public ListView<T> reorder(Reorder action) {
         reorder = action;
@@ -121,25 +138,59 @@ public final class ListView<T> extends VirtualView<T> {
 
     @Override
     protected int kindOf(int index, T row) {
-        return renderer.kind(row);
+        return kindOf(renderer.active(), row);
     }
 
     @Override
     @AllowAllocation("rows are created while the visible window fills, then recycled")
     protected Element createRow(int kind) {
         Element row = ui.element("list-item", null);
-        row.add(renderer.create(kind, context));
+        row.add(renderer.active().create(kind, context));
         return row;
     }
 
     @Override
     protected void bindRow(Element row, int kind, int index, T value, CellState state) {
-        renderer.bind(content(row), value, state);
+        bind(renderer.active(), content(row), value, state);
     }
 
     @Override
     protected void unbindRow(Element row, int kind) {
-        renderer.unbind(content(row));
+        renderer.active().unbind(content(row));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <V> int kindOf(ValueRenderer<? super V> r, V value) {
+        return ((ValueRenderer<V>) r).kind(value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <V> void bind(ValueRenderer<? super V> r, Element view, V value, CellState state) {
+        ((ValueRenderer<V>) r).bind(view, value, state);
+    }
+
+    @Override
+    protected boolean afterLayout() {
+        boolean changed = false;
+        if (renderer.update(ui.styles().styleOf(root.slot()))) {
+            dropRows(); // the views are the other renderer's
+            changed = true;
+        }
+        return super.afterLayout() | changed;
+    }
+
+    /**
+     * Resolves the style key {@code renderer} (a {@link DataStyles#RENDERER} name on {@code list-view}) in
+     * {@code registry}; returns this. Lists made by {@link #of} use their dynamic renderer's registry.
+     */
+    public ListView<T> renderers(ValueRenderers registry) {
+        renderer.registry(registry);
+        return this;
+    }
+
+    /** The renderer in use: the list's own, or the one its style names. */
+    public ValueRenderer<? super T> renderer() {
+        return renderer.active();
     }
 
     private Element content(Element row) {
@@ -151,25 +202,7 @@ public final class ListView<T> extends VirtualView<T> {
 
     @Override
     protected void typed(CharSequence text) {
-        int n = rows().size();
-        if (n == 0 || text.isEmpty()) {
-            return;
-        }
-        if (now() - lastTyped > DataTunables.TYPE_AHEAD_TIMEOUT.get()) {
-            prefix.setLength(0);
-        }
-        lastTyped = now();
-        prefix.append(text);
-        int start = current() < 0 ? 0 : current();
-        // one more character searches from the current row (it may still match), a new search from the next
-        int from = prefix.length() == text.length() ? start + 1 : start;
-        for (int k = 0; k < n; k++) {
-            int i = (from + k) % n;
-            if (startsWith(textOf(rows().get(i)), prefix)) {
-                moveTo(i, false, false);
-                return;
-            }
-        }
+        typeAhead(text, typedText);
     }
 
     @AllowAllocation("typing: values that are not text are converted")
@@ -178,18 +211,6 @@ public final class ListView<T> extends VirtualView<T> {
             return textOf.apply(value);
         }
         return value instanceof CharSequence cs ? cs : String.valueOf(value);
-    }
-
-    private static boolean startsWith(CharSequence text, CharSequence prefix) {
-        if (text == null || text.length() < prefix.length()) {
-            return false;
-        }
-        for (int i = 0; i < prefix.length(); i++) {
-            if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(prefix.charAt(i))) {
-                return false;
-            }
-        }
-        return true;
     }
 
     // ---------------------------------------------------------------- reordering
@@ -204,22 +225,29 @@ public final class ListView<T> extends VirtualView<T> {
         return preview;
     }
 
-    /** The row a pointer at UI pixel {@code y} would drop before. */
-    private int insertionAt(float y) {
+    /** The row a pointer at UI pixel {@code x, y} would drop before. */
+    private int insertionAt(float x, float y) {
         int n = rows().size();
         if (n == 0) {
             return 0;
         }
-        double at = (y - layout.y(viewport.slot())) / scale() + vertical().position();
+        double at = contentAlong(x, y);
         int i = extents().indexAt(at);
         return at > extents().offset(i) + extents().size(i) / 2 ? i + 1 : i;
     }
 
     private void showIndicator(int before) {
         dropBefore = before;
-        double base = layout.scrollY(body.slot()) - vertical().position(); // the rows' origin, see VirtualView
+        boolean across = horizontalAxis();
+        double base = across ? layout.scrollX(body.slot()) - horizontal().position()
+            : layout.scrollY(body.slot()) - vertical().position(); // the rows' origin, see VirtualView
         float at = (float) (extents().offset(before) + base);
-        layout.offsets(indicator.slot(), 0, at, 0, at).visible(indicator.slot(), true);
+        if (across) {
+            layout.anchors(indicator.slot(), 0, 0, 0, 1).offsets(indicator.slot(), at, 0, at, 0);
+        } else {
+            layout.anchors(indicator.slot(), 0, 0, 1, 0).offsets(indicator.slot(), 0, at, 0, at);
+        }
+        layout.visible(indicator.slot(), true);
     }
 
     private void hideIndicator() {
@@ -272,12 +300,12 @@ public final class ListView<T> extends VirtualView<T> {
                     Drag drag = e.drag() == null ? null : e.drag().get(ROW);
                     if (drag != null && drag.list() == ListView.this) {
                         e.acceptDrop(DragOperation.MOVE);
-                        showIndicator(insertionAt(e.y()));
+                        showIndicator(insertionAt(e.x(), e.y()));
                     }
                 }
                 case DROP -> {
                     Drag drag = e.drag().get(ROW);
-                    int before = dropBefore >= 0 ? dropBefore : insertionAt(e.y());
+                    int before = dropBefore >= 0 ? dropBefore : insertionAt(e.x(), e.y());
                     hideIndicator();
                     if (drag != null && drag.list() == ListView.this) {
                         move(drag.index(), before);

@@ -93,3 +93,4 @@ panel.meter {
 
 @import "windows-test";
 @import "oswindows-test"; // docking's OS windows
+@import "files-test"; // the file browser and its dialogs

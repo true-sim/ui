@@ -31,6 +31,18 @@ public final class DataStyles implements StyleKeyHolder {
     /** The narrowest a table column gets by resizing, in panel units. */
     public static final StyleKey<Float> COLUMN_MIN_WIDTH = StyleKey.number("column-min-width", 24, 0, 100_000);
 
+    /**
+     * The renderer of a list's items, a tree's nodes or a table column's cells by name: on a {@code list-view},
+     * {@code tree-view} or a {@code table-header-cell} (of the column), it chooses the renderer registered under that
+     * name in the control's {@link ValueRenderers} ({@link ValueRenderers#name}); empty or unknown names keep the
+     * control's own.
+     */
+    public static final StyleKey<String> RENDERER = StyleKey.of("renderer", StyleTypes.string(), "");
+    /** How long a loading placeholder's dots take to chase round once (a tree node loading its children). */
+    public static final StyleKey<Float> LOADING_PERIOD = StyleKey.of("loading-period", StyleTypes.duration(), 0.9f);
+    /** How far a table's group header row indents each grouping level, in panel units. */
+    public static final StyleKey<Float> GROUP_INDENT = StyleKey.number("group-indent", 16, 0, 10_000);
+
     /** When a scroll bar shows. */
     public enum ScrollbarVisibility {
         /** When its axis overflows. */

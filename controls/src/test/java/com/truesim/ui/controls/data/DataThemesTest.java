@@ -39,7 +39,8 @@ class DataThemesTest {
             }
             String key = store.type(s) + (store.id(s) == null ? "" : "#" + store.id(s));
             if (key.startsWith("table-") || key.startsWith("scroll") || key.startsWith("list-")
-                || key.startsWith("tree-") || key.startsWith("value-") || key.startsWith("label#")) {
+                || key.startsWith("tree-") || key.startsWith("value-") || key.startsWith("label#")
+                || key.startsWith("selection-") || key.startsWith("record-") || key.startsWith("canvas-")) {
                 if (!out.containsKey(key)) {
                     if (state != 0) {
                         store.state(s, state, true);
@@ -73,7 +74,10 @@ class DataThemesTest {
             "tree-view", "tree-item", "tree-indent", "tree-expander", "tree-drop-indicator", "table-view",
             "table-header", "table-header-row", "table-header-cell", "table-sort-indicator", "table-column-grip",
             "table-filter-row", "table-filter-cell", "table-row", "table-cells", "table-frozen", "table-cell",
-            "table-column-drop-indicator", "value-check", "label#number", "label#text", "label#enum");
+            "table-column-drop-indicator", "value-check", "label#number", "label#text", "label#enum",
+            "selection-box", "record-view#Waypoint", "record-field#x", "tree-loading", "tree-loading-indicator",
+            "tree-loading-dot", "label#loading", "table-group-row", "table-group-indent", "table-group-expander",
+            "table-header-group-row", "table-header-group-cell", "canvas-item");
         for (String type : normal.keySet()) {
             if (type.equals("list-body") || type.equals("tree-body") || type.equals("table-body")
                 || type.equals("table-cells") || type.equals("table-frozen") || type.equals("scroll-section")

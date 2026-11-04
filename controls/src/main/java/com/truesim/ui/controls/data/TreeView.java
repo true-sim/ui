@@ -17,6 +17,7 @@ import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.event.UiListener;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.layout.Unit;
+import com.truesim.ui.style.Facts;
 
 /**
  * A virtualized tree view (design 5.6) over a {@link VersionedTree} (common-state): its visible rows
@@ -30,11 +31,20 @@ import com.truesim.ui.layout.Unit;
  * TREE_ITEM, {@code :expanded} when open, {@code :selected}, {@code :focused}, {@code :drop-target} while a dragged
  * node would go into them) holding a {@code tree-indent} ({@code indent} times the depth wide), a
  * {@code tree-expander} ({@code :expanded}; {@code :disabled} on leaves, where themes hide it) and the renderer's view.
- * A {@code tree-drop-indicator} shows where a dragged node would go between rows.
+ * A {@code tree-drop-indicator} shows where a dragged node would go between rows. While a node loads its children
+ * ({@link TreeRows#loading}), a {@code tree-loading} row follows it (a {@code tree-indent}, a
+ * {@code tree-loading-indicator} of three {@code tree-loading-dot}s, one at a time {@code [lit=true]}, chasing once
+ * per {@code loading-period}, and a label with id {@code loading}: {@link #loadingText}); it is never selected. The
+ * style key {@code renderer} on {@code tree-view} chooses the node renderer by name ({@link #renderers}).
  *
  * @param <T> the node value type
  */
 public final class TreeView<T> extends VirtualView<Node<T>> {
+
+    /** The row kind of loading placeholders. */
+    static final int LOADING = -1;
+    private static final int DOTS = 3;
+    private static final Facts LIT = Facts.of("lit", "true");
 
     /** The payload of a dragged tree node. */
     public record Drag(TreeView<?> tree, Node<?> node) {
@@ -45,7 +55,11 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
 
     private final VersionedTree<T> model;
     private final TreeRows<T> treeRows;
-    private final ValueRenderer<? super T> renderer;
+    private final StyledRenderer<T> renderer;
+    private CharSequence loadingText = "Loading…";
+    private Element[] loadingRows = new Element[4];
+    private int loadingCount;
+    private int lit = -1;
     private final ViewContext context;
     private final Element indicator;
     private Element preview;
@@ -66,7 +80,7 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
         super(ui, "tree-view", "tree-body", name, rows, Role.TREE_ITEM, Selection.Mode.SINGLE);
         this.model = model;
         this.treeRows = rows;
-        this.renderer = renderer;
+        this.renderer = new StyledRenderer<>(renderer, null);
         this.context = new ViewContext(ui, "tree-view");
         root.semantics(Role.TREE, name);
         indicator = ui.element("tree-drop-indicator", null);
@@ -121,20 +135,64 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
         return dropIndex;
     }
 
+    /** The text of loading placeholders; returns this. */
+    public TreeView<T> loadingText(CharSequence text) {
+        loadingText = text;
+        rebindAll();
+        return this;
+    }
+
+    /** Resolves the style key {@code renderer} on {@code tree-view} in {@code registry}; returns this. */
+    public TreeView<T> renderers(ValueRenderers registry) {
+        renderer.registry(registry);
+        return this;
+    }
+
+    /** The renderer in use: the tree's own, or the one its style names. */
+    public ValueRenderer<? super T> renderer() {
+        return renderer.active();
+    }
+
+    @Override
+    protected boolean rowsDrag() {
+        return draggable;
+    }
+
     @Override
     protected int kindOf(int index, Node<T> row) {
-        return renderer.kind(row.value());
+        return treeRows.placeholder(index) ? LOADING : kindOf(renderer.active(), row.value());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <V> int kindOf(ValueRenderer<? super V> r, V value) {
+        return ((ValueRenderer<V>) r).kind(value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <V> void bind(ValueRenderer<? super V> r, Element view, V value, CellState state) {
+        ((ValueRenderer<V>) r).bind(view, value, state);
     }
 
     @Override
     @AllowAllocation("rows are created while the visible window fills, then recycled")
     protected Element createRow(int kind) {
+        if (kind == LOADING) {
+            Element row = ui.element("tree-loading", null);
+            Element indent = ui.element("tree-indent", null);
+            ui.codeLayout(indent, Ui.CODE_WIDTH);
+            Element indicator = ui.element("tree-loading-indicator", null);
+            for (int i = 0; i < DOTS; i++) {
+                indicator.add(ui.element("tree-loading-dot", null));
+            }
+            row.add(indent).add(indicator).add(ui.label(null, loadingText).id("loading"));
+            return row;
+        }
         Element row = ui.element("tree-item", null);
         Element indent = ui.element("tree-indent", null);
         ui.codeLayout(indent, Ui.CODE_WIDTH);
         Element expander = ui.element("tree-expander", null);
         interaction.pickable(expander, PointerEvents.ALL);
-        row.add(indent).add(expander).add(renderer.create(kind, context));
+        row.add(indent).add(expander).add(renderer.active().create(kind, context));
         return row;
     }
 
@@ -145,29 +203,108 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
 
     @Override
     protected void prepare(int index, Node<T> node, CellState state) {
-        state.tree(node.depth() - 1, treeRows.expanded(node), treeRows.leaf(node));
+        if (treeRows.placeholder(index)) {
+            state.tree(node.depth(), false, true); // one level below the loading node
+        } else {
+            state.tree(node.depth() - 1, treeRows.expanded(node), treeRows.leaf(node));
+        }
     }
 
     @Override
     protected void bindRow(Element row, int kind, int index, Node<T> node, CellState state) {
         UiStore store = ui.store();
         int indent = store.firstChild(row.slot());
-        int expander = store.nextSibling(indent);
-        int content = store.nextSibling(expander);
         float step = ui.styles().styleOf(row.slot()).getFloat(DataStyles.INDENT);
         layout.width(indent, state.depth() * step, Unit.PX);
+        if (kind == LOADING) {
+            int label = store.lastChild(row.slot());
+            ui.text(store.element(label), loadingText);
+            state.name(ui.text(store.element(label)));
+            showLoading(row);
+            return;
+        }
+        int expander = store.nextSibling(indent);
+        int content = store.nextSibling(expander);
         store.state(row.slot(), UiState.EXPANDED, treeRows.expanded(node));
         store.state(expander, UiState.EXPANDED, treeRows.expanded(node));
         store.state(expander, UiState.DISABLED, treeRows.leaf(node));
-        renderer.bind(store.element(content), node.value(), state);
+        bind(renderer.active(), store.element(content), node.value(), state);
     }
 
     @Override
     protected void unbindRow(Element row, int kind) {
+        if (kind == LOADING) {
+            for (int i = 0; i < loadingCount; i++) {
+                if (loadingRows[i] == row) {
+                    loadingRows[i] = loadingRows[--loadingCount];
+                    loadingRows[loadingCount] = null;
+                    return;
+                }
+            }
+            return;
+        }
         UiStore store = ui.store();
         int content = store.lastChild(row.slot());
-        renderer.unbind(store.element(content));
+        renderer.active().unbind(store.element(content));
     }
+
+    @Override
+    protected boolean afterLayout() {
+        boolean changed = false;
+        if (renderer.update(ui.styles().styleOf(root.slot()))) {
+            dropRows(); // the views are the other renderer's
+            changed = true;
+        }
+        return super.afterLayout() | changed;
+    }
+
+    @Override
+    protected void beforeLayout(double seconds) {
+        super.beforeLayout(seconds);
+        if (loadingCount > 0) {
+            float period = ui.styles().styleOf(loadingRows[0].slot()).getFloat(DataStyles.LOADING_PERIOD);
+            double turns = period > 0 ? seconds / period : 0;
+            int now = (int) Math.floor((turns - Math.floor(turns)) * DOTS);
+            if (now != lit) {
+                lit = now;
+                for (int i = 0; i < loadingCount; i++) {
+                    light(loadingRows[i]);
+                }
+            }
+        }
+    }
+
+    /** Keeps a bound loading row: its dots chase while it shows. */
+    @AllowAllocation("grows to the most loading rows shown, once")
+    private void showLoading(Element row) {
+        for (int i = 0; i < loadingCount; i++) {
+            if (loadingRows[i] == row) {
+                light(row);
+                return;
+            }
+        }
+        if (loadingCount == loadingRows.length) {
+            loadingRows = java.util.Arrays.copyOf(loadingRows, loadingCount * 2);
+        }
+        loadingRows[loadingCount++] = row;
+        light(row);
+    }
+
+    /** Lights the current dot of a loading row ({@code [lit=true]}), the others not. */
+    private void light(Element row) {
+        UiStore store = ui.store();
+        int indicator = store.nextSibling(store.firstChild(row.slot()));
+        int d = 0;
+        for (int dot = store.firstChild(indicator); dot != UiStore.NONE; dot = store.nextSibling(dot), d++) {
+            ui.styles().facts(dot, d == lit ? LIT : Facts.NONE);
+        }
+    }
+
+    /** How many loading rows are bound (for tests). */
+    int loadingRows() {
+        return loadingCount;
+    }
+
 
     @Override
     protected void rowCommand(UiEvent e) {
@@ -271,7 +408,7 @@ public final class TreeView<T> extends VirtualView<Node<T>> {
             switch (e.type()) {
                 case CLICK -> {
                     int index = indexOf(ui.store().element(e.targetSlot()));
-                    if (index < 0) {
+                    if (index < 0 || treeRows.placeholder(index)) {
                         return;
                     }
                     Node<T> node = rows().get(index);
