@@ -1759,6 +1759,67 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
+
+The seven areas below were built in parallel on their own branches from `a3-remaining` (b7aed4b: the new
+`UiCommand`s and `UiInput.mnemonic()`), then merged, with the engine's parts built on the merge. Builds:
+`-Ptruesim.common-state=../common-state-tree -Ptruesim.scene=../scene-a3-scene -Ptruesim.common-math=../common-math-au`
+(ui-scene needs the scene branch `a3-scene-raycast`: `SpatialIndex.raycast` with a `RayFilter`; release scene first).
+
+#### Merge decisions
+
+- *Chart style keys in ui-controls* (`com.truesim.ui.controls.charts.ChartStyles` and its enums), as the props' keys
+  are: the shipped themes style charts, so every module that compiles a theme must know the keys without ui-charts.
+- *One service for modules above the controls*: `TunableSource` (charts, scene, gizmo); the scene branch's identical
+  `TunableHolder` went.
+- *Triangles on the transform table*: the charts' `TRIANGLE` primitive keeps its corners in words 9 to 14, recorded
+  like its box and baked with it (`DrawList.baked`); the gizmos draw their filled shapes with it.
+- The file dialog is opaque (the theme's 0.86 surface showed the browser's text through it on the GPU).
+- `PropertyPanel` no longer rebuilds the root before an edit through a setter (it wrote the old value back into the
+  edited object; found by the engine's settings screen).
+
+#### Engine (`ui-rest`: `ui-rest-render`, `ui-rest-input`, `ui-rest-integ`)
+
+| Part | Built |
+|---|---|
+| Renderer | The transform table and dirty ranges (`GpuUiRenderer`, `draw.slang`); `TRIANGLE` in the uber and per-kind paths (anti-aliased flagged edges, a half-open rule on the others: no seams); world panels drawn directly (`worldVertexMain`/`worldFragmentMain`) or into a texture (`WorldPanelRenderer`) |
+| Input | Every new command bound (`ui.docking.windowMove` Alt+F7, `windowResize` Alt+F8, tabs, `CHART_RESET`, gizmos, console toggle without typing the grave; completion and history only while the console's line has the text, `UiCommands.console`), mnemonics and pointer modifiers (`UiKeyboard`, `Pointer.GIZMO_SNAP`), touch, pen, XR-ray and virtual-cursor pointers |
+| Eyedropper | `GpuScreenSampler`: a block of scene colour before the display transform (HDR kept), read back without waiting; the game hands `UiPlugin.screenSampler()` to its `Controls` |
+| Scene | `UiPlugin.scene(graph, index)`: picking through `ScenePicking` with the camera of the frame (no delay), `PickMeshes`, ~~`DepthOcclusion` for gizmos (a level of the depth pyramid, a frame or more old)~~ gizmo occlusion by the depth of the same frame (group A3, occl), `GpuCameraView` (the minimap: a view of the same graph into a bound texture, the same frame), `GpuPicking` (ID buffer: 0.007 ms GPU, a frame late; the CPU path stays the default) |
+| Console | `UiPlugin.console(...)`: `ConsoleLogProvider` (SLF4J 2), `SettingVariables` over the engine's settings with the constraint overlay's reasons, `FileHistoryStore`, `FolderScripts`, `FolderAssets`, `NamedNodes`, `SettingPermissions` |
+| Inspectors | `SettingsSource`/`SettingsScreen` (the generated settings screen), `MaterialParametersSource`; nodes wait for the component stores (D46) |
+| Settings | Every A3 tunable a setting (`UiPlugin.tunables(ui)`, the console's included) |
+| Benchmarks | Module `engine-bench` (`./gradlew :engine-bench:uiBench`) writes engine `docs/benchmarks-ui.md` with the section 11 targets |
+| Screenshots | Every gallery in both themes (`GalleryScreenshots`), the settings screen, world panels, the minimap, gizmo occlusion |
+
+#### Left after the merge
+
+- Every row of engine `docs/benchmarks-ui.md` is within budget on a quiet machine (2026-11-04, after the follow-ups
+  below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
+  0.17 ms p50, 0.26 ms p99).
+- Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
+  and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
+  in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
+  loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
+- `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
+
+#### Follow-ups decided by the lead (2026-11-04)
+
+- Engine rebased onto origin/main (window options v0.175.0, technique registry v0.176.0; `SettingVariables` maps
+  technique slots to choices). ui and scene had not moved.
+- Gizmo occlusion is exact in the same frame (section "occl"); every gizmo operation is a rebindable action
+  ("gizmoact"); chart legends never cover data and the plot's background lies under the grid ("chartfix"); the
+  benchmark misses are fixed ("perf").
+- Overlays (menus, drop-downs, pop-overs, hover cards, tooltips, dialogs) are opaque in both themes (`--overlay`,
+  the raised surface made opaque); panels keep the 0.86 surface.
+- A dialog's buttons follow the platform: the fact `platform` on `dialog-buttons` (`Controls.platform`, the system's
+  by default); Windows and Linux [Open][Cancel] (`row-reverse` in the theme), macOS [Cancel][Open]. Focus order stays
+  the tree's (cancel, then accept).
+- Spelling offers corrections two edits away only for words of `ui.spell.twoEditsFrom` (6) letters or more.
+- Kept: mnemonics underlined while Alt is held, the 11-pixel loupe, 8 atlas pages (`ui.text.atlas.maxPages`), the
+  chart palette and colormap, the gizmo look and 4-deep scene picking, the props and console defaults, box select
+  from a row; world panels default to the texture mode (`WorldPanelRenderer.add(panel)`); OS windows stay top-level.
+
 ### Group A3, gizmoact (2026-11-04): local branch a3-gizmoact
 
 Every gizmo operation as a rebindable action of `ui.gizmo`. Engine branch `ui-rest-gizmoact` (from `ui-rest`).
@@ -1867,50 +1928,16 @@ pixels of its silhouette, and whole again the frame it moved away), the shader c
 - Depth tested primitives on world panels (no depth bound there) and in XR views; a gradient box cannot be depth
   tested (its colour B is the gradient's).
 
-### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
+### Group A3, perf (2026-11-04): local branches `a3-perf` (ui) and `ui-rest-perf` (engine)
 
-The seven areas below were built in parallel on their own branches from `a3-remaining` (b7aed4b: the new
-`UiCommand`s and `UiInput.mnemonic()`), then merged, with the engine's parts built on the merge. Builds:
-`-Ptruesim.common-state=../common-state-tree -Ptruesim.scene=../scene-a3-scene -Ptruesim.common-math=../common-math-au`
-(ui-scene needs the scene branch `a3-scene-raycast`: `SpatialIndex.raycast` with a `RayFilter`; release scene first).
+The benchmark rows that missed (engine `docs/benchmarks-ui.md`).
 
-#### Merge decisions
-
-- *Chart style keys in ui-controls* (`com.truesim.ui.controls.charts.ChartStyles` and its enums), as the props' keys
-  are: the shipped themes style charts, so every module that compiles a theme must know the keys without ui-charts.
-- *One service for modules above the controls*: `TunableSource` (charts, scene, gizmo); the scene branch's identical
-  `TunableHolder` went.
-- *Triangles on the transform table*: the charts' `TRIANGLE` primitive keeps its corners in words 9 to 14, recorded
-  like its box and baked with it (`DrawList.baked`); the gizmos draw their filled shapes with it.
-- The file dialog is opaque (the theme's 0.86 surface showed the browser's text through it on the GPU).
-- `PropertyPanel` no longer rebuilds the root before an edit through a setter (it wrote the old value back into the
-  edited object; found by the engine's settings screen).
-
-#### Engine (`ui-rest`: `ui-rest-render`, `ui-rest-input`, `ui-rest-integ`)
-
-| Part | Built |
-|---|---|
-| Renderer | The transform table and dirty ranges (`GpuUiRenderer`, `draw.slang`); `TRIANGLE` in the uber and per-kind paths (anti-aliased flagged edges, a half-open rule on the others: no seams); world panels drawn directly (`worldVertexMain`/`worldFragmentMain`) or into a texture (`WorldPanelRenderer`) |
-| Input | Every new command bound (`ui.docking.windowMove` Alt+F7, `windowResize` Alt+F8, tabs, `CHART_RESET`, gizmos, console toggle without typing the grave; completion and history only while the console's line has the text, `UiCommands.console`), mnemonics and pointer modifiers (`UiKeyboard`, `Pointer.GIZMO_SNAP`), touch, pen, XR-ray and virtual-cursor pointers |
-| Eyedropper | `GpuScreenSampler`: a block of scene colour before the display transform (HDR kept), read back without waiting; the game hands `UiPlugin.screenSampler()` to its `Controls` |
-| Scene | `UiPlugin.scene(graph, index)`: picking through `ScenePicking` with the camera of the frame (no delay), `PickMeshes`, ~~`DepthOcclusion` for gizmos (a level of the depth pyramid, a frame or more old)~~ gizmo occlusion by the depth of the same frame (group A3, occl), `GpuCameraView` (the minimap: a view of the same graph into a bound texture, the same frame), `GpuPicking` (ID buffer: 0.007 ms GPU, a frame late; the CPU path stays the default) |
-| Console | `UiPlugin.console(...)`: `ConsoleLogProvider` (SLF4J 2), `SettingVariables` over the engine's settings with the constraint overlay's reasons, `FileHistoryStore`, `FolderScripts`, `FolderAssets`, `NamedNodes`, `SettingPermissions` |
-| Inspectors | `SettingsSource`/`SettingsScreen` (the generated settings screen), `MaterialParametersSource`; nodes wait for the component stores (D46) |
-| Settings | Every A3 tunable a setting (`UiPlugin.tunables(ui)`, the console's included) |
-| Benchmarks | Module `engine-bench` (`./gradlew :engine-bench:uiBench`) writes engine `docs/benchmarks-ui.md` with the section 11 targets |
-| Screenshots | Every gallery in both themes (`GalleryScreenshots`), the settings screen, world panels, the minimap, gizmo occlusion |
-
-#### Left after the merge
-
-- Over budget (engine `docs/benchmarks-ui.md`, a busy machine): 100,000 glyphs over a translucent backdrop
-  (0.43 ms, 0.4); chart streaming of 1M points on the GPU (0.27 ms line, 0.35 ms area, 0.2) and its CPU frame with the
-  GPU wait (0.50 ms, 0.5); the console flooded with 1,000 lines a frame (0.45 ms against a chosen 0.3: labels shaped
-  anew every frame). Instanced chart lines and a cache of shaped log rows are the next steps.
-- Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
-  and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
-  in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
-  loupe of touch selection handles, rotated chart text.
-- `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
+| Part | Built | Where |
+|---|---|---|
+| Lines and envelopes over vertices | `Primitive.PATH` and `COLUMNS` draw a range of the list's vertex table (`DrawList.VERTEX_FLOATS` 4: a path's x, y, length; a column's first, last, lowest, highest y), expanded on the GPU: joins (miter with a limit, bevel, round), caps, dashes by length (4 entries), each pixel drawn once at joins; columns stroked as before or filled a quad per 4 columns. Streaming rewrites only changed vertices (compare before write). The streaming chart went from 7,529 primitives (13,216 filled) to 2 or 3 | ui-core, `Canvas`, `LineSeries`, `line-join` miter/bevel, `line-miter-limit`; engine `draw.slang` |
+| Folded backdrop | A full-image box at the bottom of a layer is the pass's clear (its corners and border drawn along the edges): 100,000 glyphs over a backdrop 0.46 to 0.31 ms | engine `GpuUiRenderer` |
+| `ShapeCache` | Every `TextSystem` shapes through a cache of printable Latin runs (`ui.text.shapeCache`, 4,096 runs; 0 off), two generations (a full one ages, runs shown again move up: no frame where everything shapes again) | ui-text |
+| Timing | engine-bench times CPU frames back to back and GPU frames in a run of their own (a GPU wait between UI frames inflated CPU times; engine `docs/pitfalls.md`) | engine `bench` |
 
 ### Group A3, render (2026-11-04): local branch a3-render
 
