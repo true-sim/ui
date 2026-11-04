@@ -52,6 +52,17 @@ public final class Bindings {
         return count;
     }
 
+    /** How many bindings are broken now ({@link Binding#broken()}): a getter, converter or control threw. */
+    public int broken() {
+        int n = 0;
+        for (int i = 0; i < count; i++) {
+            if (bindings[i].broken() != null) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     /** Polls every binding; returns how many changed. */
     public int poll() {
         int changed = 0;

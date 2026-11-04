@@ -764,7 +764,9 @@ public final class CollectionEditor implements PropertyEditor {
         Object value = row.model().get();
         seen = row.model().version();
         List<Object> next = CollectionOps.items(value);
-        boolean structure = next.size() != items.size();
+        // the items' rows are built for their types: rebuilt when the count changed, or an item's type at an index (a
+        // polymorphic list reordered, an item replaced by one of another subtype), so no row reads another type's item
+        boolean structure = next.size() != items.size() || typesMoved(items, next);
         items = next;
         showCount();
         for (int i = 0; i < views.size(); i++) {
@@ -776,6 +778,18 @@ public final class CollectionEditor implements PropertyEditor {
             }
         }
         refreshOps();
+    }
+
+    /** Whether an item at some index is of another class than the item there before. */
+    private static boolean typesMoved(List<Object> before, List<Object> after) {
+        for (int i = 0; i < before.size() && i < after.size(); i++) {
+            Object a = before.get(i);
+            Object b = after.get(i);
+            if ((a == null) != (b == null) || a != null && a.getClass() != b.getClass()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

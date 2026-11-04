@@ -181,6 +181,35 @@ class CollectionsTest {
     }
 
     @Test
+    void reorderingAPolymorphicListRebuildsItsRowsForTheItemsNowThere() {
+        // the engine's UI gallery crashed (a Hold cast to a Move) after the down arrow moved a Move below a Hold: the
+        // rows stayed bound to their indices, built for the types that were there
+        Rig r = new Rig();
+        PropsGallery g = PropsGallery.build(r.c, r.ui.root());
+        r.settle();
+        CollectionEditor orders = editor(g.panel, "orders");
+        assertThat(g.squad.get().orders()).containsExactly(new Move("Gate", 4), new Hold(30));
+        r.click(button(orders, "down", 0).element()); // the first order's down arrow, as a user clicks it
+        r.settle();
+        assertThat(g.squad.get().orders()).containsExactly(new Hold(30), new Move("Gate", 4));
+        Binding<Object, Double> seconds = PipelineTest.binding(PipelineTest.nested(g.panel, "orders[0]"), "seconds");
+        assertThat(seconds.control().get()).as("index 0's row is a Hold's now").isEqualTo(30.0);
+        assertThat(seconds.broken()).isNull();
+        // by code, around the editor: the model changes first, the rows still built for the old order; the frame's
+        // bindings read the new items (another type's are not read) and the editor rebuilds the rows that frame
+        orders.row().model().set(List.of(new Move("Gate", 4), new Hold(30)));
+        r.settle();
+        Binding<Object, String> to = PipelineTest.binding(PipelineTest.nested(g.panel, "orders[0]"), "target");
+        assertThat(to.control().get()).isEqualTo("Gate");
+        // an item replaced by one of another subtype at its index
+        orders.row().model().set(List.of(new Hold(5), new Hold(30)));
+        r.settle();
+        assertThat(PipelineTest.<Double>binding(PipelineTest.nested(g.panel, "orders[0]"), "seconds").control().get())
+            .isEqualTo(5.0);
+        assertThat(PipelineTest.nested(g.panel, "orders[1]").row("seconds")).isNotNull();
+    }
+
+    @Test
     void nestedEditsInListsMakeANewRootAndUndo() {
         Rig r = new Rig();
         PropsGallery g = PropsGallery.build(r.c, r.ui.root());
