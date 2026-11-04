@@ -29,6 +29,8 @@ public final class Pointer {
     public static final int DRAG_COPY = 32;
     /** The {@code ui.pointer.dragLink} action held: a drag links. */
     public static final int DRAG_LINK = 64;
+    /** The {@code ui.gizmo.snap} action held: gizmo drags snap to their increments (or stop snapping). */
+    public static final int GIZMO_SNAP = 128;
 
     private int id;
     private Kind kind = Kind.MOUSE;
