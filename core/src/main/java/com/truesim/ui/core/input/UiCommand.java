@@ -15,8 +15,9 @@ public enum UiCommand {
     NEXT_TAB, PREVIOUS_TAB, CLOSE_TAB,
     // ui.charts (zoom and pan come from the pointer's wheel and drags)
     CHART_RESET,
-    // ui.gizmo
-    GIZMO_TRANSLATE, GIZMO_ROTATE, GIZMO_SCALE, GIZMO_UNIVERSAL, GIZMO_TOGGLE_SPACE, GIZMO_CANCEL,
+    // ui.gizmo (modes, the next mode, spaces and pivots forwards and backwards)
+    GIZMO_TRANSLATE, GIZMO_ROTATE, GIZMO_SCALE, GIZMO_UNIVERSAL, GIZMO_TOGGLE_SPACE, GIZMO_CANCEL, GIZMO_BOUNDS,
+    GIZMO_NEXT_MODE, GIZMO_PREVIOUS_SPACE, GIZMO_NEXT_PIVOT, GIZMO_PREVIOUS_PIVOT,
     // ui.docking and windows: cycle windows, move or resize the focused one by keys or the d-pad
     NEXT_WINDOW, WINDOW_MOVE, WINDOW_RESIZE,
     // ui.console

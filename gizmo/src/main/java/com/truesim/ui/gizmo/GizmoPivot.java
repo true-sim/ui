@@ -11,5 +11,20 @@ public enum GizmoPivot {
     /** A point the editor sets: the 3D cursor ({@link Gizmo#cursor}). */
     CURSOR,
     /** The centre of the selection's world bounds. */
-    BOUNDS_CENTER
+    BOUNDS_CENTER;
+
+    private static final GizmoPivot[] ALL = values();
+
+    /**
+     * The next pivot in the cycle {@code GIZMO_NEXT_PIVOT} steps through: median, individual, active, cursor, bounds
+     * centre.
+     */
+    public GizmoPivot next() {
+        return ALL[(ordinal() + 1) % ALL.length];
+    }
+
+    /** The previous pivot in that cycle ({@code GIZMO_PREVIOUS_PIVOT}). */
+    public GizmoPivot previous() {
+        return ALL[(ordinal() + ALL.length - 1) % ALL.length];
+    }
 }

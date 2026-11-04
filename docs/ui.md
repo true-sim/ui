@@ -1327,10 +1327,15 @@ The binding table below uses gamepad positions (south, east, west, north) so the
 | boxSelect / boxZoom (modifiers) | Shift+LMB drag / RMB drag | — | — | — |
 | resetView (Binary) | double click, Home | north | double tap | — |
 | **ui.gizmo** | | | | |
-| translate/rotate/scale/universal (Binary) | W / E / R / T | d-pad (when the gizmo is focused) | toolbar | — |
-| toggleSpace (Binary) | X | — | toolbar | — |
-| snap (Binary, held) | Ctrl (held) | LT held | toolbar toggle | grip held |
+| translate/rotate/scale/universal (Binary) | W / E / R / T | d-pad up / right / down / left (when the gizmo is focused) | toolbar | — |
+| bounds (Binary) | B | — | toolbar | — |
+| nextMode (Binary: translate, rotate, scale, bounds, universal) | — | — | toolbar | right A |
+| toggleSpace / previousSpace (Binary) | X / Shift+X | — | toolbar | left X / — |
+| nextPivot / previousPivot (Binary: median, individual, active, cursor, bounds centre) | . / Shift+. | — | toolbar | left Y / — |
+| snap (Binary, held) | Ctrl (held) | LT held | toolbar toggle | thumbstick pressed (either hand) |
 | cancelDrag (Binary) | Escape, RMB | east | — | B |
+| grabLeft / grabRight (Binary, held; both: two-handed scale and turn) | — | — | — | left / right grip |
+| handLeft / handRight (Pose: where a hand grabs from) | — | — | — | grip pose (each hand) |
 | **ui.docking** | | | | |
 | dockModifier (Binary, held: no docking while held) | Shift (held while dragging) | — | — | — |
 | nextWindow (Binary) | Ctrl+F6 | — | — | — |
@@ -1339,6 +1344,9 @@ The binding table below uses gamepad positions (south, east, west, north) so the
 | complete, historyUp/Down | Tab, ↑/↓ | — | — | — |
 
 - Text editing actions apply only while the text context is on top (D61). Keys typed as text never fire game actions.
+- The gizmo's keys: B is free in every `ui` group (bounds); period is Blender's pivot key, Shift with X and period goes
+  backwards. The d-pad switches gizmo modes only while the game says a gizmo is focused (`UiCommands.gizmo`); then it
+  moves no focus (the left stick and arrows still do), otherwise it navigates and switches nothing.
 - Shortcut labels in menus show the bound glyph of the last device used (D62).
 
 ---
@@ -1750,6 +1758,37 @@ one PR per repository per group, CI and release once per group.
   tunables are settings; only correct techniques are kept; never add latency; nothing allocated per frame.
 
 ## Build status
+
+### Group A3, gizmoact (2026-11-04): local branch a3-gizmoact
+
+Every gizmo operation as a rebindable action of `ui.gizmo`. Engine branch `ui-rest-gizmoact` (from `ui-rest`).
+
+**Built**
+
+| Item | What | Where |
+|---|---|---|
+| Commands | `GIZMO_BOUNDS`, `GIZMO_NEXT_MODE`, `GIZMO_PREVIOUS_SPACE`, `GIZMO_NEXT_PIVOT`, `GIZMO_PREVIOUS_PIVOT` appended to the gizmo line; `Gizmo` handles them (ignored while dragging, as every switch); `GizmoMode.next`, `GizmoSpace.previous`, `GizmoPivot.next/previous` | ui-core `UiCommand`, ui-gizmo |
+| Actions | `ui.gizmo.bounds` B, `nextMode` (no key), `previousSpace` Shift+X, `nextPivot` period, `previousPivot` Shift+period (not while typing); the mode actions on the d-pad, taken only while a gizmo is focused (`UiCommands.gizmo(BooleanSupplier)`: then the d-pad moves no focus; otherwise it navigates and the switches give nothing) | engine-ui `UiActions`, `UiCommands` |
+| XR | `grabLeft`/`grabRight` (grips; both held: two-handed) and the poses `handLeft`/`handRight` (grip poses) drive `GizmoGrab` through `XrGizmoGrab` (`UiPlugin.gizmoGrab`: each frame after the UI's input; `cancelDrag` cancels, the grip must be let go before it grabs again); `snap` on either thumbstick (grabs and, through `XrPointers`' modifiers, ray drags); right A next mode, left X next space, left Y next pivot (`XrPointers.defaults`) | engine-ui `XrGizmoGrab`, `XrPointers`, `UiPlugin` |
+
+**Decisions**
+
+- *B and period*: B is unused by every `ui` group (bounds); period is the pivot key of Blender's pivot menu; Shift goes
+  backwards (Shift+X, Shift+period), as Shift+Tab does.
+- *The d-pad by focus, not by a context*: a pushed context covering `ui.gizmo` would also take Escape, east and LT
+  from navigation; `UiCommands` instead drops the focus move while a focused gizmo's switch is held, and the switch
+  pressed with a focus move while none is focused.
+- *XR snap on the thumbsticks*, not the grip (now the grab) nor the trigger (the ray's click while grabbing).
+- *No pad bindings for bounds, spaces, pivots*: the four d-pad directions keep the design's four modes; the face
+  buttons are navigation's.
+
+**Tests**: `GizmoCommandsTest` (bounds by command and a face drag, the next mode round, pivots both ways moving the
+gizmo, the space backwards, switches ignored while dragging); engine `UiCommandsTest` (each new key, rebinding,
+typing blocks them, the d-pad by focus without repeats) and `XrGizmoGrabTest` (recorded grip poses: one hand follows,
+two scale with a thumbstick snap, cancel, rebinding the grab to the trigger, a lost hand lets go, allocation free).
+
+**Left**: pad bindings for bounds, spaces and pivots (taste); the XR `cancelDrag` B (its game default is the
+confirm setting's).
 
 ### Group A3, occl (2026-11-04): local branch a3-occl
 
@@ -2406,11 +2445,11 @@ and `scene-core`; scene gains one method (below), on the local scene branch `a3-
 | World panels | `WorldPanel`: a world-space `Ui` on a rectangle placed in the world or following a node; the ray against its plane, then the panel UI's own 2D hit test at the local pixel (a panel where nothing is hit lets the ray through unless it is opaque, `passThrough(false)`), merged by distance with the scene's hits; `ScenePicking.input` hands each panel the pointers whose front-most hit it is (or that its UI captured, at their point on its plane even off it) and `update` updates the panels at their sizes. `transform()` gives the engine the panel's world transform and pixel size for drawing | `WorldPanel`, `ScenePicking.input/update` |
 | `SceneView`, anchors | A camera as the UI sees it (doubles, camera-relative maths): rays from UI points, projection, units per pixel, perspective or orthographic, a viewport in UI pixels. `SceneAnchor`: an `OverlayAnchor` at a world point or a node's projected box | `SceneView`, `SceneAnchor` |
 | Camera views | `CameraView`: a `camera-view` element showing the newest finished image of a `CameraViewSource` (a `UiTexture` and the image's size in it, asked for at the control's pixel size every frame; frames in flight show the last finished image, stretched, so the main view waits for nothing), its frame from the theme, tinted by `color`; pointers over it pick through its camera; markers are overlays anchored through its view (`marker`, `anchor`). `FakeCameraSource` (test fixture) renders a map picture a frame after each request | `CameraView`, `CameraViewSource`, `scene/src/testFixtures` |
-| Gizmos | `Gizmo`: translate (axes, planes, screen centre), rotate (axis rings, view ring, trackball), scale (axes, uniform), bounds (8 corners, 6 faces, the opposite side fixed), universal; spaces local, world, parent, view (`GIZMO_TOGGLE_SPACE` cycles); pivots median, individual, active, cursor, bounds centre; a multi-node selection (children of selected nodes follow their parents, not moved twice); `GIZMO_TRANSLATE/ROTATE/SCALE/UNIVERSAL`; `GIZMO_CANCEL`, `CANCEL` or a right click cancel and restore, `ACCEPT` commits; snapping to `ui.gizmo.snapTranslate/snapRotate/snapScale` while `Pointer.GIZMO_SNAP` is held (or the reverse, `ui.gizmo.snapByDefault`); typed values while dragging (distance, degrees, factor; `DELETE_BACK` edits); `GizmoListener` begin, update, commit, cancel with `GizmoTransforms` (local transforms for undo) | `ui-gizmo` `Gizmo`, `GizmoSolver`, `GizmoApply`, `GizmoShapes` |
+| Gizmos | `Gizmo`: translate (axes, planes, screen centre), rotate (axis rings, view ring, trackball), scale (axes, uniform), bounds (8 corners, 6 faces, the opposite side fixed), universal; spaces local, world, parent, view (`GIZMO_TOGGLE_SPACE` cycles, `GIZMO_PREVIOUS_SPACE` back); pivots (`GIZMO_NEXT_PIVOT`/`GIZMO_PREVIOUS_PIVOT` cycle) median, individual, active, cursor, bounds centre; a multi-node selection (children of selected nodes follow their parents, not moved twice); `GIZMO_TRANSLATE/ROTATE/SCALE/BOUNDS/UNIVERSAL`, `GIZMO_NEXT_MODE`; `GIZMO_CANCEL`, `CANCEL` or a right click cancel and restore, `ACCEPT` commits; snapping to `ui.gizmo.snapTranslate/snapRotate/snapScale` while `Pointer.GIZMO_SNAP` is held (or the reverse, `ui.gizmo.snapByDefault`); typed values while dragging (distance, degrees, factor; `DELETE_BACK` edits); `GizmoListener` begin, update, commit, cancel with `GizmoTransforms` (local transforms for undo) | `ui-gizmo` `Gizmo`, `GizmoSolver`, `GizmoApply`, `GizmoShapes` |
 | Drag solving | In doubles relative to the gizmo's origin: the ray against the axis line (closest points), the handle's plane, the view plane; rings by the angle on their plane, or by the pointer's angle about the projected centre when seen edge-on (as Blender does); the trackball by screen motion; results applied to each node's world transform about the pivot, then into its parent's space (`setLocal`) | `GizmoSolver`, `GizmoApply` |
 | Gizmo picking and drawing | Analytic shapes (segments, rings of 48 segments, squares, spheres) against the ray with `ui.gizmo.pickTolerance` pixels (XR rays: `ui.gizmo.xrPickAngle` degrees), the nearest miss winning, before the scene's objects (`HandlePicker`); axes seen end-on and planes edge-on are hidden. Drawn as projected primitives on the `overlay` layer at a screen-constant size (`gizmo-size` height; XR: `ui.gizmo.xrAngularSize` from the head), filled shapes (planes, arrow tips, the view cube's faces) as triangles (`DrawList.triangle`); every colour, width and size from style parts, `:hover` on the hovered handle's part, `:pressed` while dragged. Hidden parts faded (UI26) by `gizmo-occluded`'s opacity as a `GizmoOcclusion` says: the back halves of rings always; the scene by `RayOcclusion` (the `SpatialIndex` by boxes, the selection ignored) or the engine's depth test | `Gizmo`, `GizmoShapes`, `GizmoOcclusion`, `RayOcclusion` |
 | View cube | `ViewCube`: a `view-cube` element with the cube turned as the camera sees it (faces, edges, a hovered marker from parts); click a face, edge or corner: `Listener.align` with the camera rotation looking from there (world up kept); drag: `Listener.orbit` (`ui.viewCube.orbitSpeed`) | `ViewCube` |
-| XR | Ray picking and dragging of handles; `GizmoGrab`: a direct grab (a grip with the hand in a selected node's box, `ui.gizmo.xrGrabRadius`, or at the gizmo's centre) follows the hand rigidly; two hands move with their midpoint, turn with the line between them and scale with their distance; snapping by a held snap; the same undo hooks | `GizmoGrab` |
+| XR | Ray picking and dragging of handles; `GizmoGrab`: a direct grab (a grip with the hand in a selected node's box, `ui.gizmo.xrGrabRadius`, or at the gizmo's centre) follows the hand rigidly; two hands move with their midpoint, turn with the line between them and scale with their distance; snapping by a held snap; the same undo hooks; fed from the `ui.gizmo` grab actions and hand poses by engine-ui's `XrGizmoGrab` (group A3, gizmoact) | `GizmoGrab` |
 | Styles and settings | `_scene.tss` and `_scene-test.tss` (one `@import` each in both themes): `camera-view`, `gizmo` and its parts, `view-cube` and its parts, `panel.minimap-marker`; no new style keys (parts read `color`, `opacity`, `width`, `height`, `radius`). Tunables reach `Ui.tunables()` through a new `TunableHolder` service (`ui-core`), which `Ui.tunables()` loads: `SceneTunables`, `GizmoTunables` | themes, `Ui.tunables`, `TunableHolder` |
 | Gallery | `SceneGallery` (`ui-gizmo` test fixture): a synthetic scene behind five gizmos (one per mode, one hovered, one partly occluded), a view cube, a minimap with a fake picture and a marker; in `GallerySanityTest` and `ScenePreviewTest` (both themes) | `gizmo/src/testFixtures` |
 | scene | `SpatialIndex.raycast(..., layerMask, RayFilter, Hit)`: a narrow phase decides each reached node's distance (or a miss); boxes beyond the nearest hit so far are not tested | scene `a3-scene-raycast` (ddadbd5) |

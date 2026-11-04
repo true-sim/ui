@@ -11,5 +11,12 @@ public enum GizmoMode {
     /** The selection's box: corner and face handles scale it with the opposite side fixed. */
     BOUNDS,
     /** Translate arrows, rotate rings and scale cubes at once. */
-    UNIVERSAL
+    UNIVERSAL;
+
+    private static final GizmoMode[] ALL = values();
+
+    /** The next mode in the cycle {@code GIZMO_NEXT_MODE} steps through: translate, rotate, scale, bounds, universal. */
+    public GizmoMode next() {
+        return ALL[(ordinal() + 1) % ALL.length];
+    }
 }

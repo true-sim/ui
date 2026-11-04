@@ -17,4 +17,9 @@ public enum GizmoSpace {
     public GizmoSpace next() {
         return ALL[(ordinal() + 1) % ALL.length];
     }
+
+    /** The previous space in that cycle ({@code GIZMO_PREVIOUS_SPACE}). */
+    public GizmoSpace previous() {
+        return ALL[(ordinal() + ALL.length - 1) % ALL.length];
+    }
 }

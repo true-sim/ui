@@ -41,7 +41,11 @@ import java.util.List;
  * cursor or the selection's bounds centre. Dragging solves in doubles ({@link GizmoSolver}) and writes the nodes'
  * transforms through the scene's API; a held {@code ui.gizmo.snap} snaps to increments; typing a number while dragging
  * sets the value (Blender); Escape, a right click or {@code GIZMO_CANCEL} cancel and restore the start; the
- * {@link GizmoListener} hooks give an editor its undo.
+ * {@link GizmoListener} hooks give an editor its undo. Commands switch it (each ignored while dragging, and only while
+ * no text field has the text): {@code GIZMO_TRANSLATE}, {@code GIZMO_ROTATE}, {@code GIZMO_SCALE},
+ * {@code GIZMO_BOUNDS}, {@code GIZMO_UNIVERSAL} the mode, {@code GIZMO_NEXT_MODE} the next one;
+ * {@code GIZMO_TOGGLE_SPACE} and {@code GIZMO_PREVIOUS_SPACE} cycle the space, {@code GIZMO_NEXT_PIVOT} and
+ * {@code GIZMO_PREVIOUS_PIVOT} the pivot.
  *
  * <p><b>Picking.</b> The pointer's ray against the handles' analytic shapes with a tolerance of
  * {@code ui.gizmo.pickTolerance} pixels, before the scene's objects ({@link HandlePicker} of a {@link ScenePicking}).
@@ -836,7 +840,12 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             case GIZMO_ROTATE -> mode(GizmoMode.ROTATE);
             case GIZMO_SCALE -> mode(GizmoMode.SCALE);
             case GIZMO_UNIVERSAL -> mode(GizmoMode.UNIVERSAL);
+            case GIZMO_BOUNDS -> mode(GizmoMode.BOUNDS);
+            case GIZMO_NEXT_MODE -> mode(mode.next());
             case GIZMO_TOGGLE_SPACE -> space(space.next());
+            case GIZMO_PREVIOUS_SPACE -> space(space.previous());
+            case GIZMO_NEXT_PIVOT -> pivot(pivot.next());
+            case GIZMO_PREVIOUS_PIVOT -> pivot(pivot.previous());
             case GIZMO_CANCEL, CANCEL -> cancel();
             case ACCEPT -> commit();
             case DELETE_BACK -> {
