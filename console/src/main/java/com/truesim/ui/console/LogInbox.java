@@ -82,10 +82,14 @@ public final class LogInbox implements LogSink {
         return Arrays.copyOf(buffer, Math.max(n, buffer.length * 2));
     }
 
-    /** Hands every waiting record to {@code sink} (the console's ring), oldest first; returns how many. */
+    /**
+     * Hands every waiting record to {@code sink} (the console's ring), oldest first; returns how many waited. A ring
+     * gets only the records it can hold: a burst larger than it would push the older ones out at once anyway.
+     */
     public synchronized int drainTo(LogSink sink) {
         int n = count;
-        for (int k = 0; k < n; k++) {
+        int skip = sink instanceof LogRing ring ? Math.max(0, n - ring.capacity()) : 0;
+        for (int k = skip; k < n; k++) {
             int at = (head + k) % levels.length;
             logger.set(loggers[at], loggerLengths[at]);
             message.set(messages[at], messageLengths[at]);

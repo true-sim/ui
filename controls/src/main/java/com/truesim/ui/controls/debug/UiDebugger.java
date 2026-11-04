@@ -322,9 +322,9 @@ public final class UiDebugger implements Ui.FrameListener {
             }
             return;
         }
-        boolean open = imm.treeNode(id, line, depth == 0);
+        boolean open = imm.treeNode(id, line, depth == 0 || selected != null && contains(slot, selected.slot()));
         if (open) {
-            if (imm.selectable(id + 1, "(select)", e == selected)) {
+            if (imm.selectable(id | 1L << 62, "(select)", e == selected)) {
                 selected = e;
             }
             for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
@@ -334,6 +334,16 @@ public final class UiDebugger implements Ui.FrameListener {
             }
             imm.treePop();
         }
+    }
+
+    /** Whether {@code slot} is {@code descendant} or an ancestor of it: the tree opens on the selection's path. */
+    private boolean contains(int slot, int descendant) {
+        for (int s = descendant; s != UiStore.NONE; s = store.parent(s)) {
+            if (s == slot) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** {@code type#id.style}, and the label's text in quotes. */
@@ -441,7 +451,8 @@ public final class UiDebugger implements Ui.FrameListener {
         for (int i = 0; i < origins.size(); i++) {
             StyleResolver.Origin o = origins.get(i);
             texts[i * 2] = String.valueOf(o.value());
-            texts[i * 2 + 1] = o.selector() + "  " + o.source();
+            String source = o.source();
+            texts[i * 2 + 1] = o.selector() + "  " + source.substring(source.lastIndexOf('/') + 1);
         }
     }
 
@@ -465,7 +476,7 @@ public final class UiDebugger implements Ui.FrameListener {
 
     private void timings() {
         FrameStats stats = ui.stats();
-        imm.begin("UI frame", 16, 560);
+        imm.begin("UI frame", 980, 600);
         ms("Input", stats.inputNanos());
         ms("Frame code", stats.listenerNanos());
         ms("Styles", stats.styleNanos());

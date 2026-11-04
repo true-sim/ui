@@ -234,6 +234,19 @@ class LogRingTest {
     }
 
     @Test
+    void aBurstLargerThanTheRingHandsOnlyWhatTheRingKeeps() {
+        LogInbox inbox = new LogInbox(100);
+        for (int i = 0; i < 100; i++) {
+            inbox.log(LogLevel.INFO, "a", "m" + i, null, i);
+        }
+        LogRing ring = new LogRing(10);
+        assertThat(inbox.drainTo(ring)).isEqualTo(100);
+        assertThat(ring.size()).isEqualTo(10);
+        assertThat(ring.next()).isEqualTo(10);
+        assertThat(ring.get(0).message().toString()).isEqualTo("m90");
+    }
+
+    @Test
     void levelsHaveNamesAndBits() {
         assertThat(LogLevel.name(LogLevel.WARN)).isEqualTo("warn");
         assertThat(LogLevel.of("WARNING")).isEqualTo(LogLevel.WARN);

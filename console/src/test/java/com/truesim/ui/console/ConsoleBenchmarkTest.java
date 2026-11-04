@@ -78,6 +78,8 @@ class ConsoleBenchmarkTest {
         System.out.println("console flood: 100,000 lines drained and shown in one frame: " + stats(oneFrame));
         // (b) 1,000 lines a frame
         long[] perFrame = new long[2000];
+        long[][] phases = new long[4][perFrame.length];
+        ui.stats().enabled(true);
         for (int f = 0; f < perFrame.length; f++) {
             for (int k = 0; k < 1000; k++) {
                 int n = s[0]++;
@@ -86,8 +88,15 @@ class ConsoleBenchmarkTest {
             long t0 = System.nanoTime();
             frame.run();
             perFrame[f] = System.nanoTime() - t0;
+            phases[0][f] = ui.stats().listenerNanos();
+            phases[1][f] = ui.stats().styleNanos();
+            phases[2][f] = ui.stats().layoutNanos();
+            phases[3][f] = ui.stats().recordNanos();
         }
+        ui.stats().enabled(false);
         System.out.println("console flood: 1,000 lines a frame (drain, filter, rows, record): " + stats(perFrame));
+        System.out.println("console flood: phases: frame code (drain, rows bound) " + stats(phases[0]) + "; styles "
+            + stats(phases[1]) + "; layout " + stats(phases[2]) + "; record " + stats(phases[3]));
         // (c) appending alone
         LogRing alone = new LogRing(10_000);
         long[] append = new long[200];

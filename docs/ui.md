@@ -1748,6 +1748,117 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3, tools (2026-11-04): local branch a3-tools
+
+Design 5.10 and stages 14 and 15 (decisions UI3, UI27, UI28): the developer console (new module `ui-console`), the
+immediate-mode façade, the UI debugger, pseudo-localisation, the text scale and the palette. The OS accessibility
+bridge was assessed and not built (below).
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Commands | `ConsoleCommand.named("spawn").describe(..).arg(Arg.integer("count").range(1, 100)).arg(Arg.choice("kind", ..).optional()).developer().cheat().action(call -> ..)`: typed arguments (`integer`, `decimal`, `bool`, `text` (`rest()`: the rest of the line), `choice` (strings or an enum), `asset(type)` and `node()` through the engine's `AssetProvider` and `NodeProvider` (completion and an existence check), `setting()`, `command()`, `script()`), checked before the action runs, read by name from the `Invocation`; tiers and the cheat flag through `ConsolePermissions` (the refusal says why; refused commands are not offered) | `ui-console` |
+| Parser | `CommandLine`: words, `"double"` quotes with `\"` `\\` `\n` `\t` `\;`, `'single'` quotes, a backslash outside quotes, `;` between statements, `//` comments; tokens keep their positions; an unclosed quote runs to the end (the line is being typed); `quote()` round trips | `CommandLine` |
+| Shell | `ConsoleShell`: commands, aliases (`alias low "render.bloom OFF; render.scale"`, the words after an alias appended), `exec file` through a `ScriptSource`, nesting capped by `ui.console.execDepth`, built-ins `help`, `alias`, `unalias`, `exec`, `echo`, `reset`, `toggle`, `find`; an unknown name suggests the nearest (two edits away); output to a `LogSink` with logger `console`, stamped by a settable clock | `ConsoleShell`, `Builtins` |
+| Settings as variables | `ConsoleVariables` (list, find) and `ConsoleVariable` (kind, value, default, min, max, choices, availability, `set` returning why a value is refused) are what the engine implements over its settings and the constraint overlay; `render.bloom` prints `render.bloom = CHEAP (default CHEAP; one of OFF, CHEAP, PHYSICAL): Bloom technique [unavailable: ...]`, `render.bloom physical` sets it (choices ignore case; numbers are checked against their kind and range first) or prints the overlay's reason; `TunableVariables` exposes `Ui.tunables()` where no engine stands behind the console; `ConsoleVariables.of` joins several | `ConsoleVariables`, `ConsoleVariable`, `TunableVariables` |
+| Completion | `ConsoleShell.complete(line, caret)`: the word under the caret in its statement; first words complete commands (allowed ones), aliases and settings (by prefix, then containing), each with a detail (description, `= value`); arguments complete by their `Arg` (choices, on/off, assets, nodes, settings, commands, scripts), setting values by kind (`current` marked); the hint is the signature with the argument at the caret marked (`spawn <count: 1..100> [kind: orc\|elf]`); `apply` quotes candidates that need it; `commonPrefix` | `Completer`, `Completion` |
+| History | `ConsoleHistory(appId, HistoryStore)`: older and newer, keeping the line being typed; repeats kept once; `ui.console.historyLimit` lines; saved after each run through the engine's store (`HistoryStore.memory()` for tests) | `ConsoleHistory`, `HistoryStore` |
+| Log ring (UI28) | `LogSink.log(level, logger, message, source, millis)` of preformatted records; `LogRing`: `ui.console.logCapacity` records made once, text copied into their own buffers (cut at `ui.console.maxLine` with an ellipsis, control characters flattened), a record equal to the last one coalesced (`x3`), loggers interned once; `LogInbox`: any thread, a short lock, the oldest dropped when full, drained once a frame (a burst larger than the ring hands over only what the ring keeps); both allocation-free | `LogRing`, `LogInbox`, `LogRecord`, `LogLevel` |
+| Log view | `LogRows`: the records a view shows, filtered by a level mask, a logger (and the loggers under it) and an incremental search (a longer search narrows the matches, another scans the ring once), kept as a ring of sequence numbers; new records join and gone ones leave once a frame. `LogView` (a `VirtualView`): rows of time, level, logger (short name), message, repeat count and source, with the fact `level` on the row; it follows the newest record while scrolled to the end; a click on a logger filters by it, on a source copies it to the clipboard | `LogRows`, `LogView` |
+| Console widget | `Console`: its own layer (`console`, z 600), dropping down from the top by the theme's `console` and `console:expanded` offsets and their transition; `CONSOLE_TOGGLE` from anywhere (the focus goes to the command line and back); the filter bar (level toggles `:checked`, the logger chip, a search field); the command line: Enter runs the line (echoed at level `command`, added to the history), `COMPLETE` takes the only candidate, else the common start, else picks the first (the next press takes it), `HISTORY_UP/DOWN` (and UP, DOWN) walk the pop-up while it lists candidates and the history otherwise, `CANCEL` closes the pop-up, then the console; the pop-up shows the hint and up to `ui.console.completions` candidates (a click takes one); commands `clear`, `log.level`, `log.logger`, `log.search`, `history`; `cmd:` links of rich text run commands (`linkListener()`, shown in the gallery) | `Console`, `_console.tss`, `_console-test.tss` |
+| Debugger commands | `DebugCommands.register(shell, debugger)`: `ui.inspect [on\|off]`, `ui.overlay <bounds\|clips\|picking\|dirty> [on\|off]`, `ui.pick` (developer commands) | `DebugCommands` |
+| Immediate-mode façade (UI3) | `Imm`: `begin`/`end` windows (moved by their title; on the `imm` layer or a host), `beginGroup`/`endGroup`, `beginChild`/`endChild` (a region the wheel scrolls), `pushId`/`popId`, `sameLine`, `text`, `labelText`, `separator`, `button`, `selectable`, `checkbox`, `slider`/`sliderInt`, `drag`, `inputText` (a `StringBuilder` both ways), `combo`, `treeNode`/`treePop`, `beginTable`/`tableNextRow`/`tableNextColumn`/`endTable`; ids hash the label (`label##id`) in their scope; elements are reused while called, collected in the frame they were not, moved only when the calls' order changes; a frame's input shows in its calls (no latency); the theme's own `button`, `checkbox`, `textfield` and `separator` types and new `imm-*` types; misuse (an id twice, unbalanced calls) throws | `controls.imm`, `_tools.tss`, `_tools-test.tss` |
+| UI debugger | `UiDebugger`, written with `Imm` on the `inspector` layer (above the debug layer): the element tree (open along the selection), picking by pointer (the press goes to the debugger), the selected element's id path, style name, states, facts, rectangle and every resolved value with its rule and `file:line` (`StyleResolver.explain`; `Rule.source` from the compiler); a frame window from `FrameStats` (input, frame code, styles, layout, record, total, passes, recorded elements, upload bytes); overlays on the debug layer drawn by a painter: bounds, clips, picking grid cells (`Picking.grid`, `cellCount`), dirty (the elements the last frame recorded), hover and selection, their looks from the parts `debug-bounds` to `debug-selected` | `controls.debug`, `FrameStats`, `StyleResolver.explain`, `Rule`, `Picking` |
+| Text and colour settings | `ui.textScale` (0.5 to 3) multiplies every resolved `font-size` in the resolver (labels, fields, `em` sizes; one re-resolve when it changes); `ui.palette` (`theme`, `dark`, `light`, `high-contrast`) switches the theme's token set (both themes have a `high-contrast` set, from A1); `ui.l10n.pseudo` (`off`, `on`, `mirrored`) and `ui.l10n.pseudoExpansion` (0.35) show every label accented, longer by its own letters and bracketed (mirrored: forced right to left), accessible names keeping the real text | `StyleResolver.TEXT_SCALE`, `Ui.PALETTE`, `PseudoLocale` |
+| Labels on one line | `text-wrap: false` (`Styles.TEXT_WRAP`) shapes a label without wrapping (log rows; clip the box to cut it) | `Styles`, `Ui` |
+| Galleries | `ConsoleGallery` (ui-console test fixtures: the console open over a HUD with `cmd:` links, every level, a coalesced repeat, `spawn 3 ` typed with the pop-up and the hint), `ImmGallery` (a spawner tool and a scene tool), `DebuggerGallery` (the debugger over the controls gallery, bounds and clips on, a button selected) | test fixtures |
+
+#### Decisions
+
+- *The console widget lives in `ui-console`* with its model (the design's module), above `ui-controls`; so
+  `GallerySanityTest` cannot see its gallery: `ConsoleGalleryTest` runs `LayoutSanity` on it in both themes, and its
+  tunables are listed by `ConsoleTunables.all()`, not `Ui.tunables()`.
+- *The log keeps text, not argument objects*: records are preformatted by the sink (SLF4J formats before it hands
+  them over), so the ring holds no references and appending is a copy.
+- *The completion pop-up sits in the console's layer*, placed under the command line after layout, rather than an
+  `Overlay`: it moves with the console's drop and needs no other layer.
+- *Imm builds its widgets from elements*, not from `Controls`: the basic controls register for polling for good and
+  have no destroy path, while the façade's widgets come and go with the calls. They use the theme's types where they
+  exist.
+- *The debugger draws its overlays with a painter on the debug layer and its windows on a layer above it*, so the
+  overlays never cover the inspector; picking puts a blocker on that layer so the press selects instead of clicking.
+- *The text scale is applied in the resolver*, at one place, so every control (editors and painters included) and
+  every `em` size follows; a change re-resolves every style once.
+- *Pseudo-localisation pads with the label's own letters* (about the width of real added letters), not dots.
+- *A `FontRegistry` fix*: chain lookups compared family lists with `List.equals`, which made an iterator per reshape
+  when two rules gave equal lists (the console's log rows found it); they compare by index now.
+
+#### Tests
+
+ui-console: `CommandLineTest` (14 parser fixtures, positions, unclosed quotes, the statement at the caret, quoting
+round trips), `CompletionTest` (21 completion fixtures, replacement and caret, quoting, hints with the marked
+argument, details, the common prefix), `ConsoleShellTest` (typed arguments and their errors, permissions, settings
+round trips with `FakeVariables`: set, refused by the overlay, out of range, locked, reset, toggle, text; tunables as
+variables, nearest names, aliases with appended words and their nesting, scripts, built-ins, declarations, assets and
+nodes), `ConsoleHistoryTest`, `LogRingTest` (wrapping, coalescing, cutting, interning, filters, incremental search, a
+wrapped ring, changes in place, four threads through the inbox, a full inbox, a burst larger than the ring; appending
+and filtering allocation-free), `ConsoleTest` (toggle and focus, Enter, the three steps of Tab, a click on a
+candidate, history, links, the filter bar, logger and source clicks, the inbox, following the end; frames idle,
+flooded with 200 records a frame and scrolling allocation-free), `ConsoleGalleryTest` (both themes: `LayoutSanity`,
+every interactive node named, previews), `DebugCommandsTest`. ui-controls: `ImmTest` (state by id, a click in its own
+frame, same line, collection and return, order following the calls, every widget's values, tree nodes, tables,
+moving windows, misuse, named widgets; steady frames idle, changing and hovered allocation-free), `UiDebuggerTest`
+(inspector text, explain with `file:line`, picking, timings, overlays, the tree), `TextSettingsTest` (the transform,
+labels, text scale, palette, the controls gallery pseudo-localised), `GallerySanityTest` (`immGallery`,
+`debuggerGallery`, both themes), `ToolsPreviewTest`. ui-style: `StyleExplainTest` (origins of inline values and rules
+with their lines, Java rules, the text scale, live font sizes).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; other agents were building at the same time: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Log flood: 1,000 lines a frame into the open console (drain, filter, the visible rows bound, record), 1920 x 1080 | 0.3 ms (section 11's changing HUD) | 0.35 to 0.53 ms median, 0.63 to 0.77 ms p99 (`ConsoleBenchmarkTest`); layout is 0.33 ms of it: the ~16 visible rows show new records every frame, ~96 labels shaped anew |
+| Log flood: 100,000 lines from another thread shown in one frame | — | 1.4 ms median (the ring keeps 10,000; a burst hands over only those) |
+| Appending 1,000 lines to the ring | — | 0.047 to 0.058 ms median (about 50 ns a line) |
+
+#### OS accessibility bridge (UI27): assessed, not built
+
+The UI side is ready: `Semantics.of(store, interaction)` gives every layer's tree with roles, names (live text),
+states and actions, and every new control here is named (the galleries' `Semantics.unnamed` is empty). A Windows UI
+Automation bridge through FFM needs, in the engine (`engine-platform`, Windows only):
+
+- COM objects written in FFM: a vtable of upcall stubs and a reference count per object for `IUnknown`,
+  `IRawElementProviderSimple` (provider options, `GetPropertyValue` returning `VARIANT`s: `BSTR` names through
+  `SysAllocString`, control types, `VT_BOOL` states), `IRawElementProviderFragment` (`Navigate` to parent, siblings
+  and children, `GetRuntimeId` as a `SAFEARRAY`, `BoundingRectangle` in screen pixels, `SetFocus`) and
+  `IRawElementProviderFragmentRoot` (`ElementProviderFromPoint`, `GetFocus`); `IInvokeProvider`, `IToggleProvider`
+  and `IValueProvider` for buttons, checkboxes and fields;
+- answering `WM_GETOBJECT` with `UiaReturnRawElementProvider`: SDL's window procedure subclassed
+  (`SetWindowLongPtrW(GWLP_WNDPROC)` with an upcall, `CallWindowProcW` for the rest; SDL's message hook cannot
+  return a result), the `HWND` from `SDL_PROP_WINDOW_WIN32_HWND_POINTER`;
+- a snapshot of the semantics tree taken on the UI thread when the store's version changed, read by UIA's calls on
+  its own threads;
+- `UiaRaiseAutomationEvent` for focus changes (what Narrator follows) and property-change events for names, values
+  and toggles.
+
+That is some 1,500 lines of COM by hand, checkable only by hand with Narrator or by another 1,000 lines of an
+`IUIAutomation` client in FFM for a test, on Windows only; a minimal slice (roles, names, focus) still needs every
+interface above except the patterns. Not built in this group; nothing outside the JDK is needed when it is.
+
+#### Left
+
+- The engine's parts: the SLF4J provider writing to a `LogInbox`, settings as `ConsoleVariables`, the
+  `HistoryStore`, `ScriptSource`, `AssetProvider`, `NodeProvider` and `ConsolePermissions`, the `ui.console.toggle`
+  action producing `CONSOLE_TOGGLE` (and `COMPLETE`, `HISTORY_UP/DOWN` while the command line has the text context),
+  registering `ConsoleTunables.all()`, and the console as a world panel in VR (a world-space `Ui` holding the
+  console and a virtual keyboard, anchored to the hand or in front).
+- The log flood at 1,000 lines a frame is above 0.3 ms: shaping the visible rows' new text dominates (a cache of
+  shaped runs for repeated messages would help); to measure again on a quiet machine.
+- The controls gallery pseudo-localised shows truncation and overflow in other areas' controls (`TextSettingsTest`
+  prints them); not fixed here.
+- The OS accessibility bridge (above).
+
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
 Two options of docking's windows: a paper white per window, and windows see-through while dragged.
