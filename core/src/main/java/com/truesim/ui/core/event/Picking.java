@@ -9,9 +9,9 @@ import java.util.Arrays;
 /**
  * The screen UI's hit test (design 4.7, step 1): per layer, a uniform grid over its interactive elements, rebuilt
  * only when one of them (or an element clipping them) moved, was restyled, or the layer's structure changed; then the
- * precise shape (a rounded rectangle from the element's radii) and the clip of its nearest clipping ancestor. Layers
- * are searched front to back; a {@linkplain Layer#blocking() blocking} layer stops the search, and a layer taking no
- * input is skipped.
+ * precise shape (a rounded rectangle from the element's radii) and the clips of all its clipping ancestors (rounded
+ * too). Layers are searched front to back; a {@linkplain Layer#blocking() blocking} layer stops the search, and a
+ * layer taking no input is skipped.
  *
  * <p>Each grid cell lists its elements in draw order (tree order: children over parents, later siblings over earlier
  * ones), so a pick walks one cell backwards and returns every element under the point, front-most first: the target
@@ -54,6 +54,7 @@ public final class Picking {
         int[] clip = new int[16]; // index into the clip table, or -1
         int clipCount;
         float[] clips = new float[8 * 8]; // the nearest clipping ancestor's bounds and radii
+        int[] clipParent = new int[8]; // per clip, the clip of the clipping ancestor around it, or -1
         float originX;
         float originY;
         float cell = CELL;
@@ -206,13 +207,16 @@ public final class Picking {
         if (!inside(x, y, sh[s], sh[s + 1], sh[s + 2], sh[s + 3], sh[s + 4], sh[s + 5], sh[s + 6], sh[s + 7])) {
             return false;
         }
-        int c = g.clip[i];
-        if (c < 0) {
-            return true;
-        }
+        // inside every clip on the way, rounded corners included (the rectangle has every clip's box already): a
+        // point a rounded clip further out cuts off is clipped away, however square the nearer clips are
         float[] cl = g.clips;
-        int o = c * 8;
-        return inside(x, y, cl[o], cl[o + 1], cl[o + 2], cl[o + 3], cl[o + 4], cl[o + 5], cl[o + 6], cl[o + 7]);
+        for (int c = g.clip[i]; c >= 0; c = g.clipParent[c]) {
+            int o = c * 8;
+            if (!inside(x, y, cl[o], cl[o + 1], cl[o + 2], cl[o + 3], cl[o + 4], cl[o + 5], cl[o + 6], cl[o + 7])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -366,7 +370,7 @@ public final class Picking {
             if (nx0 >= nx1 || ny0 >= ny1) {
                 return; // clipped away: nothing below can be hit
             }
-            childClip = addClip(g, geo, slot, x, y, w, h);
+            childClip = addClip(g, geo, slot, x, y, w, h, clip);
         }
         for (int c = store.firstChild(slot); c != UiStore.NONE; c = store.nextSibling(c)) {
             collectTree(g, geo, c, nx0, ny0, nx1, ny1, childClip);
@@ -397,10 +401,14 @@ public final class Picking {
         g.clip[i] = clip;
     }
 
-    private int addClip(Grid g, PickGeometry geo, int slot, float x, float y, float w, float h) {
+    private int addClip(Grid g, PickGeometry geo, int slot, float x, float y, float w, float h, int parent) {
         if ((g.clipCount + 1) * 8 > g.clips.length) {
             g.clips = growFloats(g.clips, g.clips.length * 2);
         }
+        if (g.clipCount == g.clipParent.length) {
+            g.clipParent = Arrays.copyOf(g.clipParent, g.clipParent.length * 2);
+        }
+        g.clipParent[g.clipCount] = parent;
         int o = g.clipCount * 8;
         g.clips[o] = x;
         g.clips[o + 1] = y;

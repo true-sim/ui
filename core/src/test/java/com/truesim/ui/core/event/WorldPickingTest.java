@@ -41,6 +41,14 @@ class WorldPickingTest {
         r.click(500, 500);
         assertThat(r.take(EventType.CLICK)).containsExactly("CLICK node");
         assertThat(r.ia.hovered(0)).isEqualTo(node);
+        // a HUD element watching only the hover passes presses on to the world behind it
+        Element tip = r.box(r.root(), "tip", 300, 300, 50, 50);
+        r.ia.on(tip, EventType.ENTER.bit() | EventType.EXIT.bit(), e -> { });
+        r.frame();
+        r.click(320, 320);
+        assertThat(r.take(EventType.PRESS)).containsExactly("PRESS node");
+        r.mouse(500, 500, 0);
+        r.frame();
         // a blocking layer showing something keeps pointers from the world
         Element dialog = r.box(r.layers.get("modal").root(), "dialog", 0, 0, 10, 10);
         r.frame();

@@ -1209,10 +1209,19 @@ public final class Interaction {
     private int passThrough(UiEvent e, int p) {
         int pass = ++stamp;
         int n = hitCount[p];
+        int pressed = UiStore.NONE; // the front-most hit taking presses or clicks, for a press
+        int pressedLayer = -1;
         for (int i = 0; i < n; i++) {
             int target = hits[p][i];
             if (!store.alive(target)) {
                 continue;
+            }
+            if (pressed != UiStore.NONE && intoScreenLayerBelow(target, pressedLayer)) {
+                // a press taken by an element on top does not pass into a screen layer below: what is drawn on top
+                // gets the pointer (a bar's button over a chart that pans on press kept its click). Within a layer,
+                // composite controls still pass presses on to their own parts, and the world behind the screen
+                // (hits on a layer taking no screen input) still gets what the screen did not consume
+                return pressed;
             }
             if (disabled(target)) {
                 return UiStore.NONE;
@@ -1223,9 +1232,22 @@ public final class Interaction {
             if (e.consumed) {
                 return e.current;
             }
+            if (e.type == EventType.PRESS && pressed == UiStore.NONE && (listenerMask[target] & PRESSABLE) != 0) {
+                pressed = target;
+                pressedLayer = layers.indexOf(target);
+            }
         }
-        return UiStore.NONE;
+        return UiStore.NONE; // nobody consumed it: the top hit captures
     }
+
+    /** Whether {@code target} is on another layer than {@code layer}, one that takes the screen's pointers. */
+    private boolean intoScreenLayerBelow(int target, int layer) {
+        int at = layers.indexOf(target);
+        return at != layer && at >= 0 && layers.at(at).input() != Layer.Input.NONE;
+    }
+
+    /** The events that make an element the press's target when it is the front-most hit listening to one. */
+    private static final int PRESSABLE = EventType.PRESS.bit() | EventType.CLICK.bit();
 
     /** Routes {@code e} to its target (one route, no pass-through). Disabled targets get nothing. */
     private void route(UiEvent e) {

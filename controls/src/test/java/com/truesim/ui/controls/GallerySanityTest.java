@@ -27,7 +27,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * Every gallery (the engine's GPU screenshots show the same scenes) in both themes, as the screenshots take them:
  * nothing drawn outside its clipping ancestor, no overlapping siblings in stacking containers, no text leaving its box,
- * no tab under its strip's overflow button ({@link LayoutSanity}).
+ * no tab under its strip's overflow button ({@link LayoutSanity}); the pointer hits what is drawn on top at every
+ * sampled point, nothing clipped away ({@code PickingSanity}).
  */
 class GallerySanityTest {
 
@@ -65,6 +66,10 @@ class GallerySanityTest {
         Ui ui = ui(theme);
         scene.accept(ui);
         LayoutSanity.assertSane(ui, name + " (" + theme + ")");
+        // the pointer hits what is drawn on top, nothing clipped away
+        int root = ui.store().rootSlot();
+        com.truesim.ui.testkit.PickingSanity.assertPicksWhatIsDrawn(ui, ui.layout().width(root),
+            ui.layout().height(root), name + " (" + theme + ")");
     }
 
     @ParameterizedTest

@@ -134,7 +134,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     private int count;
     private long active = NodeHandle.NONE;
     private double[] bounds = new double[4 * 6]; // local bounds per node: min x, y, z, max x, y, z (NaN: none)
-    private final long[] drivers = new long[64]; // the selected nodes no selected ancestor moves already
+    private long[] drivers = new long[64]; // the selected nodes no selected ancestor moves already: as many as selected
     private int driverCount;
 
     // this frame's shapes, drag state
@@ -339,6 +339,9 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         if (selected.length < n) {
             selected = Arrays.copyOf(selected, n);
             bounds = Arrays.copyOf(bounds, n * 6);
+        }
+        if (drivers.length < n) {
+            drivers = new long[n];
         }
         count = 0;
         for (int i = 0; i < n; i++) {
@@ -636,7 +639,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     /** The selected nodes no other selected node is an ancestor of: those a drag moves (their children follow). */
     private void drivers() {
         driverCount = 0;
-        for (int i = 0; i < count && driverCount < drivers.length; i++) {
+        for (int i = 0; i < count; i++) {
             boolean under = false;
             for (long a = scene.parent(selected[i]); a != NodeHandle.NONE && !under; a = scene.parent(a)) {
                 under = contains(a);

@@ -113,6 +113,39 @@ class GizmoTest {
     }
 
     @Test
+    void aDragMovesEveryNodeOfABigSelection() {
+        // 64 nodes were the most a drag moved: of 400 rocks selected, the rest stayed (the engine's UI gallery)
+        SceneRig r = rig(0, 0, 0);
+        int n = 200;
+        long[] nodes = new long[n];
+        for (int i = 0; i < n; i++) {
+            nodes[i] = r.box(-2 + (i % 20) * 0.2, 0, -(i / 20) * 0.2, 0.05, Mobility.DYNAMIC);
+        }
+        Gizmo g = new Gizmo(r.picking, r.view, null);
+        List<String> calls = new ArrayList<>();
+        g.listener(new Hooks(calls));
+        g.select(nodes, n, nodes[0]);
+        r.frames(2);
+        double[] x0 = new double[n];
+        for (int i = 0; i < n; i++) {
+            x0[i] = r.scene.local(nodes[i]).translation().x();
+        }
+        float[] at = arrow(r, g, 0);
+        r.mouse(at[0], at[1], 0);
+        assertThat(g.hovered()).isEqualTo(GizmoHandle.TRANSLATE_X);
+        r.mouse(at[0], at[1], Pointer.PRIMARY);
+        r.mouse(at[0] + 40, at[1], Pointer.PRIMARY);
+        r.mouse(at[0] + 40, at[1], 0);
+        double dx = r.scene.local(nodes[0]).translation().x() - x0[0];
+        assertThat(dx).isPositive();
+        for (int i = 0; i < n; i++) {
+            assertThat(r.scene.local(nodes[i]).translation().x() - x0[i]).as("node %d", i).isCloseTo(dx,
+                offset(1e-9));
+        }
+        assertThat(calls).containsExactly("begin " + n, "update", "commit " + n);
+    }
+
+    @Test
     void typedValuesSetTheDragAndCancelRestoresTheStart() {
         SceneRig r = rig(0, 0, 0);
         long a = r.box(-1, 0, 0, 0.5, Mobility.DYNAMIC);

@@ -72,6 +72,14 @@ class PickingTest {
         assertThat(pick(r, 310, 10)).isEmpty();
         assertThat(pick(r, 610, 10)).isEmpty();
         assertThat(front.alive() && content.alive() && deep.alive()).isTrue();
+        // a square clip inside a rounded one: the outer rounding still cuts the point off
+        Element squareIn = r.box(view, "squareIn", 300, 70, 30, 30);
+        r.geo.clip[squareIn.slot()] = true;
+        Element corner = r.button(squareIn, "corner", 300, 70, 30, 30);
+        r.ia.picking().invalidateAll();
+        assertThat(pick(r, 302, 98)).as("in the outer clip's rounded corner").isEmpty();
+        assertThat(pick(r, 325, 75)).containsExactly("corner", "content");
+        assertThat(corner.alive()).isTrue();
     }
 
     @Test
