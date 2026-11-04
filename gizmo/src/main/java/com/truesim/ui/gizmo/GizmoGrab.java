@@ -32,7 +32,8 @@ public final class GizmoGrab {
     private final GizmoTransforms initial = new GizmoTransforms();
     private final GizmoTransforms finals = new GizmoTransforms();
     private final GizmoDelta delta = new GizmoDelta();
-    private final long[] nodes = new long[64];
+    private long[] nodes = new long[64]; // the grabbed nodes, as many as selected
+    private int grabbed; // how many
     private boolean grabbing;
     private int hands;
 
@@ -94,7 +95,7 @@ public final class GizmoGrab {
         if (now == 0) {
             if (grabbing) {
                 grabbing = false;
-                finals.capture(scene, nodes, count());
+                finals.capture(scene, nodes, grabbed);
                 GizmoListener l = gizmo.listener();
                 if (l != null) {
                     l.commit(initial, finals);
@@ -129,7 +130,7 @@ public final class GizmoGrab {
     }
 
     private int count() {
-        return Math.min(gizmo.count(), nodes.length);
+        return gizmo.count();
     }
 
     /** Whether hand {@code i} is inside (or near) a selected node's box or at the gizmo's centre. */
@@ -155,12 +156,17 @@ public final class GizmoGrab {
     }
 
     /** The grab starts (again) from the hands' poses now and the nodes' transforms now. */
+    @AllowAllocation("a selection bigger than any grabbed before")
     private void restart() {
         boolean first = !grabbing;
         int n = count();
+        if (nodes.length < n) {
+            nodes = java.util.Arrays.copyOf(nodes, n);
+        }
         for (int k = 0; k < n; k++) {
             nodes[k] = gizmo.selected(k);
         }
+        grabbed = n;
         if (first) {
             initial.capture(scene, nodes, n);
             grabbing = true;
