@@ -40,6 +40,9 @@ project(":ui-props").projectDir = file("props")
 project(":ui-props-processor").projectDir = file("props-processor")
 include("ui-console") // the developer console: commands, completion, settings as variables, the log ring
 project(":ui-console").projectDir = file("console")
+include("ui-scene", "ui-gizmo") // the scene bridge (picking, world panels, camera views) and 3D gizmos: need scene-core
+project(":ui-scene").projectDir = file("scene")
+project(":ui-gizmo").projectDir = file("gizmo")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {

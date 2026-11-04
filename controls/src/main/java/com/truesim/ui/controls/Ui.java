@@ -1809,7 +1809,7 @@ public final class Ui {
         all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());
         for (com.truesim.ui.core.TunableSource source : java.util.ServiceLoader.load(
             com.truesim.ui.core.TunableSource.class, Ui.class.getClassLoader())) {
-            all.addAll(source.tunables()); // modules on top of the controls: charts
+            all.addAll(source.tunables()); // modules on top of the controls: charts, the scene bridge, gizmos, the console
         }
         if (text != null && text.atlas() != null) {
             all.addAll(text.atlas().settings().all());

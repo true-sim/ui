@@ -22,6 +22,7 @@ dependencies {
     testImplementation(testFixtures(project(":ui-charts")))
     // The props gallery (ui-props builds on these controls): checked by GallerySanityTest and previewed with the others.
     testImplementation(testFixtures(project(":ui-props")))
+    testImplementation(testFixtures(project(":ui-gizmo"))) // the scene and gizmo gallery, in GallerySanityTest
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.

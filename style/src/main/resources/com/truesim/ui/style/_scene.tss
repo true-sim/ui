@@ -1,0 +1,69 @@
+// The scene bridge and gizmos (ui-scene, ui-gizmo) in the default theme, imported by default-theme.tss. Element types:
+// camera-view (a minimap or picture-in-picture view: its frame; the picture fills the content box, tinted by color),
+// gizmo (a transform gizmo over a 3D view) with its style parts gizmo-axis (#x #y #z), gizmo-plane (#xy #yz #zx),
+// gizmo-ring (#x #y #z #view), gizmo-trackball, gizmo-center, gizmo-tip, gizmo-bounds, gizmo-bounds-handle (.active),
+// gizmo-occluded and gizmo-size; view-cube with view-cube-face (#px #nx #py #ny #pz #nz), view-cube-edge and
+// view-cube-hot. Parts read color, opacity, width (line widths and handle sizes), height (gizmo-size: the gizmo's
+// radius on the screen) and radius (round or square handles); a hovered handle's part is :hover, a dragged one
+// :pressed. scene-node and world-panel stand for scene nodes and world panels in picking and are never drawn.
+
+// ------------------------------------------------------------------ camera views
+
+camera-view {
+  padding: 2px;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  clip: true;
+  color: white;
+  @include raised(2);
+}
+
+// ------------------------------------------------------------------ gizmos
+
+$gizmo-x: #e5484d;
+$gizmo-y: #46a758;
+$gizmo-z: #3e7bfa;
+$gizmo-hover: #ffd166;
+$gizmo-active: #ffffff;
+
+gizmo {
+  > gizmo-size { height: 96px; }
+  > gizmo-occluded { opacity: 0.28; }
+  > gizmo-axis, > gizmo-ring { width: 3px; }
+  > gizmo-axis#x, > gizmo-ring#x, > gizmo-plane#yz { color: $gizmo-x; }
+  > gizmo-axis#y, > gizmo-ring#y, > gizmo-plane#zx { color: $gizmo-y; }
+  > gizmo-axis#z, > gizmo-ring#z, > gizmo-plane#xy { color: $gizmo-z; }
+  > gizmo-ring#view { color: rgba(white, 0.75); width: 2px; }
+  > gizmo-plane { opacity: 0.45; }
+  > gizmo-trackball { color: rgba(white, 0.025); }
+  > gizmo-center { color: rgba(white, 0.85); width: 14px; }
+  > gizmo-tip { width: 13px; radius: 2px; }
+  > gizmo-bounds { color: rgba(white, 0.8); width: 1.5px; }
+  > gizmo-bounds-handle { color: white; width: 9px; radius: 2px; }
+  > gizmo-bounds-handle.active { color: $gizmo-hover; }
+  > gizmo-axis:hover, > gizmo-ring:hover, > gizmo-center:hover, > gizmo-bounds-handle.active:hover { color: $gizmo-hover; }
+  > gizmo-plane:hover { color: $gizmo-hover; opacity: 0.7; }
+  > gizmo-trackball:hover { color: rgba(white, 0.06); }
+  > gizmo-axis:pressed, > gizmo-ring:pressed, > gizmo-center:pressed, > gizmo-plane:pressed,
+  > gizmo-bounds-handle.active:pressed { color: $gizmo-active; }
+}
+
+// ------------------------------------------------------------------ the view cube
+
+view-cube {
+  width: 96px;
+  height: 96px;
+  radius: 48px;
+  background: box(rgba(black, 0.18));
+
+  > view-cube-face { color: var(--surface-raised); }
+  > view-cube-face#px, > view-cube-face#nx { color: #7a3c40; }
+  > view-cube-face#py, > view-cube-face#ny { color: #3d6644; }
+  > view-cube-face#pz, > view-cube-face#nz { color: #3a5180; }
+  > view-cube-edge { color: var(--edge); width: 1px; }
+  > view-cube-hot { color: $gizmo-hover; width: 12px; }
+}
+
+// A marker on a camera view (an overlay anchored through its camera: the player's position).
+panel.minimap-marker { background: box(var(--accent)); border: 2px white; radius: 6px; }

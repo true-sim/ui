@@ -1,0 +1,46 @@
+// The garish look of camera views, gizmos and the view cube, imported by test-theme.tss: every element, part and state
+// differs obviously from the default theme.
+
+camera-view {
+  padding: 6px;
+  background: box($lime);
+  border: 5px $hot;
+  radius: 0 18px 0 18px;
+  color: $sun;
+}
+
+gizmo {
+  > gizmo-size { height: 130px; }
+  > gizmo-occluded { opacity: 0.6; }
+  > gizmo-axis, > gizmo-ring { width: 6px; }
+  > gizmo-axis#x, > gizmo-ring#x, > gizmo-plane#yz { color: $hot; }
+  > gizmo-axis#y, > gizmo-ring#y, > gizmo-plane#zx { color: $lime; }
+  > gizmo-axis#z, > gizmo-ring#z, > gizmo-plane#xy { color: $cyan; }
+  > gizmo-ring#view { color: $sun; width: 5px; }
+  > gizmo-plane { opacity: 0.8; }
+  > gizmo-trackball { color: rgba($sun, 0.3); }
+  > gizmo-center { color: $sun; width: 22px; }
+  > gizmo-tip { width: 20px; radius: 10px; }
+  > gizmo-bounds { color: $lime; width: 4px; }
+  > gizmo-bounds-handle { color: $hot; width: 16px; radius: 8px; }
+  > gizmo-bounds-handle.active { color: $cyan; }
+  > gizmo-axis:hover, > gizmo-ring:hover, > gizmo-center:hover, > gizmo-plane:hover, > gizmo-trackball:hover,
+  > gizmo-bounds-handle.active:hover { color: white; }
+  > gizmo-axis:pressed, > gizmo-ring:pressed, > gizmo-center:pressed, > gizmo-plane:pressed,
+  > gizmo-bounds-handle.active:pressed { color: black; }
+}
+
+view-cube {
+  width: 120px;
+  height: 120px;
+  radius: 0;
+  background: box($sun);
+
+  > view-cube-face { color: $hot; opacity: 1; }
+  > view-cube-face#px, > view-cube-face#nx { color: $lime; }
+  > view-cube-face#py, > view-cube-face#ny { color: $cyan; }
+  > view-cube-edge { color: black; width: 4px; }
+  > view-cube-hot { color: white; width: 20px; }
+}
+
+panel.minimap-marker { background: box($hot); border: 3px $sun; radius: 0; }

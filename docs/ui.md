@@ -1778,6 +1778,11 @@ new modules `ui-props` and `ui-props-processor`.
 Design 5.10 and stages 14 and 15 (decisions UI3, UI27, UI28): the developer console (new module `ui-console`), the
 immediate-mode façade, the UI debugger, pseudo-localisation, the text scale and the palette. The OS accessibility
 bridge was assessed and not built (below).
+### Group A3, scene (2026-11-04): local branch a3-scene
+
+Scene picking, world panels and camera views (`ui-scene`), and 3D gizmos with the view cube and XR grabs
+(`ui-gizmo`): stage 4's leftovers and stage 12. Both modules sit on `ui-controls` (they draw and style through `Ui`)
+and `scene-core`; scene gains one method (below), on the local scene branch `a3-scene-raycast`.
 
 #### Built
 
@@ -2278,6 +2283,74 @@ interface above except the patterns. Not built in this group; nothing outside th
 - The controls gallery pseudo-localised shows truncation and overflow in other areas' controls (`TextSettingsTest`
   prints them); not fixed here.
 - The OS accessibility bridge (above).
+| Picking beyond the screen | `WorldPicking` in `ui-core`: after the screen layers' hit test (unless a blocking layer stopped it) the scene bridge appends what each pointer's world ray hits, nearest first, as elements standing for scene nodes and panels (on a hidden `scene` layer that takes no screen input and draws nothing), so the one `Interaction` routes them: capture and bubble, pass-through, pointer capture, hover, clicks with counts, long press, context, wheel, tooltips, drag and drop with one `DragSession`. `Pointer.ray` (doubles) for XR pointers and screen pointers whose ray the engine knows | `ui-core` `event.WorldPicking`, `Interaction.worldPicking`, `input.Pointer` |
+| `Interactive` | The component (a sparse set by node slot in `ScenePicking`; scene-core has no component stores yet, D46): listeners for any mask through `UiListener`, capture listeners, narrow phase `BOUNDS`, `MESH` (`PickMesh`) or `CUSTOM` (`NarrowPhase`), hooks for a tooltip (a scene tooltip overlay anchored to the node's projected box), a context menu (`Menu.openAt`), a drag payload and accepted drop formats. Adding puts the node on the interactive `SceneLayer`; a node's element sits under its nearest interactive scene-graph ancestor's, so events bubble up the scene graph; `node(event)`, `targetNode`, `hitPoint`, `hitDistance`, `ray(pointerId)`, `hovered`, `pressed` | `ui-scene` `Interactive`, `ScenePicking` |
+| Scene picking | `SpatialIndex.raycast(..., interactive mask, RayFilter, hit)` with each node's narrow phase; up to `ui.pick.sceneHits` objects along the ray (each further one a raycast skipping those found) for pass-through; screen pointers take the ray of the camera view they are over or the main `SceneView`, XR pointers their own (`ui.pick.rayLength`) | `ScenePicking.pick` |
+| Mesh narrow phase | `PickMesh`: positions and indices in the mesh's space, a triangle `Bvh` (common-math) built on the first ray that reaches the mesh, shared by every node showing it (the engine keeps it with the mesh asset); the world ray goes into the node's space (translation, rotation, per-axis scale), distances stay those of the world ray | `PickMesh`, `ScenePicking.mesh` |
+| World panels | `WorldPanel`: a world-space `Ui` on a rectangle placed in the world or following a node; the ray against its plane, then the panel UI's own 2D hit test at the local pixel (a panel where nothing is hit lets the ray through unless it is opaque, `passThrough(false)`), merged by distance with the scene's hits; `ScenePicking.input` hands each panel the pointers whose front-most hit it is (or that its UI captured, at their point on its plane even off it) and `update` updates the panels at their sizes. `transform()` gives the engine the panel's world transform and pixel size for drawing | `WorldPanel`, `ScenePicking.input/update` |
+| `SceneView`, anchors | A camera as the UI sees it (doubles, camera-relative maths): rays from UI points, projection, units per pixel, perspective or orthographic, a viewport in UI pixels. `SceneAnchor`: an `OverlayAnchor` at a world point or a node's projected box | `SceneView`, `SceneAnchor` |
+| Camera views | `CameraView`: a `camera-view` element showing the newest finished image of a `CameraViewSource` (a `UiTexture` and the image's size in it, asked for at the control's pixel size every frame; frames in flight show the last finished image, stretched, so the main view waits for nothing), its frame from the theme, tinted by `color`; pointers over it pick through its camera; markers are overlays anchored through its view (`marker`, `anchor`). `FakeCameraSource` (test fixture) renders a map picture a frame after each request | `CameraView`, `CameraViewSource`, `scene/src/testFixtures` |
+| Gizmos | `Gizmo`: translate (axes, planes, screen centre), rotate (axis rings, view ring, trackball), scale (axes, uniform), bounds (8 corners, 6 faces, the opposite side fixed), universal; spaces local, world, parent, view (`GIZMO_TOGGLE_SPACE` cycles); pivots median, individual, active, cursor, bounds centre; a multi-node selection (children of selected nodes follow their parents, not moved twice); `GIZMO_TRANSLATE/ROTATE/SCALE/UNIVERSAL`; `GIZMO_CANCEL`, `CANCEL` or a right click cancel and restore, `ACCEPT` commits; snapping to `ui.gizmo.snapTranslate/snapRotate/snapScale` while `Pointer.GIZMO_SNAP` is held (or the reverse, `ui.gizmo.snapByDefault`); typed values while dragging (distance, degrees, factor; `DELETE_BACK` edits); `GizmoListener` begin, update, commit, cancel with `GizmoTransforms` (local transforms for undo) | `ui-gizmo` `Gizmo`, `GizmoSolver`, `GizmoApply`, `GizmoShapes` |
+| Drag solving | In doubles relative to the gizmo's origin: the ray against the axis line (closest points), the handle's plane, the view plane; rings by the angle on their plane, or by the pointer's angle about the projected centre when seen edge-on (as Blender does); the trackball by screen motion; results applied to each node's world transform about the pivot, then into its parent's space (`setLocal`) | `GizmoSolver`, `GizmoApply` |
+| Gizmo picking and drawing | Analytic shapes (segments, rings of 48 segments, squares, spheres) against the ray with `ui.gizmo.pickTolerance` pixels (XR rays: `ui.gizmo.xrPickAngle` degrees), the nearest miss winning, before the scene's objects (`HandlePicker`); axes seen end-on and planes edge-on are hidden. Drawn as projected primitives on the `overlay` layer at a screen-constant size (`gizmo-size` height; XR: `ui.gizmo.xrAngularSize` from the head), filled shapes as abutting lines (no polygon primitive); every colour, width and size from style parts, `:hover` on the hovered handle's part, `:pressed` while dragged. Hidden parts faded (UI26) by `gizmo-occluded`'s opacity as a `GizmoOcclusion` says: the back halves of rings always; the scene by `RayOcclusion` (the `SpatialIndex` by boxes, the selection ignored) or the engine's depth test | `Gizmo`, `GizmoShapes`, `GizmoOcclusion`, `RayOcclusion` |
+| View cube | `ViewCube`: a `view-cube` element with the cube turned as the camera sees it (faces, edges, a hovered marker from parts); click a face, edge or corner: `Listener.align` with the camera rotation looking from there (world up kept); drag: `Listener.orbit` (`ui.viewCube.orbitSpeed`) | `ViewCube` |
+| XR | Ray picking and dragging of handles; `GizmoGrab`: a direct grab (a grip with the hand in a selected node's box, `ui.gizmo.xrGrabRadius`, or at the gizmo's centre) follows the hand rigidly; two hands move with their midpoint, turn with the line between them and scale with their distance; snapping by a held snap; the same undo hooks | `GizmoGrab` |
+| Styles and settings | `_scene.tss` and `_scene-test.tss` (one `@import` each in both themes): `camera-view`, `gizmo` and its parts, `view-cube` and its parts, `panel.minimap-marker`; no new style keys (parts read `color`, `opacity`, `width`, `height`, `radius`). Tunables reach `Ui.tunables()` through a new `TunableHolder` service (`ui-core`), which `Ui.tunables()` loads: `SceneTunables`, `GizmoTunables` | themes, `Ui.tunables`, `TunableHolder` |
+| Gallery | `SceneGallery` (`ui-gizmo` test fixture): a synthetic scene behind five gizmos (one per mode, one hovered, one partly occluded), a view cube, a minimap with a fake picture and a marker; in `GallerySanityTest` and `ScenePreviewTest` (both themes) | `gizmo/src/testFixtures` |
+| scene | `SpatialIndex.raycast(..., layerMask, RayFilter, Hit)`: a narrow phase decides each reached node's distance (or a miss); boxes beyond the nearest hit so far are not tested | scene `a3-scene-raycast` (ddadbd5) |
+
+#### Decisions
+
+- *Scene nodes and panels as elements*, not a second event system: each interactive node and panel has an element of
+  its own on a hidden layer, so routing, capture, click counts, long presses, drag sessions and states are the screen
+  UI's code. Costs an element per interactive node (1,000 at 1%), allocated when the component is added.
+- *A narrow phase inside the index's raycast* (the one scene change): without it the index answers only the nearest
+  box, and a mesh missed inside its box would hide everything behind it.
+- *World panels are UIs of their own* (`worldSpace`), fed pointers by the bridge; their elements route within their
+  own UI. A drag session therefore does not cross from a world panel to the scene or the screen UI (screen UI and
+  scene nodes share one session).
+- *A camera view element is transparent to clicks* unless it listens itself: pointers over it pick through its camera
+  by its rectangle, so a click on the minimap reaches the scene object under it.
+- *Gizmos drawn by the UI* as projected lines and boxes on the overlay layer (the engine needs nothing to show them);
+  filled planes, tips and cube faces are abutting lines until the draw list has a polygon primitive.
+- *Occlusion through an interface*: the engine's depth test is exact; `RayOcclusion` (boxes, this frame) works without
+  it. Hidden parts are faded, never hidden (UI26).
+- *Drags update in the frame phase* from the captured pointer's ray each frame, not from MOVE events, so XR rays (whose
+  screen position does not move) drag as mice do.
+
+#### Tests
+
+- `ScenePickingTest`: clicks with counts, hover states, pass-through to nodes behind and from screen elements, capture
+  off the node, bubbling to interactive ancestors (and back on removal), mesh triangles against boxes, custom narrow
+  phases, XR recorded poses, drag and drop from a list slot to a 3D node and back in one session, world panels (local
+  points, pass-through, opaque, following a node, capture off the rectangle), context menus, tooltips, wheel and long
+  press on nodes, camera views picking through their camera, pruning.
+- `ScenePickingBenchmarkTest`: counted narrow-phase visits at 100,000 nodes (tests only of interactive nodes whose
+  boxes the ray enters) and the timing benchmark below. `SceneAllocationTest`: pointers over nodes, meshes, a panel
+  and a minimap, presses, drags, an XR ray sweeping: allocation-free.
+- `GizmoTest`: the X arrow dragged 10,000 km from the origin moves the node exactly along x; snapping; typed values and
+  cancel restoring the start (undo hooks in order); every pivot for two nodes 10,000 km out; scale by axis, uniform
+  and a bounds face; spaces with a turned parent; trackball, view ring, a right click cancelling; the pixel tolerance.
+  `GizmoXrAndViewCubeTest`: an XR ray picking and dragging a handle; a recorded hand grab (rigid follow), two-handed
+  scale, cancel; the view cube's alignments, hover, click and orbit. `WorldPickingTest` (`ui-core`): world hits after
+  screen hits, pass-through, a blocking layer.
+- `GallerySanityTest.sceneGallery` (both themes); CPU previews `scene-gallery.png`, `scene-gallery-test-theme.png`.
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo, other builds running: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Picking per pointer, 100,000 nodes (a fifth dynamic), 1% interactive, bounds | ≤ 20 µs | 3.6 µs median, 13.3 µs p99 (`ScenePickingBenchmarkTest`, half the pointers on interactive nodes) |
+| The same, mesh narrow phase (320-triangle spheres) | ≤ 50 µs | 3.2 µs median, 11.5 µs p99 |
+| Narrow-phase tests of nodes without `Interactive` | 0 | 0 (1.15 tests a pick, all of interactive nodes the ray reaches) |
+
+#### Left
+
+- GPU picking (ID buffer, TLAS ray query; UI5: skinned objects) and its benchmark against the CPU path: the engine's.
+- Vertex and surface snapping for gizmos (through `SpatialIndex` and mesh BVHs), typed values for plane handles and
+  bounds (two or three numbers), axis constraint keys (Blender's G then X).
+- A polygon (or quad) primitive in the draw list would draw plane handles, arrow tips and cube faces exactly.
+- Drag sessions across world panels and the scene; component stores in scene-core (D46) to hold `Interactive`.
 
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
@@ -2462,7 +2535,8 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
   the colour picker~~ (built: group A3 controls) (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
   records by their
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
-  (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources
+  (data); ~~world panels, scene picking (`Interactive`, the mesh BVH)~~ (built: Group A3, scene, above), GPU picking,
+  touch, pen and XR pointer sources
   (groundwork).
   `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
   primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
