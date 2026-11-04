@@ -29,6 +29,8 @@ public final class ChartStyles implements StyleKeyHolder {
         StyleKey.of("line-dash", StyleTypes.list(StyleTypes.number(0, 10_000)), List.of());
     /** How a series' line segments meet. */
     public static final StyleKey<LineJoin> LINE_JOIN = StyleKey.of("line-join", LineJoin.class, LineJoin.NONE);
+    /** How long a miter may be, as a multiple of the line's width, before it is beveled ({@code line-join: miter}). */
+    public static final StyleKey<Float> LINE_MITER_LIMIT = StyleKey.number("line-miter-limit", 4, 1, 100);
     /** The fill of areas, bars, slices and bands; transparent: the series' colour. */
     public static final StyleKey<Color> FILL = StyleKey.of("fill", StyleTypes.color(), Color.TRANSPARENT);
     /** The opacity of fills (areas, bands, bars, slices, heatmaps) over the series' colour. */

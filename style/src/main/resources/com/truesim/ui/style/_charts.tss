@@ -177,6 +177,7 @@ chart-drag-rect {
   fill-opacity: 0.1;
   stroke: rgba(#3fa7ff, 0.8);
   line-width: 1px;
+  line-join: miter;
   &:hover { fill-opacity: 0.18; }
   &:pressed { fill-opacity: 0.25; }
 }

@@ -1807,6 +1807,7 @@ public final class Ui {
         all.addAll(com.truesim.ui.controls.windows.Tooltips.tunables());
         all.addAll(com.truesim.ui.controls.windows.Popovers.tunables());
         all.addAll(com.truesim.ui.controls.windows.WindowManager.tunables());
+        all.addAll(com.truesim.ui.text.ShapeCache.tunables());
         for (com.truesim.ui.core.TunableSource source : java.util.ServiceLoader.load(
             com.truesim.ui.core.TunableSource.class, Ui.class.getClassLoader())) {
             all.addAll(source.tunables()); // modules on top of the controls: charts, the scene bridge, gizmos, the console

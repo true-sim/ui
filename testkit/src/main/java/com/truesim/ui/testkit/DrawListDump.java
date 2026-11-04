@@ -21,7 +21,7 @@ import java.util.Locale;
 public final class DrawListDump {
 
     private static final String[] KINDS = {"empty", "box", "shadow", "glyph", "image", "nine-slice", "line",
-        "triangle"};
+        "triangle", "path", "columns"};
 
     private DrawListDump() {
     }
@@ -47,7 +47,8 @@ public final class DrawListDump {
             out.append(' ').append(n(list.drawnX(i, Primitive.X0))).append(',').append(n(list.drawnY(i, Primitive.Y0)))
                 .append(' ').append(n(list.drawnX(i, Primitive.X1))).append(',').append(n(list.drawnY(i, Primitive.Y1)))
                 .append(" a=").append(color(list.colorAt(i, Primitive.COLOR_A)));
-            long b = list.colorAt(i, Primitive.COLOR_B);
+            boolean overVertices = kind == Primitive.PATH || kind == Primitive.COLUMNS;
+            long b = overVertices ? 0 : list.colorAt(i, Primitive.COLOR_B);
             if ((Primitive.flags(header) & Primitive.FLAG_DEPTH) != 0) { // words 7-8 are its depth, not colour B
                 int d = list.intAt(i, Primitive.DEPTH);
                 int e = list.intAt(i, Primitive.DEPTH_B);
@@ -82,7 +83,29 @@ public final class DrawListDump {
                     .append(n(list.drawnY(i, Primitive.YA))).append(' ').append(n(list.drawnX(i, Primitive.XB)))
                     .append(',').append(n(list.drawnY(i, Primitive.YB))).append(' ')
                     .append(n(list.drawnX(i, Primitive.XC))).append(',').append(n(list.drawnY(i, Primitive.YC)));
+                case Primitive.PATH -> out.append(" width=").append(n(list.floatAt(i, Primitive.WIDTH)))
+                    .append(" stroke=").append(list.intAt(i, Primitive.STROKE)).append(" miter=")
+                    .append(n(list.floatAt(i, Primitive.MITER_LIMIT))).append(" dashes=")
+                    .append(halves(list.intAt(i, Primitive.DASHES))).append(' ')
+                    .append(halves(list.intAt(i, Primitive.DASHES + 1))).append(" phase=")
+                    .append(n(list.floatAt(i, Primitive.DASH_PHASE)));
+                case Primitive.COLUMNS -> out.append(" x=").append(n(list.floatAt(i, Primitive.COLUMN_X)))
+                    .append(" step=").append(n(list.floatAt(i, Primitive.COLUMN_STEP))).append(" width=")
+                    .append(n(list.floatAt(i, Primitive.WIDTH))).append(" baseline=")
+                    .append(n(list.floatAt(i, Primitive.BASELINE))).append(" flags=")
+                    .append(list.intAt(i, Primitive.STROKE));
                 default -> {
+                }
+            }
+            if (overVertices) { // the vertices, as the primitive reads them
+                int first = list.intAt(i, Primitive.FIRST_VERTEX);
+                int count = list.intAt(i, Primitive.VERTEX_COUNT);
+                out.append(" vertices=").append(count).append(':');
+                for (int v = first; v < first + count; v++) {
+                    out.append(' ').append(n(list.vertexAt(v, 0))).append(',').append(n(list.vertexAt(v, 1)));
+                    if (kind == Primitive.COLUMNS) {
+                        out.append(',').append(n(list.vertexAt(v, 2))).append(',').append(n(list.vertexAt(v, 3)));
+                    }
                 }
             }
             out.append('\n');

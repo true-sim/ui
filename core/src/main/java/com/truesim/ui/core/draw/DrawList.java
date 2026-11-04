@@ -36,6 +36,13 @@ import java.util.Arrays;
  * recording the content again. Everything that reads positions back applies the offset and the transform:
  * {@link #drawnX}, {@link #drawnY}, {@link #drawnScale}, {@link #drawnOpacity}, {@link #drawnClip}, or reads
  * {@link #baked()}, a copy with both applied (CPU previews, checks, goldens).
+ *
+ * <p><b>Vertices.</b> {@link Primitive#PATH} and {@link Primitive#COLUMNS} draw points of the list's vertex table ({@link #VERTEX_FLOATS} floats each), in blocks a recorder allocates once
+ * ({@link #allocateVertices}) and writes again whenever it records ({@link #pathVertex}, {@link #columnVertex}): writes
+ * compare before they write, so unchanged points upload nothing, and a stream appending points uploads theirs alone
+ * ({@link #vertexRanges()}). Blocks last until {@link #reset} (watch {@link #generation()}); a recorder needing more
+ * takes a larger block (the old one stays unused until the list is recorded again from the start). Primitives sharing
+ * vertices (a line and its area) share their clip and transform.
  */
 public final class DrawList {
 
@@ -50,6 +57,11 @@ public final class DrawList {
     public static final int TRANSFORM_FLOATS = 8;
     /** The identity transform (scale 1, no offset, opaque), always at index 0. */
     public static final int NO_TRANSFORM = 0;
+    /**
+     * Floats per vertex of the vertex table (16 bytes): x, y, the path's length up to it and a spare float (paths and
+     * areas), or a pixel column's first, last, lowest and highest y (columns).
+     */
+    public static final int VERTEX_FLOATS = 4;
 
     private int[] words;
     private int size; // primitives in use: the end of the last range
@@ -60,6 +72,9 @@ public final class DrawList {
     private float[] transforms;
     private int transformCount;
     private final DirtyRanges transformsDirty = new DirtyRanges();
+    private float[] vertices;
+    private int vertexCount;
+    private final DirtyRanges verticesDirty = new DirtyRanges();
     private long version;
     private long generation; // grows with every reset: transforms and clips handed out before are gone
 
@@ -80,6 +95,7 @@ public final class DrawList {
         words = new int[256 * WORDS];
         clips = new float[16 * CLIP_FLOATS];
         transforms = new float[16 * TRANSFORM_FLOATS];
+        vertices = new float[64 * VERTEX_FLOATS];
         reset();
     }
 
@@ -98,6 +114,8 @@ public final class DrawList {
         identity(0);
         transformsDirty.clear();
         transformsDirty.add(0, 1);
+        vertexCount = 0;
+        verticesDirty.clear();
         version++;
         generation++;
     }
@@ -254,6 +272,93 @@ public final class DrawList {
     /** The transform entries changed since {@link #clean()}, as ranges of entries: what a renderer uploads. */
     public DirtyRanges transformRanges() {
         return transformsDirty;
+    }
+
+    // ---------------------------------------------------------------- the vertex table
+
+    /**
+     * A new block of {@code count} vertices at the end of the vertex table, all 0: its first vertex's index. It lasts
+     * until {@link #reset} ({@link #generation()} changes).
+     */
+    public int allocateVertices(int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("vertices: " + count);
+        }
+        int first = vertexCount;
+        if ((first + count) * VERTEX_FLOATS > vertices.length) {
+            vertices = grow(vertices, Math.max(vertices.length * 2, (first + count) * VERTEX_FLOATS));
+        }
+        Arrays.fill(vertices, first * VERTEX_FLOATS, (first + count) * VERTEX_FLOATS, 0);
+        vertexCount = first + count;
+        verticesDirty.add(first, first + count);
+        version++;
+        return first;
+    }
+
+    /**
+     * Sets vertex {@code index} of a path: the point {@code x, y} and the path's {@code length} up to it (for
+     * dashes; 0 if not dashed). While a range records, its baked transform ({@link #transform}) applies, as to its
+     * primitives. NaN coordinates break the path.
+     */
+    public void pathVertex(int index, float x, float y, float length) {
+        if (cursor >= 0) {
+            vertex(index, scale * x + offsetX, scale * y + offsetY, scale * length, 0);
+        } else {
+            vertex(index, x, y, length, 0);
+        }
+    }
+
+    /**
+     * Sets vertex {@code index} of columns: a pixel column's {@code first}, {@code last}, {@code low} and {@code high}
+     * sample's y (NaN: no samples). While a range records, its baked transform applies.
+     */
+    public void columnVertex(int index, float first, float last, float low, float high) {
+        if (cursor >= 0) {
+            vertex(index, scale * first + offsetY, scale * last + offsetY, scale * low + offsetY,
+                scale * high + offsetY);
+        } else {
+            vertex(index, first, last, low, high);
+        }
+    }
+
+    private void vertex(int index, float a, float b, float c, float d) {
+        if (index < 0 || index >= vertexCount) {
+            throw new IllegalArgumentException("no vertex " + index);
+        }
+        int o = index * VERTEX_FLOATS;
+        float[] v = vertices;
+        // by bits: NaN equals NaN, so an unchanged break uploads nothing
+        if (Float.floatToRawIntBits(v[o]) != Float.floatToRawIntBits(a)
+            || Float.floatToRawIntBits(v[o + 1]) != Float.floatToRawIntBits(b)
+            || Float.floatToRawIntBits(v[o + 2]) != Float.floatToRawIntBits(c)
+            || Float.floatToRawIntBits(v[o + 3]) != Float.floatToRawIntBits(d)) {
+            v[o] = a;
+            v[o + 1] = b;
+            v[o + 2] = c;
+            v[o + 3] = d;
+            verticesDirty.add(index, index + 1);
+            version++;
+        }
+    }
+
+    /** The packed vertex table: {@link #vertexCount()} vertices of {@link #VERTEX_FLOATS} floats. */
+    public float[] vertices() {
+        return vertices;
+    }
+
+    /** Vertices allocated. */
+    public int vertexCount() {
+        return vertexCount;
+    }
+
+    /** Float {@code component} (0 to 3) of vertex {@code index}. */
+    public float vertexAt(int index, int component) {
+        return vertices[index * VERTEX_FLOATS + component];
+    }
+
+    /** The vertices changed since {@link #clean()}, as ranges of vertices: what a renderer uploads. */
+    public DirtyRanges vertexRanges() {
+        return verticesDirty;
     }
 
     // ---------------------------------------------------------------- clips
@@ -571,6 +676,115 @@ public final class DrawList {
         emit(p);
     }
 
+    /**
+     * A polyline through vertices {@code first} to {@code first + count - 1} ({@link #pathVertex}), {@code width}
+     * pixels wide in {@code color}: {@code stroke} names its joins and caps ({@link Primitive#JOIN_MITER},
+     * {@link Primitive#JOIN_BEVEL}, {@link Primitive#JOIN_ROUND}, {@link Primitive#CAP_SQUARE},
+     * {@link Primitive#CAP_ROUND}; 0: butt ends, no joins), miters longer than {@code miterLimit} widths are beveled;
+     * dashed by {@code dash, gap, dash2, gap2} pixels along the path (all 0: solid; {@code dash2, gap2} 0: repeat the
+     * first pair), the pattern starting {@code phase} pixels in. Write the vertices first: its box is theirs.
+     */
+    public void path(int first, int count, float width, long color, int stroke, float miterLimit, float dash,
+        float gap, float dash2, float gap2, float phase) {
+        int[] p = start(Primitive.PATH, 0, 0, 0, 0, 0, color, 0);
+        boolean miter = (stroke & 3) == Primitive.JOIN_MITER;
+        pointBounds(p, first, count, scale * Math.max(width, 1) * 0.5f * (miter ? Math.max(1.5f, miterLimit) : 1.5f)
+            + 1);
+        p[Primitive.FIRST_VERTEX] = first;
+        p[Primitive.VERTEX_COUNT] = count;
+        p[Primitive.MITER_LIMIT] = Float.floatToRawIntBits(miterLimit);
+        p[Primitive.DASH_PHASE] = Float.floatToRawIntBits(phase);
+        p[Primitive.WIDTH] = Float.floatToRawIntBits(width);
+        boolean second = dash2 > 0 || gap2 > 0;
+        p[Primitive.DASHES] = Primitive.halves(dash, gap);
+        p[Primitive.DASHES + 1] = second ? Primitive.halves(dash2, gap2) : Primitive.halves(dash, gap);
+        p[Primitive.STROKE] = stroke & 15;
+        emit(p);
+    }
+
+    /**
+     * {@code count} pixel columns from vertex {@code first} on ({@link #columnVertex}), the first centred at
+     * {@code x}, the next {@code step} pixels on each (negative: leftwards, an inverted axis's columns in their data's
+     * order, which connectors follow): stroked {@code width} pixels wide in {@code color} (the M4
+     * envelope's look: a vertical stroke over each column's span, connectors where neighbouring spans do not touch;
+     * {@code steps}: connectors as stairs), or, when {@code width} is 0, filled from {@code baseline} to each column's
+     * farthest sample. Write the vertices first.
+     */
+    public void columns(int first, int count, float x, float step, float width, long color, float baseline,
+        boolean steps) {
+        if (first < 0 || count < 0 || first + count > vertexCount) {
+            throw new IllegalArgumentException("vertices " + first + " + " + count + " of " + vertexCount);
+        }
+        int[] p = start(Primitive.COLUMNS, 0, 0, 0, 0, 0, color, 0);
+        boolean fill = !(width > 0);
+        float cx = scale * x + offsetX;
+        float base = scale * baseline + offsetY;
+        float reach = scale * (Math.max(width, 1) * 0.5f + 1);
+        float lo = fill ? base : Float.POSITIVE_INFINITY;
+        float hi = fill ? base : Float.NEGATIVE_INFINITY;
+        for (int i = first * VERTEX_FLOATS, end = (first + count) * VERTEX_FLOATS; i < end; i++) {
+            float v = vertices[i];
+            if (v < lo) {
+                lo = v;
+            }
+            if (v > hi) {
+                hi = v;
+            }
+        }
+        if (!(lo <= hi)) {
+            lo = cx;
+            hi = cx;
+            reach = 0;
+        }
+        float half = scale * Math.abs(step) * 0.5f;
+        float last = cx + scale * step * Math.max(0, count - 1);
+        p[Primitive.X0] = Float.floatToRawIntBits(Math.min(cx, last) - half - reach);
+        p[Primitive.Y0] = Float.floatToRawIntBits(lo - reach);
+        p[Primitive.X1] = Float.floatToRawIntBits(Math.max(cx, last) + half + reach);
+        p[Primitive.Y1] = Float.floatToRawIntBits(hi + reach);
+        p[Primitive.FIRST_VERTEX] = first;
+        p[Primitive.VERTEX_COUNT] = count;
+        p[Primitive.BASELINE] = Float.floatToRawIntBits(base);
+        p[Primitive.COLUMN_X] = Float.floatToRawIntBits(cx);
+        p[Primitive.WIDTH] = Float.floatToRawIntBits(fill ? 0 : width);
+        p[Primitive.COLUMN_STEP] = Float.floatToRawIntBits(step);
+        p[Primitive.STROKE] = (fill ? Primitive.COLUMNS_FILL : 0) | (steps ? Primitive.COLUMNS_STEPS : 0);
+        emit(p);
+    }
+
+    /** The box of path vertices {@code first..first + count - 1} (stored transformed) grown by {@code grow}. */
+    private void pointBounds(int[] p, int first, int count, float grow) {
+        if (first < 0 || count < 0 || first + count > vertexCount) {
+            throw new IllegalArgumentException("vertices " + first + " + " + count + " of " + vertexCount);
+        }
+        float x0 = Float.POSITIVE_INFINITY;
+        float y0 = Float.POSITIVE_INFINITY;
+        float x1 = Float.NEGATIVE_INFINITY;
+        float y1 = Float.NEGATIVE_INFINITY;
+        for (int i = first; i < first + count; i++) {
+            float x = vertices[i * VERTEX_FLOATS];
+            float y = vertices[i * VERTEX_FLOATS + 1];
+            if (x == x && y == y) {
+                x0 = Math.min(x0, x);
+                y0 = Math.min(y0, y);
+                x1 = Math.max(x1, x);
+                y1 = Math.max(y1, y);
+            }
+        }
+        float g = grow;
+        if (!(x0 <= x1)) {
+            x0 = 0;
+            y0 = 0;
+            x1 = 0;
+            y1 = 0;
+            g = 0;
+        }
+        p[Primitive.X0] = Float.floatToRawIntBits(x0 - g);
+        p[Primitive.Y0] = Float.floatToRawIntBits(y0 - g);
+        p[Primitive.X1] = Float.floatToRawIntBits(x1 + g);
+        p[Primitive.Y1] = Float.floatToRawIntBits(y1 + g);
+    }
+
     private static int texels(int v) {
         if (v < 0 || v > 255) {
             throw new IllegalArgumentException("nine-slice insets are 0 to 255 texels: " + v);
@@ -627,6 +841,16 @@ public final class DrawList {
                 p[Primitive.INSETS + 1] = scaleHalves(p[Primitive.INSETS + 1], scale);
             }
             case Primitive.LINE -> p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH], scale);
+            case Primitive.PATH -> {
+                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH], scale);
+                p[Primitive.DASH_PHASE] = scaleFloat(p[Primitive.DASH_PHASE], scale);
+                p[Primitive.DASHES] = scaleHalves(p[Primitive.DASHES], scale);
+                p[Primitive.DASHES + 1] = scaleHalves(p[Primitive.DASHES + 1], scale);
+            }
+            case Primitive.COLUMNS -> {
+                p[Primitive.WIDTH] = scaleFloat(p[Primitive.WIDTH], scale);
+                p[Primitive.COLUMN_STEP] = scaleFloat(p[Primitive.COLUMN_STEP], scale);
+            }
             default -> {
                 // images: the quad alone
             }
@@ -724,6 +948,7 @@ public final class DrawList {
     public void clean() {
         dirty.clear();
         transformsDirty.clear();
+        verticesDirty.clear();
         clipsDirty = false;
     }
 
@@ -819,6 +1044,9 @@ public final class DrawList {
         b.size = size;
         b.clips = Arrays.copyOf(clips, clips.length);
         b.clipCount = clipCount;
+        b.vertices = Arrays.copyOf(vertices, vertices.length);
+        b.vertexCount = vertexCount;
+        boolean[] bakedVertex = new boolean[vertexCount]; // vertices two primitives share are baked once
         int[] p = new int[WORDS];
         for (int i = 0; i < size; i++) {
             int kind = Primitive.kind(header(i));
@@ -836,6 +1064,10 @@ public final class DrawList {
                     p[w + 1] = Float.floatToRawIntBits(drawnY(i, w + 1));
                 }
             }
+            boolean overVertices = kind == Primitive.PATH || kind == Primitive.COLUMNS;
+            if (overVertices) {
+                bakeVertices(b, i, kind, p, bakedVertex);
+            }
             float s = drawnScale(i);
             if (s != 1) {
                 scaleSizes(p, s);
@@ -843,8 +1075,8 @@ public final class DrawList {
             float opacity = drawnOpacity(i);
             if (opacity != 1) {
                 fade(p, Primitive.COLOR_A, opacity);
-                if ((Primitive.flags(p[Primitive.HEADER]) & Primitive.FLAG_DEPTH) == 0) {
-                    fade(p, Primitive.COLOR_B, opacity); // a depth tested primitive's words 7-8 are its depth
+                if (!overVertices && (Primitive.flags(p[Primitive.HEADER]) & Primitive.FLAG_DEPTH) == 0) {
+                    fade(p, Primitive.COLOR_B, opacity); // over vertices or depth tested, words 7-8 are not colour B
                 }
                 if (kind == Primitive.BOX) {
                     fade(p, Primitive.BORDER_COLOR, opacity);
@@ -863,6 +1095,39 @@ public final class DrawList {
             b.clips[o + 7] = NO_TRANSFORM;
         }
         return b;
+    }
+
+    /** Bakes primitive {@code i}'s coordinate words and its vertices (into {@code b}) as it draws. */
+    private void bakeVertices(DrawList b, int i, int kind, int[] p, boolean[] done) {
+        int t = transformOf(i);
+        int clip = Primitive.clip(header(i));
+        float s = transformScale(t);
+        float ox = clipOffsetX(clip);
+        float oy = clipOffsetY(clip);
+        float tx = transformX(t);
+        float ty = transformY(t);
+        if (kind == Primitive.COLUMNS) {
+            p[Primitive.BASELINE] = Float.floatToRawIntBits(drawnY(i, Primitive.BASELINE));
+            p[Primitive.COLUMN_X] = Float.floatToRawIntBits(drawnX(i, Primitive.COLUMN_X));
+        }
+        int first = intAt(i, Primitive.FIRST_VERTEX);
+        int count = intAt(i, Primitive.VERTEX_COUNT);
+        for (int v = first; v < first + count && v < vertexCount; v++) {
+            if (done[v]) {
+                continue;
+            }
+            done[v] = true;
+            int o = v * VERTEX_FLOATS;
+            if (kind == Primitive.COLUMNS) {
+                for (int c = 0; c < 4; c++) {
+                    b.vertices[o + c] = (vertices[o + c] + oy) * s + ty;
+                }
+            } else {
+                b.vertices[o] = (vertices[o] + ox) * s + tx;
+                b.vertices[o + 1] = (vertices[o + 1] + oy) * s + ty;
+                b.vertices[o + 2] = vertices[o + 2] * s;
+            }
+        }
     }
 
     private static void fade(int[] p, int word, float opacity) {
