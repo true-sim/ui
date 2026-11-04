@@ -12,7 +12,6 @@ import com.truesim.ui.core.UiState;
 import com.truesim.ui.core.event.DataFormat;
 import com.truesim.ui.core.event.DragOperation;
 import com.truesim.ui.core.event.EventType;
-import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.style.tss.Tss;
 import com.truesim.ui.text.AtlasSettings;
@@ -197,7 +196,6 @@ class ScenePickingTest {
         r.scene.setLocalBounds(node, -1, -1, -0.1, 1, 1, 0.1);
         r.scene.setTranslation(node, 0, 0, -10);
         r.scene.setScale(node, 2, 2, 2);
-        double s = Math.sqrt(0.5);
         r.scene.setRotation(node, 0, 0, 0, 1);
         long behind = r.box(0, 0, -20, 4, Mobility.STATIC);
         List<Long> hits = new ArrayList<>();
@@ -223,7 +221,6 @@ class ScenePickingTest {
         r.mouse(upperRight[0], upperRight[1], Pointer.PRIMARY).mouse(upperRight[0], upperRight[1], 0);
         assertThat(hits).containsExactly(behind); // the box is hit there, the triangle is not
         assertThat(point[2]).isCloseTo(-16, org.assertj.core.data.Offset.offset(1e-9));
-        assertThat(s).isPositive();
     }
 
     @Test
@@ -461,7 +458,5 @@ class ScenePickingTest {
         assertThat(r.picking.index()).isSameAs(r.index);
         assertThat(r.picking.interactiveLayer()).isEqualTo(SceneRig.INTERACTIVE);
         assertThat(r.ui.tunables()).contains(ScenePicking.SCENE_HITS, ScenePicking.RAY_LENGTH);
-        UiEvent[] none = new UiEvent[1];
-        assertThat(none[0]).isNull();
     }
 }
