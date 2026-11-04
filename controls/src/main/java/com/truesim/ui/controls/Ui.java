@@ -164,6 +164,7 @@ public final class Ui {
     private final Interaction interaction;
     private final Visuals visuals;
     private final Animator animator;
+    private final com.truesim.ui.core.bind.Bindings bindings = new com.truesim.ui.core.bind.Bindings();
     private final Measure measure = this::measure;
     private DrawList rec; // the list being recorded
     private float recordShiftX; // the shift of the element being recorded: its clip owner's scroll
@@ -258,6 +259,14 @@ public final class Ui {
     /** The animations and style transitions of this UI. */
     public Animator animator() {
         return animator;
+    }
+
+    /**
+     * The bindings of this UI (design 4.2): polled at the start of each {@link #update}, before the frame listeners,
+     * so an edit reaches its model and a model change its control in the frame it happened.
+     */
+    public com.truesim.ui.core.bind.Bindings bindings() {
+        return bindings;
     }
 
     private static UiTextures atlasTextures(GlyphAtlas atlas) {
@@ -625,6 +634,7 @@ public final class Ui {
             ensure();
             rebuildAll();
         }
+        bindings.poll();
         for (int i = 0; i < listenerCount; i++) {
             listeners[i].frame(nanos);
         }
