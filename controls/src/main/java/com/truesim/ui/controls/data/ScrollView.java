@@ -482,6 +482,11 @@ public abstract class ScrollView {
         }
     }
 
+    /** Stops the view's frame work (its elements are destroyed or about to be): generated editors drop views. */
+    public void dispose() {
+        ui.removeFrameListener(updater);
+    }
+
     /** The frame listener. */
     private final class Updater implements Ui.FrameListener {
 

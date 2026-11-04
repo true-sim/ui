@@ -201,6 +201,11 @@ public final class Ui {
     private int[] codeLayout = new int[0];
     private FrameListener[] listeners = new FrameListener[4];
     private int listenerCount;
+    /** A listener removed while the listeners ran: does nothing until compacted. */
+    private static final FrameListener REMOVED = nanos -> {
+    };
+    private boolean runningListeners;
+    private boolean listenersRemoved;
     private UiInput frameInput;
     private long frameNanos;
     private boolean inputGiven; // input() was called since the last update()
@@ -531,15 +536,40 @@ public final class Ui {
         listeners[listenerCount++] = listener;
     }
 
-    /** Stops running {@code listener}. */
+    /**
+     * Stops running {@code listener}. Removed while the listeners run (a panel dropping the controls it made), it
+     * stops at once and the others still run in this pass.
+     */
     public void removeFrameListener(FrameListener listener) {
         for (int i = 0; i < listenerCount; i++) {
             if (listeners[i] == listener) {
-                System.arraycopy(listeners, i + 1, listeners, i, listenerCount - i - 1);
-                listeners[--listenerCount] = null;
+                if (runningListeners) {
+                    listeners[i] = REMOVED;
+                    listenersRemoved = true;
+                } else {
+                    System.arraycopy(listeners, i + 1, listeners, i, listenerCount - i - 1);
+                    listeners[--listenerCount] = null;
+                }
                 return;
             }
         }
+    }
+
+    /** Compacts the listeners removed while they ran. */
+    private void compactListeners() {
+        runningListeners = false;
+        if (!listenersRemoved) {
+            return;
+        }
+        listenersRemoved = false;
+        int n = 0;
+        for (int i = 0; i < listenerCount; i++) {
+            if (listeners[i] != REMOVED) {
+                listeners[n++] = listeners[i];
+            }
+        }
+        java.util.Arrays.fill(listeners, n, listenerCount, null);
+        listenerCount = n;
     }
 
     /**
@@ -635,9 +665,11 @@ public final class Ui {
             rebuildAll();
         }
         bindings.poll();
+        runningListeners = true;
         for (int i = 0; i < listenerCount; i++) {
             listeners[i].frame(nanos);
         }
+        compactListeners();
         ensure();
         animator.advance(nanos);
         attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
@@ -665,9 +697,11 @@ public final class Ui {
         placePreviews(); // after styles: a restyled preview keeps the place set here
         layOut(width, height);
         for (int pass = 1; listenerCount > 0; pass++) {
+            runningListeners = true;
             for (int i = 0; i < listenerCount; i++) {
                 listeners[i].afterLayout();
             }
+            compactListeners();
             if (pass == MAX_PASSES || !relayoutPending()) {
                 break;
             }
