@@ -35,6 +35,8 @@ public final class Overlays implements Ui.FrameListener {
     private int count;
     private final float[] box = new float[4];
     private final float[] out = new float[3];
+    private final float[] view = new float[4];
+    private Viewports viewports;
     private boolean rtl;
 
     /** The overlays of {@code ui}; registers itself as one of its frame listeners. */
@@ -69,6 +71,15 @@ public final class Overlays implements Ui.FrameListener {
     /** Lays start and end sides out right to left (START is the right side); returns this. */
     public Overlays rightToLeft(boolean value) {
         rtl = value;
+        return this;
+    }
+
+    /**
+     * Keeps anchored overlays inside the viewport holding their anchor, as {@code value} says (null: the host's box):
+     * for a UI shown in several windows. Returns this.
+     */
+    public Overlays viewports(Viewports value) {
+        viewports = value;
         return this;
     }
 
@@ -167,6 +178,13 @@ public final class Overlays implements Ui.FrameListener {
             }
             boolean visible = o.anchor().bounds(box);
             o.anchorVisible = visible;
+            if (visible && viewports != null
+                && viewports.viewportAt(box[0] + box[2] * 0.5f, box[1] + box[3] * 0.5f, view)) {
+                vx = view[0];
+                vy = view[1];
+                vw = view[2];
+                vh = view[3];
+            }
             if (visible) {
                 ResolvedStyle s = ui.styles().styleOf(slot);
                 float scale = scale();

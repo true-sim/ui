@@ -2013,3 +2013,52 @@ following lines' cluster indices.
 - `common-state` 0.4.0 must be released with `VersionedTree` before `ui` can use the published artifact: the
   dependency in `core/build.gradle.kts` stays 0.3.0 and builds use `-Ptruesim.common-state=../common-state-tree`
   until then.
+
+### OS windows for docking (2026-11-04): built, local branches `a2-oswindows` (ui) and `ui-a2-oswindows` (engine)
+
+Built on group A2: tabs tear out of the main window into OS windows of their own, and dock back.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Dock areas | A `DockSpace` has areas: its main one (`root()`) and one per OS window (`newArea`, `closeArea`, `areaOf`, `findArea`, `dock(panel, area, position)`); each a tree of splits and panes; tabs drag between areas like between panes; an area left empty closes its window; a closed window's panels dock again where they last were in the main area (beside the panels they were beside, at their side and share, else into the main area) | `controls.windows` `DockArea`, `DockSpace` |
+| Area hosts | `DockHost` gains default methods for hosts with areas (`areas`, `openArea`, `closeArea`, `titleArea`, `raiseArea`, `outside`, `follow`, `following`, `describe`, `restoreArea`); `WindowDockHost` (floating windows in the UI) is unchanged | `DockHost` |
+| `OsDockHost` | Over `OsWindows` (open, close, move, title, raise, maximise, bounds, pixel ratio, content scale, monitors, the global cursor: an engine's, or a fake): a tab dragged beyond every window tears out into a window at the cursor that follows it until release (the drag session continues, so dropping on any area's panes or edges docks it); the only tab of a window drags the window; a window's close button re-docks its panels; a window gone by itself too. Every window shows a region of the one `Ui` (a layer `dock-window-<n>` at z 50 + n, its region at x 65,536 + n x 16,384 UI pixels), so sheet, tokens, text, atlas, focus, commands and drag and drop are shared; `toUi` maps screen points into the region of the front-most window under them (the following window left out; the OS focus orders them), `toScreen` back; a window's UI pixels per screen coordinate are its pixel density times the main window's scale over its own, so content keeps its size in points on monitors of other scales | `OsDockHost`, `OsWindows` |
+| Overlays | Anchored overlays are kept inside the viewport of their anchor's window (`Overlays.viewports(Viewports)`) | `controls.overlay` |
+| Layouts | `DockLayout` window lines: `window <id> "<monitor key>" <x> <y> <width> <height> [maximized] <node>`, the place from the monitor's top left in screen coordinates; round trip exact (`#` in quoted monitor keys is not a comment). Restored on a missing monitor, a window goes to the primary one, its size and place clamped into the usable area; persisted through the `LayoutStore`, saved once a moved or resized window kept still for 20 frames (never per frame) | `DockLayout`, `OsDockHost` |
+| Engine | `UiOsWindows` (engine-ui) implements `OsWindows` over the platform: a window per area, presented by the presenter from a view of its own (`ui.window<id>`: `UiBackdrop`, the scene cleared black, and a `GpuUiRenderer.share()` drawing the main renderer's uploads at its region's `origin`): one device, one upload, one atlas, a presenter target per window with its own encoding (SDR, HDR10, scRGB by its display); the mouse of every window maps through the host (`MousePointer.mapper`; the global cursor where the system tells it), text input starts on the window holding the field (`UiTextInput.locator`), close buttons and focus reach the host. `UiPlugin.osWindows()` makes it with a window and a presenter and drives it each frame. Platform: `Platform.createWindow(options, x, y)`, `Platform.globalMouse(out)` (false on Wayland); monitors are `Platform.displays()` with `displayKey` | engine `ui`, `platform`, the UI shader's `originX`, `originY` |
+| Styles | `dock-window` in `_oswindows.tss` and `_oswindows-test.tss` (one `@import` each) | themes |
+
+#### Decisions
+
+- *One UI, regions per window* (Dear ImGui's multi-viewport way) rather than a second `Ui` per window: elements
+  belong to one store, so a panel's content could not move to another UI; one UI shares everything and a tab drags
+  between windows as between panes. The cost: every window draws every layer, clipped by the rasteriser (the main
+  window's primitives fall outside an OS window's image).
+- *The window follows the drag; the drag session stays.* Docking on drop is the ordinary drop on a dock space's
+  root, wherever the cursor is; the following window is left out of the mouse mapping and of the drop targets.
+- *DPI by scaling the region*, not a second layout: an OS window's region is laid out at the main window's scale and
+  drawn scaled to its monitor's; MSDF text stays sharp, raster small text drawn at another scale is resampled.
+
+#### Tests
+
+ui: `OsDockTest` (fake windows: tear out and follow, dock back, close and re-dock, between windows and out of them,
+a drop where nothing docks, layouts with monitors round trip and restore on a missing monitor and clamped, the
+store, scales and the front-most window, no global cursor, overlays kept in a window, the test theme),
+`OsDockAllocationTest` (idle, the mouse over windows, a window following a drag: nothing allocated without escape
+analysis). Engine: `OsWindowsTest` (real windows and the presenter: a tab dragged out opens a second window that
+follows the cursor, both render, the close button docks it back, screenshots `ui-windows/os-window-main.png`,
+`os-window-undocked.png`, `os-window-redocked.png`), `PlatformTest` (windows at a position, the global mouse).
+
+#### Left
+
+- Wayland: no global cursor and no window positions; windows open where the compositor puts them, the following
+  window tracks the pointer's place in the UI (when the cursor leaves every window it is not known), and saved
+  positions are not restored.
+- Paper white and the UI's brightness are the graph's settings, one for all windows; each window's encoding is its
+  own.
+- Windows stack by the OS focus as the host saw it; overlapping windows of other applications are not known.
+- Pop-ups of content in a window flip within its region; a centred dialog shows in the main window.
+- An OS window is not made a child of the main one (stays on top, no task bar entry): SDL's parent windows behave
+  differently per system; to decide.

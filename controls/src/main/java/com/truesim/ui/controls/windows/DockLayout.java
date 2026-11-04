@@ -13,14 +13,18 @@ import java.util.List;
  * <pre>
  * dock split(row; 0.25 0.75; tabs(0; scene hierarchy) split.editor(column; 0.7 0.3; tabs(1; viewport game) tabs(0; console)))
  * floating inspector 40 60 320 480
+ * window w1 "DELL U2720Q #2" 120 80 640 480 maximized tabs(0; console)
  * </pre>
  *
  * Grammar: {@code dock <node>} or {@code dock none}; a node is {@code split[.style](row|column; ratio...; node...)} or
- * {@code tabs[.style](active; id...)}; then {@code floating <id> <x> <y> <width> <height>} lines (panel units). Ids and
- * style names hold no white space nor {@code # , ( ) ;}; {@code #} starts a comment.
+ * {@code tabs[.style](active; id...)}; then {@code floating <id> <x> <y> <width> <height>} lines (panel units) and
+ * {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] <node>} lines: an OS window's dock area
+ * ({@link OsDockHost}), on the monitor of that key (empty: unknown), at {@code x, y} from the monitor's top left,
+ * {@code width x height}, in screen coordinates. Ids and style names hold no white space nor {@code # , ( ) ;}; a
+ * monitor key no {@code "}; {@code #} outside quotes starts a comment.
  */
 @AllowAllocation("layouts are saved and restored on user action")
-public record DockLayout(Node root, List<Floating> floating) {
+public record DockLayout(Node root, List<Floating> floating, List<Window> windows) {
 
     /** A node of the tree. */
     public sealed interface Node permits Split, Tabs {
@@ -65,8 +69,33 @@ public record DockLayout(Node root, List<Floating> floating) {
         }
     }
 
+    /**
+     * An OS window holding a dock area of its own ({@code root}, never empty): its {@code id}, the key of the monitor
+     * it is on ({@code ""}: unknown), its place {@code x, y} from that monitor's top left and its size, in screen
+     * coordinates, and whether it is maximised.
+     */
+    public record Window(String id, String monitor, float x, float y, float width, float height, boolean maximized,
+        Node root) {
+        public Window {
+            WindowLayout.checkId(id);
+            monitor = monitor == null ? "" : monitor;
+            if (monitor.indexOf('"') >= 0 || monitor.indexOf('\n') >= 0) {
+                throw new IllegalArgumentException("a monitor key holds no quote nor line break: " + monitor);
+            }
+            if (root == null) {
+                throw new IllegalArgumentException("a window holds a dock area");
+            }
+        }
+    }
+
     public DockLayout {
         floating = List.copyOf(floating);
+        windows = windows == null ? List.of() : List.copyOf(windows);
+    }
+
+    /** A layout of a tree and floating panels, without OS windows. */
+    public DockLayout(Node root, List<Floating> floating) {
+        this(root, floating, List.of());
     }
 
     /** No panels. */
@@ -87,6 +116,18 @@ public record DockLayout(Node root, List<Floating> floating) {
             WindowLayout.number(out, f.y()).append(' ');
             WindowLayout.number(out, f.width()).append(' ');
             WindowLayout.number(out, f.height()).append('\n');
+        }
+        for (Window w : windows) {
+            out.append("window ").append(w.id()).append(" \"").append(w.monitor()).append("\" ");
+            WindowLayout.number(out, w.x()).append(' ');
+            WindowLayout.number(out, w.y()).append(' ');
+            WindowLayout.number(out, w.width()).append(' ');
+            WindowLayout.number(out, w.height()).append(' ');
+            if (w.maximized()) {
+                out.append("maximized ");
+            }
+            write(out, w.root());
+            out.append('\n');
         }
         return out.toString();
     }
@@ -142,6 +183,9 @@ public record DockLayout(Node root, List<Floating> floating) {
         for (Floating f : floating) {
             ids.add(f.panel());
         }
+        for (Window w : windows) {
+            collect(w.root(), ids);
+        }
         return ids;
     }
 
@@ -160,9 +204,10 @@ public record DockLayout(Node root, List<Floating> floating) {
         Node root = null;
         boolean seen = false;
         List<Floating> floating = new ArrayList<>();
+        List<Window> windows = new ArrayList<>();
         String[] lines = text.split("\n", -1);
         for (int i = 0; i < lines.length; i++) {
-            String line = WindowLayout.strip(lines[i]);
+            String line = strip(lines[i]);
             if (line.isEmpty()) {
                 continue;
             }
@@ -186,14 +231,49 @@ public record DockLayout(Node root, List<Floating> floating) {
                     }
                     floating.add(new Floating(f[1], Float.parseFloat(f[2]), Float.parseFloat(f[3]),
                         Float.parseFloat(f[4]), Float.parseFloat(f[5])));
+                } else if (line.startsWith("window ")) {
+                    windows.add(window(line));
                 } else {
-                    throw new IllegalArgumentException("expected dock or floating");
+                    throw new IllegalArgumentException("expected dock or floating (or window)");
                 }
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("dock layout line " + (i + 1) + ": " + e.getMessage(), e);
             }
         }
-        return new DockLayout(root, floating);
+        return new DockLayout(root, floating, windows);
+    }
+
+    /** A line without its comment: from a {@code #} outside quotes. */
+    static String strip(String line) {
+        boolean quoted = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '"') {
+                quoted = !quoted;
+            } else if (c == '#' && !quoted) {
+                return line.substring(0, i).strip();
+            }
+        }
+        return line.strip();
+    }
+
+    /** Parses {@code window <id> "<monitor>" <x> <y> <width> <height> [maximized] <node>}. */
+    private static Window window(String line) {
+        Reader r = new Reader(line, 6);
+        String id = r.word();
+        String monitor = r.quoted();
+        float x = r.number(r.word());
+        float y = r.number(r.word());
+        float w = r.number(r.word());
+        float h = r.number(r.word());
+        int mark = r.pos;
+        boolean maximized = r.word(true).equals("maximized");
+        if (!maximized) {
+            r.pos = mark;
+        }
+        Node root = r.node();
+        r.end();
+        return new Window(id, monitor, x, y, w, h, maximized, root);
     }
 
     /** A recursive-descent reader of one dock line. */
@@ -238,6 +318,19 @@ public record DockLayout(Node root, List<Floating> floating) {
 
         String word() {
             return word(false);
+        }
+
+        /** A string in double quotes (no escapes). */
+        String quoted() {
+            expect('"');
+            int start = pos;
+            while (pos < text.length() && text.charAt(pos) != '"') {
+                pos++;
+            }
+            if (pos >= text.length()) {
+                throw error("expected a closing '\"'");
+            }
+            return text.substring(start, pos++);
         }
 
         /** A word up to white space or {@code ( ) ;} (and {@code .} with {@code dotEnds}: a node's style). */
@@ -297,7 +390,7 @@ public record DockLayout(Node root, List<Floating> floating) {
             return node;
         }
 
-        private float number(String word) {
+        float number(String word) {
             try {
                 return Float.parseFloat(word);
             } catch (NumberFormatException e) {

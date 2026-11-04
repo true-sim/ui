@@ -62,6 +62,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     /** A node of the tree: a split or a pane. */
     abstract static class Node {
         Split parent;
+        DockArea area;
         Element element;
         String style;
     }
@@ -92,7 +93,8 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     private final UiStore store;
     private final Element root;
     private final List<DockPanel> panels = new ArrayList<>();
-    private Node tree;
+    private final DockArea main;
+    private final List<DockArea> areas = new ArrayList<>();
     private Split[] splits = new Split[0];
     private Tabs[] panes = new Tabs[0];
     private DockHost host;
@@ -109,6 +111,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     private final Element dragLabel;
 
     // the drop target found last
+    private DockArea hitArea;
     private Tabs hitTabs;
     private DockPosition hitPosition;
     private int hitIndex;
@@ -142,6 +145,8 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         root.semantics(Role.GROUP, null);
         interaction.on(root, EventType.DROP_OVER.bit() | EventType.DROP.bit() | EventType.DROP_LEAVE.bit(),
             rootListener);
+        main = new DockArea(this, "main", root);
+        areas.add(main);
         previewElement = ui.element("dock-drop-preview", null);
         preview = overlays.create(previewElement, Layers.DRAG).input(OverlayInput.PASS_THROUGH);
         zonesElement = ui.element("dock-zones", null);
@@ -175,6 +180,167 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     /** Sets where undocked panels float (an engine's OS windows; null: they cannot float). */
     public void host(DockHost value) {
         host = value;
+    }
+
+    // ================================================================ areas
+
+    /** The main area: the one filling {@link #root()}. */
+    public DockArea mainArea() {
+        return main;
+    }
+
+    /** How many areas there are: the main one and one per OS window. */
+    public int areaCount() {
+        return areas.size();
+    }
+
+    /** Area {@code index}: the main one first, then the others in the order they were made. */
+    public DockArea area(int index) {
+        return areas.get(index);
+    }
+
+    /** The area with id {@code id}, or null. */
+    public DockArea findArea(String id) {
+        for (int i = 0; i < areas.size(); i++) {
+            if (areas.get(i).id().equals(id)) {
+                return areas.get(i);
+            }
+        }
+        return null;
+    }
+
+    /** The area {@code panel} is docked in, or null. */
+    public DockArea areaOf(DockPanel panel) {
+        return panel.tabs == null ? null : panel.tabs.area;
+    }
+
+    /**
+     * A new, empty area with id {@code id} (unused, no white space): for a {@link DockHost} that opens a window per
+     * area, which puts its {@link DockArea#root()} in the window. Panels dock in it like in the main area; an area left
+     * empty closes ({@link DockHost#closeArea}).
+     */
+    @AllowAllocation("an area opens on user action")
+    public DockArea newArea(String id) {
+        if (findArea(id) != null) {
+            throw new IllegalArgumentException("an area " + id + " exists");
+        }
+        Element e = ui.element("dock-space", null);
+        e.semantics(Role.GROUP, null);
+        interaction.on(e, EventType.DROP_OVER.bit() | EventType.DROP.bit() | EventType.DROP_LEAVE.bit(),
+            rootListener);
+        DockArea area = new DockArea(this, id, e);
+        areas.add(area);
+        return area;
+    }
+
+    /**
+     * Closes {@code area} (not the main one): its panels dock again where they last were in the main area (beside the
+     * panel they were beside, else into the main area's first pane), and its host closes its window.
+     */
+    @AllowAllocation("closing a window is a user action")
+    public void closeArea(DockArea area) {
+        if (area == main || !areas.contains(area)) {
+            return;
+        }
+        List<DockPanel> inside = area.panels();
+        for (DockPanel p : inside) {
+            detachPanel(p, false);
+        }
+        for (DockPanel p : inside) {
+            dockHome(p);
+        }
+        rebuild(); // the emptied area closes
+        for (DockPanel p : inside) {
+            activate(p);
+        }
+        save();
+    }
+
+    /** Docks {@code panel} (detached) where it last was in the main area, or into its first pane. */
+    @AllowAllocation("docking is a user action")
+    private void dockHome(DockPanel panel) {
+        DockPanel beside = null;
+        for (DockPanel near : panel.homeNear) {
+            if (beside == null && near != panel && near.tabs != null && near.tabs.area == main) {
+                beside = near;
+            }
+        }
+        if (beside != null) {
+            Tabs target = beside.tabs;
+            if (panel.homePosition == DockPosition.CENTER) {
+                int at = panel.homeIndex < 0 || panel.homeIndex > target.panels.size() ? target.panels.size()
+                    : panel.homeIndex;
+                target.panels.add(at, panel);
+                panel.tabs = target;
+            } else {
+                Node node = target;
+                for (int up = 0; up < panel.homeUp && node.parent != null; up++) {
+                    node = node.parent;
+                }
+                splitBeside(panel, node, panel.homePosition, panel.homeShare);
+            }
+        } else {
+            dockOuter(main, panel, DockPosition.CENTER);
+        }
+    }
+
+    /**
+     * Remembers where {@code panel} is in the main area, to dock it there again when its window closes: beside the
+     * other panels of its pane (or of the neighbouring pane), the first of them still in the main area then.
+     */
+    @AllowAllocation("docking is a user action")
+    private static void rememberHome(DockPanel panel, Tabs tabs, int index) {
+        if (tabs.panels.size() > 1) {
+            List<DockPanel> near = new ArrayList<>(tabs.panels);
+            near.remove(panel);
+            panel.homeNear = near;
+            panel.homePosition = DockPosition.CENTER;
+            panel.homeIndex = index;
+            return;
+        }
+        Split parent = tabs.parent;
+        if (parent == null) {
+            panel.homeNear = List.of();
+            return;
+        }
+        int at = parent.children.indexOf(tabs);
+        Node neighbour = parent.children.get(at == 0 ? 1 : at - 1);
+        Tabs next = at == 0 ? firstPane(neighbour) : lastPane(neighbour);
+        int up = 0;
+        for (Node n = next; n != neighbour; n = n.parent) {
+            up++;
+        }
+        panel.homeUp = up;
+        panel.homeShare = parent.ratios[at];
+        List<DockPanel> near = new ArrayList<>();
+        near.add(next.active());
+        near.addAll(next.panels);
+        panel.homeNear = near;
+        panel.homePosition = parent.row ? at == 0 ? DockPosition.LEFT : DockPosition.RIGHT
+            : at == 0 ? DockPosition.TOP : DockPosition.BOTTOM;
+        panel.homeIndex = -1;
+    }
+
+    private static Tabs lastPane(Node node) {
+        Node n = node;
+        while (n instanceof Split s) {
+            n = s.children.get(s.children.size() - 1);
+        }
+        return (Tabs) n;
+    }
+
+    /** The panel being dragged by its tab now, or null. */
+    public DockPanel dragged() {
+        for (int p = 0; p < UiInput.MAX_POINTERS; p++) {
+            DragSession s = interaction.sessionAt(p);
+            if (s.active()) {
+                DockPanel panel = s.get(PANEL);
+                if (panel != null && panel.space() == this) {
+                    return panel;
+                }
+            }
+        }
+        return null;
     }
 
     /** Sets the accessible name of the tabs' close buttons (localised), for panels made afterwards. */
@@ -258,8 +424,14 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     /** Docks {@code panel} at {@code where} of the whole space (a side: a quarter of it; centre: the first pane). */
     @AllowAllocation("docking is a user action")
     public void dock(DockPanel panel, DockPosition where) {
+        dock(panel, main, where);
+    }
+
+    /** Docks {@code panel} at {@code where} of {@code area} (a side: a quarter of it; centre: its first pane). */
+    @AllowAllocation("docking is a user action")
+    public void dock(DockPanel panel, DockArea area, DockPosition where) {
         detachPanel(panel);
-        dockOuter(panel, where);
+        dockOuter(area, panel, where);
         rebuild();
         activate(panel);
     }
@@ -303,37 +475,50 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
             target.panels.add(at, panel);
             panel.tabs = target;
         } else {
-            Tabs fresh = new Tabs();
-            fresh.panels.add(panel);
-            panel.tabs = fresh;
-            Split parent = target.parent;
-            if (parent != null && parent.row == where.row()) {
-                int i = parent.children.indexOf(target);
-                float half = parent.ratios[i] * 0.5f;
-                parent.ratios[i] = half;
-                insert(parent, where.first() ? i : i + 1, fresh, half);
-            } else {
-                Split split = new Split();
-                split.row = where.row();
-                replace(target, split);
-                split.children.add(where.first() ? fresh : target);
-                split.children.add(where.first() ? target : fresh);
-                split.ratios = new float[] {0.5f, 0.5f};
-                target.parent = split;
-                fresh.parent = split;
-            }
+            splitBeside(panel, target, where, 0);
         }
         rebuild();
         activate(panel);
     }
 
+    /**
+     * Docks {@code panel} (detached) in a new pane at {@code where} of {@code target} (a pane or a split), splitting
+     * it: the new pane takes {@code share} of the room they share (0 or less: half of the target's).
+     */
     @AllowAllocation("docking is a user action")
-    private void dockOuter(DockPanel panel, DockPosition where) {
+    private void splitBeside(DockPanel panel, Node target, DockPosition where, float share) {
         Tabs fresh = new Tabs();
+        fresh.area = target.area;
         fresh.panels.add(panel);
         panel.tabs = fresh;
+        Split parent = target.parent;
+        if (parent != null && parent.row == where.row()) {
+            int i = parent.children.indexOf(target);
+            float taken = share > 0 && share < parent.ratios[i] ? share : parent.ratios[i] * 0.5f;
+            parent.ratios[i] -= taken;
+            insert(parent, where.first() ? i : i + 1, fresh, taken);
+        } else {
+            float taken = share > 0 && share < 1 ? share : 0.5f;
+            Split split = new Split();
+            split.row = where.row();
+            replace(target, split);
+            split.children.add(where.first() ? fresh : target);
+            split.children.add(where.first() ? target : fresh);
+            split.ratios = where.first() ? new float[] {taken, 1 - taken} : new float[] {1 - taken, taken};
+            target.parent = split;
+            fresh.parent = split;
+        }
+    }
+
+    @AllowAllocation("docking is a user action")
+    private void dockOuter(DockArea area, DockPanel panel, DockPosition where) {
+        Tabs fresh = new Tabs();
+        fresh.area = area;
+        fresh.panels.add(panel);
+        panel.tabs = fresh;
+        Node tree = area.tree;
         if (tree == null) {
-            tree = fresh;
+            area.tree = fresh;
             return;
         }
         if (where == DockPosition.CENTER) {
@@ -352,6 +537,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
             return;
         }
         Split split = new Split();
+        split.area = area;
         split.row = where.row();
         Node old = tree;
         split.children.add(where.first() ? fresh : old);
@@ -359,7 +545,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         split.ratios = where.first() ? new float[] {share, 1 - share} : new float[] {1 - share, share};
         old.parent = split;
         fresh.parent = split;
-        tree = split;
+        area.tree = split;
     }
 
     private static Tabs firstPane(Node node) {
@@ -385,8 +571,9 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     private void replace(Node node, Node with) {
         Split parent = node.parent;
         with.parent = parent;
+        with.area = node.area;
         if (parent == null) {
-            tree = with;
+            node.area.tree = with;
         } else {
             parent.children.set(parent.children.indexOf(node), with);
         }
@@ -395,6 +582,12 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     /** Takes {@code panel} out of its pane (collapsing an emptied pane and one-child splits) or its floating host. */
     @AllowAllocation("docking is a user action")
     private void detachPanel(DockPanel panel) {
+        detachPanel(panel, true);
+    }
+
+    /** As {@link #detachPanel(DockPanel)}; {@code remember}: note where it was in the main area. */
+    @AllowAllocation("docking is a user action")
+    private void detachPanel(DockPanel panel, boolean remember) {
         if (panel.floating) {
             panel.floating = false;
             if (host != null) {
@@ -407,6 +600,9 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         }
         panel.tabs = null;
         int i = tabs.panels.indexOf(panel);
+        if (remember && tabs.area == main) {
+            rememberHome(panel, tabs, i);
+        }
         tabs.panels.remove(i);
         if (tabs.active > i || tabs.active >= tabs.panels.size()) {
             tabs.active = Math.max(0, tabs.active - 1);
@@ -416,7 +612,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         }
         Split parent = tabs.parent;
         if (parent == null) {
-            tree = null;
+            tabs.area.tree = null;
             return;
         }
         int at = parent.children.indexOf(tabs);
@@ -482,11 +678,27 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         if (host == null) {
             throw new IllegalStateException("this dock space has no host for floating panels");
         }
+        if (host.areas()) {
+            undockArea(panel, x, y, width, height);
+            save();
+            return;
+        }
         detachPanel(panel);
         rebuild();
         panel.floating = true;
         host.undock(panel, x, y, width, height);
         save();
+    }
+
+    /** Moves {@code panel} into a new area of the host (an OS window) at {@code x, y}: the area. */
+    @AllowAllocation("undocking is a user action")
+    private DockArea undockArea(DockPanel panel, float x, float y, float width, float height) {
+        detachPanel(panel);
+        DockArea area = host.openArea(this, x, y, width, height, panel.title());
+        dockOuter(area, panel, DockPosition.CENTER);
+        rebuild();
+        activate(panel);
+        return area;
     }
 
     /** Closes {@code panel} (no asking): it leaves its pane or window. */
@@ -514,6 +726,10 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         if (panel.tabs != null) {
             panel.tabs.active = panel.tabs.panels.indexOf(panel);
             showActive(panel.tabs);
+            if (panel.tabs.area != main && host != null) {
+                host.titleArea(panel.tabs.area, title(panel.tabs.area));
+                host.raiseArea(panel.tabs.area);
+            }
         } else if (panel.floating && host != null) {
             host.raise(panel);
         }
@@ -567,9 +783,11 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         }
         List<Split> allSplits = new ArrayList<>();
         List<Tabs> allPanes = new ArrayList<>();
-        if (tree != null) {
-            tree.parent = null;
-            root.add(build(tree, allSplits, allPanes));
+        for (DockArea area : areas) {
+            if (area.tree != null) {
+                area.tree.parent = null;
+                area.root.add(build(area, area.tree, allSplits, allPanes));
+            }
         }
         splits = allSplits.toArray(new Split[0]);
         panes = allPanes.toArray(new Tabs[0]);
@@ -577,11 +795,50 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
             showActive(t);
         }
         dragSplit = null;
+        for (int i = areas.size() - 1; i > 0; i--) {
+            DockArea area = areas.get(i);
+            if (area.tree == null) {
+                dropArea(area);
+            } else if (host != null) {
+                host.titleArea(area, title(area));
+            }
+        }
         save();
     }
 
+    /** Removes the emptied {@code area}: its host closes its window. */
+    @AllowAllocation("an area closes on user action")
+    private void dropArea(DockArea area) {
+        areas.remove(area);
+        if (host != null) {
+            host.closeArea(area);
+        }
+        if (area.root.alive()) {
+            ui.destroy(area.root);
+        }
+    }
+
+    /** What {@code area}'s window is titled: its first pane's shown panel's title. */
+    private static String title(DockArea area) {
+        DockPanel shown = area.tree == null ? null : firstPane(area.tree).active();
+        return shown == null ? "" : shown.title();
+    }
+
+    /** Every panel of {@code node}'s subtree, pane by pane, into {@code out}. */
+    @AllowAllocation("a query")
+    static void collect(Node node, List<DockPanel> out) {
+        if (node instanceof Split s) {
+            for (Node c : s.children) {
+                collect(c, out);
+            }
+        } else if (node instanceof Tabs t) {
+            out.addAll(t.panels);
+        }
+    }
+
     @AllowAllocation("the tree's elements are made when docking changes")
-    private Element build(Node node, List<Split> allSplits, List<Tabs> allPanes) {
+    private Element build(DockArea area, Node node, List<Split> allSplits, List<Tabs> allPanes) {
+        node.area = area;
         if (node instanceof Split s) {
             Element e = ui.element("dock-split", s.style);
             ui.styles().facts(e.slot(), s.row ? ROW : COLUMN);
@@ -600,7 +857,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 }
                 Node child = s.children.get(i);
                 child.parent = s;
-                e.add(build(child, allSplits, allPanes));
+                e.add(build(area, child, allSplits, allPanes));
             }
             allSplits.add(s);
             return e;
@@ -628,13 +885,61 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
 
     @Override
     public void frame(long nanos) {
+        if (host != null && host.areas() && host.following() == null) {
+            tearOut();
+        }
         assertLayout();
+    }
+
+    /**
+     * A tab dragged beyond every window tears out: its panel moves into a new area of the host (an OS window) at the
+     * pointer, which follows the pointer until the drag ends.
+     */
+    private void tearOut() {
+        for (int p = 0; p < UiInput.MAX_POINTERS; p++) {
+            DragSession s = interaction.sessionAt(p);
+            if (!s.active()) {
+                continue;
+            }
+            DockPanel panel = s.get(PANEL);
+            if (panel != null && panel.space() == this && panel.tabs != null && host.outside(s.x(), s.y())) {
+                tearOut(panel, s);
+                return;
+            }
+        }
+    }
+
+    @AllowAllocation("a tab tears out on user action")
+    private void tearOut(DockPanel panel, DragSession session) {
+        float scale = HostBox.scale(ui);
+        Tabs tabs = panel.tabs;
+        int pane = tabs.element.slot();
+        int tab = panel.tab.slot();
+        boolean shown = layout.shown(pane);
+        float w = shown ? layout.width(pane) / scale : 320;
+        float h = shown ? layout.height(pane) / scale : 240;
+        // held where the pointer holds the tab: its place in its pane, plus where in the tab it was taken
+        float gx = shown ? layout.x(tab) - layout.x(pane) + session.previewOffsetX() : 0;
+        float gy = shown ? layout.y(tab) - layout.y(pane) + session.previewOffsetY() : 0;
+        host.toHost(session.x(), session.y(), point);
+        float px = point[0];
+        float py = point[1];
+        host.toHost(session.x() - gx, session.y() - gy, point);
+        float grabX = px - point[0];
+        float grabY = py - point[1];
+        DockArea area = undockArea(panel, point[0], point[1], w, h);
+        session.preview(null, 0, 0); // the window is the preview now
+        hidePreview();
+        host.follow(area, grabX, grabY);
     }
 
     /** Sets the layout inputs docking owns (split directions and ratios, the shown tab's content, the preview). */
     private void assertLayout() {
-        if (tree != null) {
-            flexChild(tree.element.slot(), 1);
+        for (int a = 0; a < areas.size(); a++) {
+            Node tree = areas.get(a).tree;
+            if (tree != null) {
+                flexChild(tree.element.slot(), 1);
+            }
         }
         for (Split s : splits) {
             int e = s.element.slot();
@@ -708,7 +1013,20 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
      */
     boolean target(float x, float y) {
         hit = false;
-        int r = root.slot();
+        DockArea moving = host == null ? null : host.following();
+        for (int a = 0; a < areas.size(); a++) {
+            DockArea area = areas.get(a);
+            if (area != moving && target(area, x, y)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@link #target(float, float)} in {@code area}. */
+    private boolean target(DockArea area, float x, float y) {
+        Node tree = area.tree;
+        int r = area.root.slot();
         if (tree == null || !layout.shown(r)) {
             return false;
         }
@@ -726,8 +1044,12 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         float fy = (y - ry) / rh;
         DockPosition outer = tree instanceof Split ? nearest(fx, fy, band) : null;
         hit = true;
+        hitArea = area;
         hitIndex = -1;
         for (Tabs t : panes) {
+            if (t.area != area) {
+                continue;
+            }
             int e = t.element.slot();
             float tx = layout.x(e);
             float ty = layout.y(e);
@@ -858,7 +1180,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     private void dropAtTarget(DockPanel panel) {
         if (hitTabs == null) {
             detachPanel(panel);
-            dockOuter(panel, hitPosition);
+            dockOuter(hitArea, panel, hitPosition);
             rebuild();
             activate(panel);
         } else {
@@ -919,7 +1241,17 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 floating.add(new DockLayout.Floating(p.id(), box[0], box[1], box[2], box[3]));
             }
         }
-        return new DockLayout(tree == null ? null : describe(tree), floating);
+        List<DockLayout.Window> windows = new ArrayList<>();
+        for (int a = 1; a < areas.size(); a++) {
+            DockArea area = areas.get(a);
+            if (area.tree != null && host != null) {
+                DockLayout.Window w = host.describe(area, describe(area.tree));
+                if (w != null) {
+                    windows.add(w);
+                }
+            }
+        }
+        return new DockLayout(main.tree == null ? null : describe(main.tree), floating, windows);
     }
 
     @AllowAllocation("layouts are saved on user action")
@@ -959,11 +1291,26 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 }
                 p.tabs = null;
             }
-            tree = description.root() == null ? null : make(description.root());
-            if (tree != null) {
-                tree.parent = null;
+            for (DockArea area : areas) {
+                area.tree = null;
             }
-            rebuild();
+            main.tree = description.root() == null ? null : make(main, description.root());
+            if (main.tree != null) {
+                main.tree.parent = null;
+            }
+            rebuild(); // the windows of the areas left close
+            if (host != null && host.areas() && !description.windows().isEmpty()) {
+                for (DockLayout.Window w : description.windows()) {
+                    DockArea area = host.restoreArea(this, w);
+                    if (area != null) {
+                        area.tree = make(area, w.root());
+                        if (area.tree != null) {
+                            area.tree.parent = null;
+                        }
+                    }
+                }
+                rebuild(); // a window whose panels are all gone closes again
+            }
             for (DockLayout.Floating f : description.floating()) {
                 DockPanel p = find(f.panel());
                 if (p != null && host != null && !p.isOpen()) {
@@ -978,14 +1325,15 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     }
 
     @AllowAllocation("layouts are restored on user action")
-    private Node make(DockLayout.Node node) {
+    private Node make(DockArea area, DockLayout.Node node) {
         if (node instanceof DockLayout.Split s) {
             Split split = new Split();
+            split.area = area;
             split.row = s.row();
             split.style = s.style();
             List<Float> ratios = new ArrayList<>();
             for (int i = 0; i < s.children().size(); i++) {
-                Node child = make(s.children().get(i));
+                Node child = make(area, s.children().get(i));
                 if (child != null) {
                     child.parent = split;
                     split.children.add(child);
@@ -1010,6 +1358,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         }
         DockLayout.Tabs t = (DockLayout.Tabs) node;
         Tabs tabs = new Tabs();
+        tabs.area = area;
         tabs.style = t.style();
         for (int i = 0; i < t.panels().size(); i++) {
             DockPanel p = find(t.panels().get(i));
@@ -1113,10 +1462,28 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                         ui.text(dragLabel, p.title());
                         dragLabel.semantics(Role.TEXT, p.title());
                     }
-                    e.startDrag(DragOperation.MOVE).put(PANEL, p).preview(dragTab, ox, oy);
+                    DragSession session = e.startDrag(DragOperation.MOVE).put(PANEL, p);
+                    DockArea area = p.tabs == null ? null : p.tabs.area;
+                    if (area != null && area != main && host != null && host.areas() && area.tree instanceof Tabs t
+                        && t.panels.size() == 1) {
+                        // the only tab of a window: the window moves with it, held where the pointer took it
+                        host.toHost(e.pressX(), e.pressY(), point);
+                        float px = point[0];
+                        float py = point[1];
+                        int r = area.root.slot();
+                        host.toHost(layout.x(r), layout.y(r), point);
+                        host.follow(area, px - point[0], py - point[1]);
+                    } else {
+                        session.preview(dragTab, ox, oy);
+                    }
                 }
                 case DRAG_END -> {
                     hidePreview();
+                    if (host != null && host.following() != null) {
+                        host.follow(null, 0, 0); // it stays where it was let go, unless it docked
+                        save();
+                        return;
+                    }
                     // dropped where nothing docks it (not cancelled: the button was released): it floats there
                     if (e.drag() != null && e.dropOperation() == DragOperation.NONE && e.buttons() == 0
                         && host != null) {
@@ -1237,6 +1604,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
 
     @Override
     public String toString() {
-        return "DockSpace[" + panels.size() + " panels, " + panes.length + " panes]";
+        return "DockSpace[" + panels.size() + " panels, " + panes.length + " panes"
+            + (areas.size() > 1 ? ", " + (areas.size() - 1) + " windows]" : "]");
     }
 }
