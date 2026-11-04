@@ -9,6 +9,8 @@
 @use "charts-test"; // charts (ui-charts, com.truesim.ui.charts)
 @use "controls-test"; // group A3: mnemonics, HDR colours and the eyedropper, spelling
 @use "props-test"; // generated property panels and collection editors (ui-props)
+@use "console-test"; // the developer console (ui-console)
+@use "tools-test"; // the immediate-mode façade and the UI debugger (ui-controls)
 
 $hot: #ff00ff;
 $lime: #39ff14;

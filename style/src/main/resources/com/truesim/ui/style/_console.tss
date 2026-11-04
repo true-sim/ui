@@ -1,0 +1,165 @@
+// The developer console (ui-console: Console, LogView). It drops down from the top of its layer: `console` is the
+// closed place above the screen, `console:expanded` the open one, and the offsets transition animates between them.
+// Element types: console, console-bar, console-level (:checked for shown levels), console-input, log-view, log-body,
+// log-row ([level=trace|debug|info|warn|error|command]), console-completions, console-hint, console-completion
+// (:selected). Labels by style name: console-logger (the logger filter chip), console-prompt, log-time, log-level,
+// log-logger, log-message, log-count, log-source, hint-before, hint-current, hint-after, completion-text,
+// completion-detail; the fields textfield.console (the command line) and textfield.console-search.
+
+@use "tokens";
+@use "mixins" as *;
+
+console {
+  layout: flex;
+  direction: column;
+  width: 100%;
+  height: 360px;
+  offsets: 0 -384px 0 0; // above the screen, its shadow too
+  background: box(rgba(#0d1117, 0.95));
+  border: 1px var(--edge);
+  @include raised(3);
+  clip: true;
+  pointer-events: all;
+  transition: offsets tokens.$normal ease-out;
+
+  &:expanded { offsets: 0 0 0 0; }
+}
+
+console-bar {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s tokens.$space-m;
+}
+
+console-level {
+  layout: stack;
+  @include pill(1px, tokens.$space-m);
+  border: 1px var(--edge);
+  cursor: pointer;
+  @include reactive;
+
+  > label { @include text(caption); color: var(--fg-muted); }
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:checked { background: box(rgba(#3fa7ff, 0.22)); border: 1px var(--accent); }
+  &:checked > label { color: var(--fg); }
+}
+
+label.console-logger {
+  @include text(caption);
+  @include pill(1px, tokens.$space-m);
+  color: var(--fg);
+  background: box(rgba(#3fa7ff, 0.3));
+  cursor: pointer;
+  &:hover { background: box(rgba(#3fa7ff, 0.45)); }
+}
+
+textfield.console-search { width: 220px; padding: 2px tokens.$space-m; @include text(caption); }
+
+log-view {
+  grow: 1;
+  scroll-step: 60;
+  pointer-events: all;
+  border: 1px rgba(#8b949e, 0.12);
+}
+
+log-row {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-m;
+  height: 20px;
+  padding: 0 tokens.$space-m;
+
+  &:hover { background: box(rgba(#8b949e, 0.08)); }
+
+  label { font-family: tokens.$font-numbers; font-size: 12px; line-height: 1.2; color: var(--fg); text-wrap: false; }
+  label.log-time { color: var(--fg-muted); width: 84px; shrink: 0; }
+  label.log-level { width: 64px; shrink: 0; font-weight: 600; color: var(--fg-muted); }
+  label.log-logger {
+    width: 120px;
+    shrink: 0;
+    clip: true;
+    color: rgba(#3fa7ff, 0.85);
+    cursor: pointer;
+    &:hover { text-decoration: underline; }
+  }
+  label.log-message { grow: 1; shrink: 1; width: 0px; clip: true; }
+  label.log-count {
+    @include pill(0, tokens.$space-s);
+    font-size: 11px;
+    color: var(--bg);
+    background: box(var(--fg-muted));
+  }
+  label.log-source {
+    color: var(--fg-muted);
+    cursor: pointer;
+    &:hover { color: var(--fg); text-decoration: underline; }
+  }
+}
+
+log-row[level=info] label.log-level { color: var(--good); }
+log-row[level=warn] label.log-level, log-row[level=warn] label.log-message { color: #e3b341; }
+log-row[level=error] { background: box(rgba(#ff5c5c, 0.1)); }
+log-row[level=error] label.log-level, log-row[level=error] label.log-message { color: var(--danger); }
+log-row[level=command] label.log-level, log-row[level=command] label.log-message { color: var(--accent); }
+log-row[level=trace] label.log-message, log-row[level=debug] label.log-message { color: var(--fg-muted); }
+
+console-input {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s tokens.$space-m;
+}
+
+label.console-prompt { font-family: tokens.$font-numbers; font-weight: 600; color: var(--accent); }
+
+textfield.console {
+  grow: 1;
+  width: 0px;
+  font-family: tokens.$font-numbers;
+  background: box(rgba(#8b949e, 0.06));
+}
+
+// the completion pop-up under the command line
+console-completions {
+  layout: flex;
+  direction: column;
+  min-width: 360px;
+  padding: tokens.$space-xs;
+  background: box(alpha(var(--surface-raised), 1));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(4);
+  pointer-events: all;
+}
+
+console-hint {
+  layout: flex;
+  direction: row;
+  gap: tokens.$space-s;
+  padding: tokens.$space-xs tokens.$space-s;
+
+  label { font-family: tokens.$font-numbers; font-size: 12px; color: var(--fg-muted); }
+  label.hint-current { color: var(--accent); font-weight: 600; }
+  label.hint-after { padding: 0 0 0 tokens.$space-m; }
+}
+
+console-completion {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-l;
+  padding: tokens.$space-xs tokens.$space-s;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+
+  label.completion-text { font-family: tokens.$font-numbers; font-size: 13px; }
+  label.completion-detail { grow: 1; text-align: end; @include text(caption); color: var(--fg-muted); }
+}

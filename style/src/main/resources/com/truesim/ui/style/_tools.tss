@@ -1,0 +1,159 @@
+// Developer tools of ui-controls: the immediate-mode façade's widgets (com.truesim.ui.controls.imm) and the UI
+// debugger (com.truesim.ui.controls.debug). Imm element types: imm-window (imm-title with label.imm-title,
+// imm-window-body), imm-line, imm-field (a widget and its caption, label.imm-label), label.imm-text, imm-slider
+// (imm-slider-fill, label.imm-value), imm-drag, textfield.imm, imm-combo (imm-combo-button with imm-combo-arrow,
+// imm-combo-list of label.imm-combo-item), imm-tree (imm-tree-header with imm-tree-arrow, :expanded; imm-tree-body),
+// imm-selectable (:selected), imm-group, imm-table, imm-row, imm-cell. Buttons, checkboxes and separators are the
+// theme's own. The debugger's overlay parts: debug-bounds, debug-clip, debug-grid, debug-dirty, debug-hover,
+// debug-selected (their border is what they draw).
+
+@use "tokens";
+@use "mixins" as *;
+
+imm-window {
+  layout: flex;
+  direction: column;
+  min-width: 300px;
+  background: box(alpha(var(--surface), 1));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  @include raised(3);
+  clip: true;
+  pointer-events: all;
+}
+
+imm-title {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  padding: tokens.$space-s tokens.$space-m;
+  background: box(rgba(#3fa7ff, 0.18));
+  cursor: move;
+}
+label.imm-title { @include text(caption, 600); color: var(--fg); }
+
+imm-window-body {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+}
+
+imm-line { layout: flex; direction: row; align-items: center; gap: tokens.$space-m; }
+imm-group { layout: flex; direction: column; gap: tokens.$space-s; }
+imm-field { layout: flex; direction: row; align-items: center; gap: tokens.$space-m; }
+
+label.imm-text { @include text(caption); color: var(--fg); }
+label.imm-label { @include text(caption); color: var(--fg-muted); }
+label.imm-value { @include text(caption); font-family: tokens.$font-numbers; color: var(--fg); text-align: center; }
+
+imm-slider, imm-drag {
+  layout: overlay;
+  width: 160px;
+  height: 22px;
+  background: box(rgba(#8b949e, 0.14));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  clip: true;
+  cursor: pointer;
+  focus-ring-offset: 1px;
+  @include reactive;
+
+  &:hover { border: 1px rgba(#8b949e, 0.6); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+imm-drag { cursor: resize-ew; }
+imm-slider-fill { background: box(rgba(#3fa7ff, 0.55)); }
+
+textfield.imm { width: 160px; padding: 2px tokens.$space-s; @include text(caption); }
+
+imm-combo { layout: flex; direction: column; gap: tokens.$space-xs; width: 160px; }
+imm-combo-button {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 tokens.$space-s;
+  background: box(rgba(#8b949e, 0.14));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  @include reactive;
+
+  &:hover { border: 1px rgba(#8b949e, 0.6); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+imm-combo-arrow { size: 7px; radius: 1px; background: box(var(--fg-muted)); }
+imm-combo-list {
+  layout: flex;
+  direction: column;
+  padding: tokens.$space-xs;
+  background: box(alpha(var(--surface-raised), 1));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+}
+label.imm-combo-item {
+  @include text(caption);
+  padding: 2px tokens.$space-s;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  &:hover { background: box(rgba(#8b949e, 0.16)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+}
+
+imm-tree { layout: flex; direction: column; gap: tokens.$space-xs; }
+imm-tree-header {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+  padding: 1px tokens.$space-xs;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  @include reactive;
+
+  > label { @include text(caption); }
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+imm-tree-arrow {
+  size: 7px;
+  radius: 1px 4px 4px 1px;
+  background: box(var(--fg-muted));
+  &:expanded { radius: 1px 1px 4px 4px; }
+}
+imm-tree-body { layout: flex; direction: column; gap: tokens.$space-xs; padding: 0 0 0 14px; }
+
+imm-selectable {
+  layout: flex;
+  direction: row;
+  padding: 1px tokens.$space-s;
+  radius: tokens.$radius-s;
+  cursor: pointer;
+  @include reactive;
+
+  > label { @include text(caption); }
+  &:hover { background: box(rgba(#8b949e, 0.12)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.32)); }
+}
+
+imm-table { layout: flex; direction: column; grow: 1; border: 1px var(--edge); radius: tokens.$radius-s; }
+imm-row { layout: flex; direction: row; }
+imm-row:hover { background: box(rgba(#8b949e, 0.08)); }
+imm-cell { layout: flex; direction: column; grow: 1; basis: 0px; padding: 2px tokens.$space-s; }
+
+// ------------------------------------------------------------------ the UI debugger's overlays
+
+debug-overlay { width: 100%; height: 100%; pointer-events: none; }
+debug-windows, debug-blocker { layout: none; width: 100%; height: 100%; }
+debug-bounds { border: 1px rgba(#3fa7ff, 0.55); }
+debug-clip { border: 1px rgba(#ff5c5c, 0.85); }
+debug-grid { border: 1px rgba(#e3b341, 0.35); }
+debug-dirty { border: 2px rgba(#3fb950, 0.9); background: box(rgba(#3fb950, 0.12)); }
+debug-hover { border: 2px rgba(#c792ea, 0.95); background: box(rgba(#c792ea, 0.12)); }
+debug-selected { border: 2px var(--accent); background: box(rgba(#3fa7ff, 0.16)); }
+
+// a region of a window that scrolls (Imm.beginChild)
+imm-child { layout: flex; direction: column; grow: 1; clip: true; pointer-events: all; }
+imm-child-content { layout: flex; direction: column; gap: tokens.$space-xs; shrink: 0; }

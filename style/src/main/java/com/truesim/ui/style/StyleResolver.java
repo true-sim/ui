@@ -58,6 +58,13 @@ public final class StyleResolver implements Versioned {
     public static final Tunable CACHE_LIMIT = Tunable.of("ui.style.cacheLimit", 65_536, 256, 16_777_216,
         "Interned style nodes kept before the style cache is rebuilt");
 
+    /**
+     * The scale of every text size (accessibility, design stage 15): resolved {@code font-size} values are multiplied
+     * by it, so labels, fields and everything sized in {@code em} grow with it. A change re-resolves every style once.
+     */
+    public static final Tunable TEXT_SCALE = Tunable.of("ui.textScale", 1, 0.5f, 3,
+        "Scale of every text size");
+
     /** Stands for every type, id or style name no selector tests. */
     private static final String UNOBSERVED = "\u0000";
 
@@ -66,6 +73,8 @@ public final class StyleResolver implements Versioned {
     private StyleSheet sheet;
     private long version;
     private long seenTokens;
+    private long seenTextScale = -1;
+    private float textScale = 1;
     private Consumer<String> errors = message -> { };
     private String lastError;
     private int computed;
@@ -323,6 +332,14 @@ public final class StyleResolver implements Versioned {
         store.markDirty(slot, UiStore.DIRTY_STYLE);
     }
 
+    /** The attribute facts of the element in {@code slot} ({@link Facts#NONE} when it has none). */
+    public Facts factsOf(int slot) {
+        if (slot >= owner.length || owner[slot] != store.element(slot)) {
+            return Facts.NONE;
+        }
+        return factsList.get(factsOf[slot]);
+    }
+
     /** Sets the inline values of the element in {@code slot}: they beat every rule. */
     @AllowAllocation("inline values are set when an element is configured")
     public void inline(int slot, InlineStyle inline) {
@@ -394,6 +411,62 @@ public final class StyleResolver implements Versioned {
         return h;
     }
 
+    /**
+     * Where one resolved value of an element comes from (the UI debugger): the key, its resolved value, and the
+     * winning declaration's selector and source ({@code file:line} of a {@code .tss} rule, {@code java} for a rule
+     * built in code, {@code inline} for the element's inline style).
+     */
+    public record Origin(StyleKey<?> key, Object value, String selector, String source) {
+    }
+
+    /**
+     * The keys {@code slot}'s style sets, in the order of the declarations that won (inline first, then the rules by
+     * priority), each with its resolved value and where it was declared. Keys left at their defaults are not listed.
+     * For tools: it matches the rules again and allocates.
+     */
+    @AllowAllocation("the debugger asks on demand")
+    public List<Origin> explain(int slot) {
+        ResolvedStyle style = styleOf(slot);
+        int parentSlot = store.parent(slot);
+        int parentContext = -1;
+        if (parentSlot != UiStore.NONE) {
+            styleOf(parentSlot);
+            parentContext = context[parentSlot];
+        }
+        String styleName = canonical(store.style(slot));
+        if (styleName == null && parentContext >= 0) {
+            styleName = nodes.style[parentContext];
+        }
+        int node = nodes.intern(parentContext, canonical(store.type(slot)), canonical(store.id(slot)), styleName,
+            store.state(slot), factsOf[slot]);
+        boolean[] taken = new boolean[StyleKeys.count()];
+        List<Origin> out = new ArrayList<>();
+        for (Declaration d : inlineList.get(inlineOf[slot]).declarations()) {
+            int k = d.key().index();
+            if (!taken[k]) {
+                taken[k] = true;
+                out.add(new Origin(d.key(), style.values[k], "(inline)", "inline"));
+            }
+        }
+        int n = gather(node);
+        int[] ranks = Arrays.copyOf(candidates, n);
+        for (int rank : ranks) {
+            Rule r = rules[rank];
+            if (!matches(r.selector(), node)) {
+                continue;
+            }
+            for (Declaration d : r.declarations()) {
+                int k = d.key().index();
+                if (!taken[k]) {
+                    taken[k] = true;
+                    out.add(new Origin(d.key(), style.values[k], r.selector().toString(),
+                        r.source() == null ? "java" : r.source()));
+                }
+            }
+        }
+        return out;
+    }
+
     /** The resolved style of {@code handle} (from {@link #resolve}). */
     public ResolvedStyle style(int handle) {
         return styles[handle];
@@ -453,6 +526,7 @@ public final class StyleResolver implements Versioned {
         for (String name : names) {
             slots[k++] = tokens.slot(name);
         }
+        scaleText(values);
         int[] liveKeyArray = toArray(liveKeys);
         int h = styleCount;
         if (h == styles.length) {
@@ -499,6 +573,16 @@ public final class StyleResolver implements Versioned {
             lastError = key.name() + ": " + expression + ": " + e.getMessage();
             errors.accept(lastError);
             return null;
+        }
+    }
+
+    /** Multiplies a computed style's font size by the text scale. */
+    @AllowAllocation("a cache miss or a token change")
+    private void scaleText(Object[] values) {
+        if (textScale != 1) {
+            int k = Styles.FONT_SIZE.index();
+            Object v = values[k];
+            values[k] = (v == null ? Styles.FONT_SIZE.defaultValue() : (Float) v) * textScale;
         }
     }
 
@@ -638,6 +722,14 @@ public final class StyleResolver implements Versioned {
      * UI update; with no change it is one comparison. Returns whether any style changed.
      */
     public boolean update() {
+        if (TEXT_SCALE.version() != seenTextScale) {
+            seenTextScale = TEXT_SCALE.version();
+            if (TEXT_SCALE.get() != textScale) {
+                textScale = TEXT_SCALE.get();
+                clearCache(); // every style again, at the new text size
+                return true;
+            }
+        }
         long tv = tokens.version();
         if (tv == seenTokens) {
             return false;
@@ -662,6 +754,9 @@ public final class StyleResolver implements Versioned {
             for (int k = 0; k < s.liveKeys.length; k++) {
                 int key = s.liveKeys[k];
                 s.values[key] = evaluate(StyleKeys.key(key), s.liveExpressions[k]);
+                if (key == Styles.FONT_SIZE.index()) {
+                    scaleText(s.values);
+                }
             }
             s.version = stamp;
             changedStyles[s.handle()] = true;

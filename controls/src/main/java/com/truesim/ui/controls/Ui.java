@@ -111,6 +111,13 @@ public final class Ui {
     /** {@link #codeLayout} bit: code sets the element's flex grow, shrink and basis (a split's ratios). */
     public static final int CODE_FLEX = 16;
 
+    /**
+     * The palette: the theme's own tokens, or one of its token sets ({@code @tokens dark}, {@code light},
+     * {@code high-contrast}); a sheet without the set keeps its own tokens.
+     */
+    public static final Tunable PALETTE = Tunable.choice("ui.palette", List.of("theme", "dark", "light",
+        "high-contrast"), "theme", "Colours of the UI: the theme's, dark, light or high contrast");
+
     /** The most layout passes a frame runs for {@link FrameListener#afterLayout} changes. */
     public static final int MAX_PASSES = 4;
 
@@ -191,6 +198,9 @@ public final class Ui {
     private boolean[] parts = new boolean[0];
     private TextBlock[] blocks = new TextBlock[0];
     private StringBuilder[] strings = new StringBuilder[0];
+    private StringBuilder[] pseudo = new StringBuilder[0]; // a label's pseudo-localised text (PseudoLocale)
+    private long seenPseudo = -1;
+    private long seenPalette = -1;
     private long[] drawnTextVersion = new long[0];
     private int[] underlined = new int[0]; // per label: a character (a mnemonic) + 1 to underline, 0 for none
     private Element[] underlineParts = new Element[0]; // per label: the part styling its underline
@@ -235,6 +245,7 @@ public final class Ui {
     private long seenTechnique = -1;
     private int recorded; // elements recorded in the last update
     private long frames;
+    private final FrameStats stats = new FrameStats();
 
     /** A UI styled by {@code sheet}, its text set by {@code text} (null: no text, for tests of boxes). */
     @AllowAllocation("one per UI")
@@ -639,6 +650,7 @@ public final class Ui {
             parts = Arrays.copyOf(parts, n);
             blocks = Arrays.copyOf(blocks, n);
             strings = Arrays.copyOf(strings, n);
+            pseudo = Arrays.copyOf(pseudo, n);
             drawnTextVersion = Arrays.copyOf(drawnTextVersion, n);
             underlined = Arrays.copyOf(underlined, n);
             underlineParts = Arrays.copyOf(underlineParts, n);
@@ -690,8 +702,12 @@ public final class Ui {
         frameNanos = nanos;
         inputGiven = true;
         if (input != null) {
+            long t0 = stats.enabled ? System.nanoTime() : 0;
             interaction.process(input, nanos);
             ensure();
+            if (stats.enabled) {
+                stats.input = System.nanoTime() - t0;
+            }
         }
     }
 
@@ -703,6 +719,8 @@ public final class Ui {
      * frame), before submitting. Without an {@link #input} call this frame it runs without input, at time 0.
      */
     public void update(float width, float height) {
+        boolean measuring = stats.enabled;
+        long t0 = measuring ? System.nanoTime() : 0;
         frames++;
         recorded = 0;
         long nanos = inputGiven ? frameNanos : 0;
@@ -722,7 +740,9 @@ public final class Ui {
         }
         compactListeners();
         ensure();
+        settingsChanged();
         animator.advance(nanos);
+        long t1 = measuring ? System.nanoTime() : 0;
         attachPreviews(); // before styles: a new preview (and the drag layer) is styled this frame
         GlyphAtlas atlas = text == null ? null : text.atlas();
         if (atlas != null) {
@@ -751,8 +771,10 @@ public final class Ui {
         resolver.update();
         ensure();
         resolveQueued();
+        long t2 = measuring ? System.nanoTime() : 0;
         placePreviews(); // after styles: a restyled preview keeps the place set here
         layOut(width, height);
+        int passes = 1;
         for (int pass = 1; listenerCount > 0; pass++) {
             runningListeners = true;
             for (int i = 0; i < listenerCount; i++) {
@@ -766,8 +788,40 @@ public final class Ui {
             resolveQueued(); // what the listeners changed: states, facts, layout inputs
             placePreviews();
             layOut(width, height);
+            passes++;
         }
+        long t3 = measuring ? System.nanoTime() : 0;
         recordChanges();
+        if (measuring) {
+            long t4 = System.nanoTime();
+            stats.listeners = t1 - t0;
+            stats.styles = t2 - t1;
+            stats.layout = t3 - t2;
+            stats.record = t4 - t3;
+            stats.total = t4 - t0;
+            stats.passes = passes;
+            stats.recorded = recorded;
+            stats.uploadBytes = uploadBytes();
+            stats.endFrame();
+        }
+    }
+
+    /** The bytes the renderer would upload now: the layers' changed primitives and changed clip tables. */
+    private long uploadBytes() {
+        long bytes = 0;
+        for (int li = 0; li < layerStack.count(); li++) {
+            DrawList list = layerStack.at(li).drawList();
+            bytes += (long) (list.dirtyTo() - list.dirtyFrom()) * com.truesim.ui.core.draw.Primitive.BYTES;
+            if (list.clipsDirty()) {
+                bytes += (long) list.clipCount() * DrawList.CLIP_FLOATS * 4;
+            }
+        }
+        return bytes;
+    }
+
+    /** What the frames cost, phase by phase (off until {@link FrameStats#enabled(boolean)} turns it on). */
+    public FrameStats stats() {
+        return stats;
     }
 
     /**
@@ -778,6 +832,26 @@ public final class Ui {
     public void update(float width, float height, UiInput input, long nanos) {
         input(input, nanos);
         update(width, height);
+    }
+
+    /** Applies changed settings: pseudo-localisation shapes every label again; the palette switches token sets. */
+    private void settingsChanged() {
+        long p = PseudoLocale.MODE.version() + PseudoLocale.EXPANSION.version();
+        if (p != seenPseudo) {
+            boolean first = seenPseudo < 0;
+            seenPseudo = p;
+            for (int i = 0; i < textSlotCount && !first; i++) {
+                store.markDirty(textSlots[i], UiStore.DIRTY_TEXT | UiStore.DIRTY_LAYOUT | UiStore.DIRTY_DRAW);
+            }
+        }
+        if (PALETTE.version() != seenPalette) {
+            boolean first = seenPalette < 0; // a set code chose before the first frame stays, unless one is set
+            seenPalette = PALETTE.version();
+            String set = PALETTE.index() == 0 ? null : PALETTE.option();
+            if (!first || set != null) {
+                resolver.tokens().use(set != null && resolver.tokens().setNames().contains(set) ? set : null);
+            }
+        }
     }
 
     /** Records what changed into the layers' draw lists and ends the frame. */
@@ -1096,9 +1170,22 @@ public final class Ui {
     private boolean shape(int slot, float maxWidthPx) {
         ResolvedStyle s = resolver.styleOf(slot);
         float scale = layout.scale();
-        return blocks[slot].set(strings[slot], s.get(Styles.FONT_FAMILY), s.getFloat(Styles.FONT_SIZE) * scale,
+        float max = s.get(Styles.TEXT_WRAP) ? maxWidthPx : Float.POSITIVE_INFINITY;
+        CharSequence shown = strings[slot];
+        if (PseudoLocale.active()) {
+            shown = PseudoLocale.apply(shown, pseudoBuffer(slot));
+        }
+        return blocks[slot].set(shown, s.get(Styles.FONT_FAMILY), s.getFloat(Styles.FONT_SIZE) * scale,
             s.getInt(Styles.FONT_WEIGHT), s.get(Styles.FONT_STYLE) != FontStyle.NORMAL,
-            TEXT_ALIGNS[s.get(Styles.TEXT_ALIGN).ordinal()], maxWidthPx, s.getFloat(Styles.LINE_HEIGHT));
+            TEXT_ALIGNS[s.get(Styles.TEXT_ALIGN).ordinal()], max, s.getFloat(Styles.LINE_HEIGHT));
+    }
+
+    @AllowAllocation("a label's pseudo-localised buffer, once")
+    private StringBuilder pseudoBuffer(int slot) {
+        if (pseudo[slot] == null) {
+            pseudo[slot] = new StringBuilder();
+        }
+        return pseudo[slot];
     }
 
     private long measure(int slot, float width, int widthMode, float height, int heightMode) {
@@ -1300,6 +1387,9 @@ public final class Ui {
         remember(slot);
         recordPrimitives(slot);
         recorded++;
+        if (stats.enabled) {
+            stats.recorded(slot);
+        }
         return list.end();
     }
 
@@ -1705,6 +1795,9 @@ public final class Ui {
         all.add(StyleWatcher.DELAY);
         all.add(Animator.SPEED);
         all.addAll(com.truesim.ui.core.draw.DirtyRanges.tunables());
+        all.add(StyleResolver.TEXT_SCALE);
+        all.add(PALETTE);
+        all.addAll(PseudoLocale.tunables());
         all.addAll(Interaction.tunables());
         all.addAll(com.truesim.ui.controls.text.TextEditor.tunables());
         all.add(com.truesim.ui.controls.text.NumberField.DRAG_PIXELS);

@@ -38,6 +38,8 @@ project(":ui-charts").projectDir = file("charts")
 include("ui-props", "ui-props-processor") // property panels from metadata (design 5.11)
 project(":ui-props").projectDir = file("props")
 project(":ui-props-processor").projectDir = file("props-processor")
+include("ui-console") // the developer console: commands, completion, settings as variables, the log ring
+project(":ui-console").projectDir = file("console")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {
