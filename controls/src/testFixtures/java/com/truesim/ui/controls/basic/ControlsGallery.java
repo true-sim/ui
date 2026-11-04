@@ -20,7 +20,10 @@ import java.util.Locale;
  * Every basic and container control in one screen, for goldens, semantics, theme and allocation tests, and for the
  * integrator's GPU screenshots: {@code ControlsGallery.build(controls, parent)} fills {@code parent} (a 1280 x 800
  * screen fits it) and {@link Gallery#openOverlays()} opens a modal drawer, a dialog, a notification, a drop-down and a
- * context menu on their layers.
+ * context menu on their layers. Mnemonics ({@code &File}), a repeat button, a logarithmic slider, an HDR colour picker
+ * with an eyedropper (reading a {@link com.truesim.ui.core.input.PatternScreenSampler} unless the controls have a
+ * sampler) and a label for a field are among them; {@link Gallery#openEyedropper(float, float)} shows the eyedropper's
+ * magnifier.
  *
  * <pre>{@code
  * Ui ui = new Ui(Tss.defaultTheme(), textSystem);          // or Tss.testTheme()
@@ -58,6 +61,14 @@ public final class ControlsGallery {
         public Slider slider;
         public Slider vertical;
         public Slider range;
+        /** A logarithmic slider (20 Hz to 20 kHz) with ticks on its decades. */
+        public Slider logarithmic;
+        /** A button repeating while held. */
+        public RepeatButton repeat;
+        /** A label whose mnemonic focuses the key-binding field. */
+        public Element bindingLabel;
+        /** The screen sampler the eyedropper reads (a pattern). */
+        public com.truesim.ui.core.input.PatternScreenSampler sampler;
         public ColorPicker color;
         public DatePicker date;
         public TimePicker time;
@@ -85,6 +96,12 @@ public final class ControlsGallery {
         public Dialog dialog;
         Controls controls;
         Element contextTarget;
+
+        /** Starts the colour picker's eyedropper with the pointer at {@code x, y} (call frames after it). */
+        public void openEyedropper(float x, float y) {
+            color.eyedropperTool().start(0);
+            color.eyedropperTool().moveTo(x, y);
+        }
 
         /** Opens a confirm dialog, a notification, the drop-down's list and the context menu. */
         public void openOverlays() {
@@ -148,15 +165,19 @@ public final class ControlsGallery {
         parent.add(root);
         g.root = root;
 
+        if (c.screenSampler() == null) {
+            g.sampler = new com.truesim.ui.core.input.PatternScreenSampler();
+            c.screenSampler(g.sampler);
+        }
         Element s = section(c, root, "Buttons");
-        g.button = c.button("Save");
+        g.button = c.button("&Save");
         g.iconButton = c.iconButton("close", "Close");
-        Button both = new Button(c, "next", "Next", null);
+        g.repeat = new RepeatButton(c, "next", "Next", null); // steps while held
         g.disabled = c.button("Disabled");
         g.disabled.enabled(false);
         g.toggle = c.toggle("Bold", clock.booleanValue(true));
         Element r = row(c);
-        r.add(g.button.element()).add(g.iconButton.element()).add(both.element());
+        r.add(g.button.element()).add(g.iconButton.element()).add(g.repeat.element());
         s.add(r);
         r = row(c);
         r.add(g.toggle.element()).add(g.disabled.element());
@@ -200,11 +221,15 @@ public final class ControlsGallery {
         g.slider = c.slider("Volume", clock.doubleValue(0.4), 0, 1).step(0.1).ticks(11);
         g.range = c.rangeSlider("Level range", clock.doubleValue(20), clock.doubleValue(80), 0, 100);
         g.vertical = new Slider(c, "Gain", clock.doubleValue(0.7), 0, 1, true);
-        s.add(g.slider.element()).add(g.range.element()).add(g.vertical.element());
+        g.logarithmic = c.slider("Frequency", clock.doubleValue(440), 20, 20_000).scale(SliderScale.logarithmic(10))
+            .scaleTicks();
+        s.add(g.slider.element()).add(g.logarithmic.element()).add(g.range.element()).add(g.vertical.element());
 
         s = section(c, root, "Colour");
         g.color = c.colorPicker("Tint", clock.longValue(Rgba.srgb(64, 160, 255, 1)));
         g.color.swatches(Rgba.srgb(255, 64, 64, 1), Rgba.srgb(64, 200, 64, 1), Rgba.srgb(255, 200, 0, 1));
+        g.color.hdr(4);
+        g.color.model().set(Rgba.pack(2.4f, 1.2f, 0.3f, 1)); // an HDR orange: +1.3 EV over its base colour
         g.hex = com.truesim.ui.controls.text.HexField.attach(c.ui(), g.color, "Hex value");
         s.add(g.color.element());
 
@@ -222,20 +247,23 @@ public final class ControlsGallery {
         g.search = com.truesim.ui.controls.text.SearchField.create(c.ui(), null, "Filter countries", "Clear");
         g.searchDropDown = c.dropDown("Country", List.of("Austria", "Australia", "Belgium", "Brazil", "Canada",
             "Chile", "Denmark", "Estonia"), String::toString, clock.intValue(0)).filter(g.search);
-        s.add(g.binding.element()).add(g.dropDown.element()).add(g.searchDropDown.element());
+        g.bindingLabel = c.labelFor("&Jump key", g.binding.element());
+        Element bindingRow = row(c);
+        bindingRow.add(g.bindingLabel).add(g.binding.element());
+        s.add(bindingRow).add(g.dropDown.element()).add(g.searchDropDown.element());
 
         s = section(c, root, "Menus and bars");
         g.menuBar = c.menuBar("Main menu");
-        Menu file = g.menuBar.menu("File");
-        file.item("New", "new", () -> { });
-        file.item("Open", "open", () -> { });
+        Menu file = g.menuBar.menu("&File");
+        file.item("&New", "new", () -> { });
+        file.item("&Open", "open", () -> { });
         file.separator();
-        Menu recent = file.submenu("Recent");
+        Menu recent = file.submenu("&Recent");
         recent.item("forest.level", () -> { });
         recent.item("desert.level", () -> { });
-        file.item("Quit", () -> { });
-        Menu view = g.menuBar.menu("View");
-        view.check("Grid", clock.booleanValue(true));
+        file.item("&Quit", () -> { });
+        Menu view = g.menuBar.menu("&View");
+        view.check("&Grid", clock.booleanValue(true));
         VersionedInt zoom = clock.intValue(1);
         view.radio("50%", zoom, 0);
         view.radio("100%", zoom, 1);

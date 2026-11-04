@@ -1,6 +1,8 @@
 package com.truesim.ui.controls.basic;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.annotations.AllowStrictMath;
+import com.truesim.common.state.VersionedDouble;
 import com.truesim.common.state.VersionedLong;
 import com.truesim.common.state.Watch;
 import com.truesim.ui.controls.anim.Visuals;
@@ -34,6 +36,17 @@ import java.util.Arrays;
  * <p>Dragging in the area, strip or alpha bar sets the colour (HSV in sRGB-encoded terms, as people pick colours); each
  * takes focus, and arrow keys step it by 1% (page keys by 10%). The hue is kept while saturation or value is 0, so
  * the area does not jump. Dragging allocates nothing.
+ *
+ * <p><b>HDR</b> ({@link #hdr}): the colour is a displayable base colour (the area, strip and hex) times an intensity
+ * of {@code 2^stops}, set by a {@code color-intensity} row (a {@link Slider} of style name {@code intensity} over
+ * {@code 0..maxStops} exposure stops and a {@code color-intensity-value} label such as {@code +2.0 EV}); components
+ * above 1 are kept. The preview splits into {@code color-preview-clipped} (the colour clipped to 1, as an SDR display
+ * shows it) and {@code color-preview-hdr} (the HDR value). The hex shows and takes the base colour only.
+ *
+ * <p><b>Eyedropper</b>: with a {@linkplain Controls#screenSampler() screen sampler}, a {@code button} of style name
+ * {@code eyedropper} (icon {@code eyedropper}, {@code :checked} while picking) in the hex slot starts an
+ * {@link Eyedropper}; the pixel picked becomes the colour (its HDR intensity kept in HDR mode, clipped otherwise;
+ * the alpha stays).
  */
 public final class ColorPicker extends Control {
 
@@ -66,6 +79,20 @@ public final class ColorPicker extends Control {
     private int dragging = -1; // 0 area, 1 hue, 2 alpha
     private final StringBuilder hex = new StringBuilder(9);
     private final float[] rgb = new float[3];
+    // HDR: the colour is the base (h, s, v) times 2^stops
+    private float stops;
+    private float maxStops;
+    private Element intensityRow;
+    private Slider intensity;
+    private VersionedDouble intensityModel;
+    private Watch intensityWatch;
+    private Element intensityValue;
+    private final StringBuilder intensityText = new StringBuilder(16);
+    private Element clipped;
+    private Element hdrPreview;
+    // the eyedropper
+    private Button eyedropButton;
+    private Eyedropper eyedropper;
 
     /** A picker named {@code name} bound to {@code model} (a packed {@link Rgba} colour). */
     @AllowAllocation("controls are built once")
@@ -118,7 +145,145 @@ public final class ColorPicker extends Control {
         grow(hueCursor);
         grow(alphaCursor);
         controls.poll(this);
+        if (controls.screenSampler() != null) {
+            eyedropper();
+        }
         bind(model);
+    }
+
+    /**
+     * Picks colours as HDR values of up to {@code 2^maxStops} times paper white ({@code maxStops} 0: back to LDR,
+     * colours clipped to 1): adds the intensity row and splits the preview; returns this.
+     */
+    @AllowAllocation("controls are configured when built")
+    public ColorPicker hdr(float maxStopsValue) {
+        maxStops = Math.max(0, maxStopsValue);
+        if (maxStops > 0 && intensityRow == null) {
+            intensityRow = part("color-intensity");
+            intensityModel = controls.clock().doubleValue(0);
+            intensity = new Slider(controls, "Intensity", intensityModel, 0, maxStops, false);
+            intensity.element().style("intensity");
+            intensityValue = label("+0.0 EV");
+            intensityValue.style("color-intensity-value");
+            intensityRow.add(intensity.element()).add(intensityValue);
+            intensityWatch = intensityModel.watch();
+            clipped = part("color-preview-clipped");
+            hdrPreview = part("color-preview-hdr");
+            preview.add(clipped).add(hdrPreview);
+            preview.detach();
+            hexSlot.detach();
+            swatchRow.detach();
+            root.add(intensityRow).add(preview).add(hexSlot).add(swatchRow);
+        } else if (maxStops > 0) {
+            intensity.range(0, maxStops);
+        }
+        if (intensityRow != null) {
+            ui.layout().visible(intensityRow.slot(), maxStops > 0);
+            ui.layout().visible(clipped.slot(), maxStops > 0);
+            ui.layout().visible(hdrPreview.slot(), maxStops > 0);
+        }
+        fromModel();
+        return this;
+    }
+
+    /** Whether it picks HDR colours. */
+    public boolean hdr() {
+        return maxStops > 0;
+    }
+
+    /** The intensity in exposure stops (the colour is its base times {@code 2^stops}). */
+    public float stops() {
+        return stops;
+    }
+
+    /** Sets the intensity in stops (clamped to {@code 0..maxStops}); the base colour stays. */
+    public void stops(float value) {
+        stops = Math.max(0, Math.min(maxStops, value));
+        if (intensityModel != null) {
+            intensityModel.set(stops);
+            intensityWatch.update();
+        }
+        toModel();
+    }
+
+    /** The intensity slider (null until {@link #hdr}). */
+    public Slider intensitySlider() {
+        return intensity;
+    }
+
+    /** The intensity label (null until {@link #hdr}). */
+    public Element intensityLabel() {
+        return intensityValue;
+    }
+
+    /** The clipped half of the preview (null until {@link #hdr}). */
+    public Element clippedPreview() {
+        return clipped;
+    }
+
+    /** The HDR half of the preview (null until {@link #hdr}). */
+    public Element hdrPreview() {
+        return hdrPreview;
+    }
+
+    /**
+     * Adds the eyedropper button (made by the constructor when the controls have a screen sampler); returns this.
+     */
+    @AllowAllocation("controls are configured when built")
+    public ColorPicker eyedropper() {
+        if (eyedropButton != null) {
+            return this;
+        }
+        eyedropper = new Eyedropper(controls, new Eyedropper.Listener() {
+            @Override
+            public void picked(long color) {
+                eyedropButton.element().state(com.truesim.ui.core.UiState.CHECKED, false);
+                pickedColor(color);
+            }
+
+            @Override
+            public void cancelled() {
+                eyedropButton.element().state(com.truesim.ui.core.UiState.CHECKED, false);
+            }
+        });
+        eyedropButton = new Button(controls, "eyedropper", null, "Pick from screen");
+        eyedropButton.element().style("eyedropper");
+        eyedropButton.onClick(() -> {
+            if (eyedropper.start(0)) {
+                eyedropButton.element().state(com.truesim.ui.core.UiState.CHECKED, true);
+            }
+        });
+        Element first = ui.store().element(ui.store().firstChild(hexSlot.slot()));
+        hexSlot.add(eyedropButton.element());
+        if (first != null) { // the button first, the hex after it
+            first.detach();
+            hexSlot.add(first);
+        }
+        return this;
+    }
+
+    /** The eyedropper button (null without a screen sampler). */
+    public Button eyedropperButton() {
+        return eyedropButton;
+    }
+
+    /** The eyedropper (null without a screen sampler). */
+    public Eyedropper eyedropperTool() {
+        return eyedropper;
+    }
+
+    /** The eyedropper picked {@code color}: it becomes the colour, its alpha kept. */
+    private void pickedColor(long color) {
+        float r = Rgba.r(color);
+        float g = Rgba.g(color);
+        float b = Rgba.b(color);
+        if (maxStops <= 0) {
+            r = clamp(r);
+            g = clamp(g);
+            b = clamp(b);
+        }
+        model.set(Rgba.pack(r, g, b, a));
+        fromModel();
     }
 
     private void full(Element e) {
@@ -257,19 +422,40 @@ public final class ColorPicker extends Control {
         float r = c[0];
         float g = c[1];
         float b = c[2];
-        model.set(Rgba.pack(Rgba.toLinear(r), Rgba.toLinear(g), Rgba.toLinear(b), alphaValue));
+        float k = intensityScale();
+        model.set(Rgba.pack(Rgba.toLinear(r) * k, Rgba.toLinear(g) * k, Rgba.toLinear(b) * k, alphaValue));
         fromModel();
         return true;
     }
 
     // ---------------------------------------------------------------- model and display
 
+    /** {@code 2^stops}: what the base colour is multiplied by (1 without HDR). */
+    @AllowStrictMath("the intensity on a colour change, not per idle frame")
+    private float intensityScale() {
+        return maxStops > 0 ? (float) StrictMath.pow(2, stops) : 1;
+    }
+
+    @AllowStrictMath("the intensity's stops on a colour change, not per idle frame")
     private void fromModel() {
         watch.update();
         long c = model.get();
-        float r = Rgba.toSrgb(clamp(Rgba.r(c)));
-        float g = Rgba.toSrgb(clamp(Rgba.g(c)));
-        float b = Rgba.toSrgb(clamp(Rgba.b(c)));
+        float lr = Rgba.r(c);
+        float lg = Rgba.g(c);
+        float lb = Rgba.b(c);
+        if (maxStops > 0) { // the intensity is what lifts the brightest component above 1
+            float m = Math.max(lr, Math.max(lg, lb));
+            stops = m > 1 ? Math.min(maxStops, (float) (StrictMath.log(m) / StrictMath.log(2))) : 0;
+            float k = 1 / intensityScale();
+            lr *= k;
+            lg *= k;
+            lb *= k;
+            intensityModel.set(stops);
+            intensityWatch.update();
+        }
+        float r = Rgba.toSrgb(clamp(lr));
+        float g = Rgba.toSrgb(clamp(lg));
+        float b = Rgba.toSrgb(clamp(lb));
         a = clamp(Rgba.a(c));
         float max = Math.max(r, Math.max(g, b));
         float min = Math.min(r, Math.min(g, b));
@@ -302,7 +488,8 @@ public final class ColorPicker extends Control {
     /** Writes h, s, v, a to the model. */
     private void toModel() {
         hsvToRgb(h, s, v, rgb);
-        model.set(Rgba.pack(Rgba.toLinear(rgb[0]), Rgba.toLinear(rgb[1]), Rgba.toLinear(rgb[2]), a));
+        float k = intensityScale();
+        model.set(Rgba.pack(Rgba.toLinear(rgb[0]) * k, Rgba.toLinear(rgb[1]) * k, Rgba.toLinear(rgb[2]) * k, a));
         watch.update();
         display();
     }
@@ -340,9 +527,18 @@ public final class ColorPicker extends Control {
         vis.anchors(hueCursor.slot(), h, 0.5f, h, 0.5f);
         vis.anchors(alphaCursor.slot(), a, 0.5f, a, 0.5f);
         long c = model.get();
-        long opaque = Rgba.pack(Rgba.r(c), Rgba.g(c), Rgba.b(c), 1);
-        vis.background(alphaGradient.slot(), Rgba.pack(Rgba.r(c), Rgba.g(c), Rgba.b(c), 0), opaque);
+        float cr = clamp(Rgba.r(c));
+        float cg = clamp(Rgba.g(c));
+        float cb = clamp(Rgba.b(c));
+        long opaque = Rgba.pack(cr, cg, cb, 1);
+        vis.background(alphaGradient.slot(), Rgba.pack(cr, cg, cb, 0), opaque);
         vis.background(preview.slot(), c, c);
+        if (maxStops > 0) {
+            long clip = Rgba.pack(cr, cg, cb, Rgba.a(c));
+            vis.background(clipped.slot(), clip, clip);
+            vis.background(hdrPreview.slot(), c, c);
+            showStops();
+        }
         hsvToRgb(h, s, v, rgb);
         hex.setLength(0);
         hex.append('#');
@@ -356,6 +552,14 @@ public final class ColorPicker extends Control {
         }
     }
 
+    /** The intensity as {@code +2.5 EV}, written without allocating. */
+    private void showStops() {
+        intensityText.setLength(0);
+        int tenths = Math.round(stops * 10);
+        intensityText.append('+').append(tenths / 10).append('.').append(tenths % 10).append(" EV");
+        ui.text(intensityValue, intensityText);
+    }
+
     private void byteHex(float f) {
         int b = (int) (clamp(f) * 255 + 0.5f);
         hex.append(Character.toUpperCase(Character.forDigit(b >> 4, 16)));
@@ -366,6 +570,11 @@ public final class ColorPicker extends Control {
     public void poll(long nanos) {
         if (watch.isChanged()) {
             fromModel();
+        }
+        if (intensityWatch != null && intensityWatch.isChanged()) {
+            intensityWatch.update();
+            stops = (float) intensityModel.get();
+            toModel();
         }
     }
 

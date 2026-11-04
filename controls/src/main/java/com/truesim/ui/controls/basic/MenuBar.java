@@ -12,7 +12,7 @@ import java.util.Arrays;
  * A menu bar (type {@code menu-bar}) of {@code menu-title} buttons, each opening its {@link Menu} below it
  * ({@code :expanded} while open). While one is open, moving the pointer onto another title opens that one; left and
  * right in an open menu move to the neighbouring menu; down or ACCEPT on a title opens its menu, left and right move
- * between titles.
+ * between titles. Titles may mark a mnemonic ({@code "&File"}): Alt and the letter open that menu.
  */
 public final class MenuBar extends Control {
 
@@ -31,7 +31,7 @@ public final class MenuBar extends Control {
     @AllowAllocation("controls are built once")
     public Menu menu(CharSequence title) {
         Button b = new Button(controls, "menu-title", Role.MENU_ITEM, title, null, null);
-        Menu m = new Menu(controls, title.toString());
+        Menu m = new Menu(controls, Button.plain(title));
         m.bar = this;
         if (count == titles.length) {
             titles = Arrays.copyOf(titles, count * 2);

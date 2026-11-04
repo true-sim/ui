@@ -1,0 +1,46 @@
+// Group A3's control additions in the default theme: mnemonics, HDR colours and the eyedropper, spelling squiggles.
+// Keys: loupe-pixels and loupe-gap (BasicStyles), squiggle-wavelength, squiggle-amplitude and squiggle-thickness
+// (TextStyles).
+
+@use "tokens";
+@use "mixins" as *;
+
+// ------------------------------------------------------------------ mnemonics
+
+// The underlined letter of "&File": shown only while the mnemonic modifier (Alt) is held. A theme that always shows
+// mnemonics sets text-decoration: underline on span.mnemonic itself.
+span.mnemonic { text-decoration: none; }
+span.mnemonic[mnemonics=shown] { text-decoration: underline; }
+
+// ------------------------------------------------------------------ HDR colours
+
+color-intensity { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; }
+slider.intensity { grow: 1; width: 120px; }
+label.color-intensity-value { font-family: tokens.$font-numbers; @include text(caption); color: var(--fg-muted);
+  min-width: 48px; text-align: end; }
+color-preview { layout: flex; direction: row; clip: true; }
+color-preview-clipped, color-preview-hdr { grow: 1; basis: 0px; }
+
+// ------------------------------------------------------------------ the eyedropper
+
+image.icon#eyedropper { image: "icons/eyedropper" var(--fg) contain; }
+button.eyedropper { padding: 2px; }
+button.eyedropper:checked { background: box(var(--accent)); border: 1px var(--accent); }
+color-hex-slot { align-items: center; gap: tokens.$space-xs; }
+
+// the screen while picking: takes the pointer, shows a crosshair
+eyedropper { layout: none; width: 100%; height: 100%; cursor: crosshair; pointer-events: all; }
+color-loupe {
+  size: 112px;
+  border: 2px white;
+  radius: tokens.$radius-s;
+  clip: true;
+  shadow: 0 2px 8px rgba(black, 0.6);
+  loupe-pixels: 11;
+  loupe-gap: 20;
+}
+color-loupe-center { border: 1px white; }
+
+// ------------------------------------------------------------------ spelling
+
+span.misspelt { color: #ff5c5c; squiggle-wavelength: 4; squiggle-amplitude: 2; squiggle-thickness: 1; }

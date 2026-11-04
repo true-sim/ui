@@ -68,9 +68,9 @@ public final class TimePicker extends Control {
             field.semantics(Role.SPIN_BUTTON, names[i]);
             focusable(field);
             listen(field, EventType.COMMAND.bit() | EventType.WHEEL.bit());
-            ups[i] = new Button(controls, "up", null, "More " + names[i].toLowerCase());
+            ups[i] = new RepeatButton(controls, "up", null, "More " + names[i].toLowerCase());
             ups[i].element().style("time-up");
-            downs[i] = new Button(controls, "down", null, "Fewer " + names[i].toLowerCase());
+            downs[i] = new RepeatButton(controls, "down", null, "Fewer " + names[i].toLowerCase());
             downs[i].element().style("time-down");
             values[i] = label("00");
             values[i].semantics(Role.NONE, null);
@@ -126,6 +126,16 @@ public final class TimePicker extends Control {
     /** The value label of field {@code index}. */
     public Element valueLabel(int index) {
         return values[index];
+    }
+
+    /** The up button of field {@code index} (0 hours, 1 minutes, 2 seconds): a repeat button. */
+    public Button upButton(int index) {
+        return ups[index];
+    }
+
+    /** The down button of field {@code index} (0 hours, 1 minutes, 2 seconds). */
+    public Button downButton(int index) {
+        return downs[index];
     }
 
     /** The AM/PM button, or null on a 24-hour clock. */

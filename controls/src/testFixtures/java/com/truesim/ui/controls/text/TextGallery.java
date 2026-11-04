@@ -19,8 +19,8 @@ import java.awt.image.BufferedImage;
 
 /**
  * The text controls on one screen (1280 x 720): fields in their states (placeholder, selection, IME preedit,
- * password, search, number, invalid, tags, read-only, emoji, mixed directions), a text area with line numbers and a
- * selection, and rich text with spans, a link, an inline image and emoji. Styled by the UI's sheet (the default or
+ * password, search, number, invalid, tags, read-only, emoji, mixed directions, a password masked per grapheme
+ * cluster), a text area with line numbers, a selection and spell checking (misspelt words' squiggles), and rich text with spans, a link, an inline image and emoji. Styled by the UI's sheet (the default or
  * the test theme); the layout of the screen is inline. For the engine's GPU screenshots.
  *
  * <pre>{@code
@@ -46,7 +46,9 @@ public final class TextGallery {
         this.ui = ui;
         this.width = width;
         this.height = height;
-        area = TextEditor.area(ui, null, "Notes").lineNumbers(true);
+        area = TextEditor.area(ui, null, "Notes").lineNumbers(true)
+            .spelling(new com.truesim.ui.text.spell.SpellChecker(com.truesim.ui.text.spell.Dictionary.sampleEnglish()),
+                null);
         rich = TextEditor.richText(ui, null, "Console", String.join("\n",
             "[class=muted]12:00:01[/class] Server started on port [b]7777[/b]",
             "[class=muted]12:00:04[/class] [class=warning]warning:[/class] texture [class=code]rock_01.ktx2[/class]"
@@ -100,6 +102,7 @@ public final class TextGallery {
         TextEditor readOnly = TextEditor.field(ui, null, "Read-only").text("cannot change this").readOnly(true);
         TextEditor emoji = TextEditor.field(ui, null, "Emoji").text("Nice 👍🏽 "
             + "🇩🇪 ❤️ 👨‍👩‍👧");
+        PasswordField clusters = PasswordField.create(ui, null, "Password with emoji", "Show");
         TextEditor mixed = TextEditor.field(ui, null, "Mixed").text("abc مرحبا def");
         row(fields, "placeholder", empty.element());
         row(fields, "selection", selected.element());
@@ -113,11 +116,12 @@ public final class TextGallery {
         row(fields, "read-only", readOnly.element());
         row(fields, "emoji", emoji.element());
         row(fields, "mixed", mixed.element());
+        row(fields, "clusters", clusters.element());
         StringBuilder text = new StringBuilder();
         for (int i = 1; i <= 14; i++) {
             text.append("Line ").append(i).append(i % 3 == 0
                 ? ": a longer line that wraps at the area's width so the soft breaks show between its words"
-                : ": short").append('\n');
+                : i == 13 ? ": a mispelled wrod, checked as you type" : ": short").append('\n');
         }
         area.text(text);
         sized(area.element(), 640, 260);
@@ -127,6 +131,8 @@ public final class TextGallery {
         pw.editor().text("hunter2");
         shown.editor().text("hunter2");
         shown.revealed(true);
+        // e and a combining acute, a ZWJ family, a flag, "!": four clusters, four masks
+        clusters.editor().text("e\u0301\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\uD83C\uDDE9\uD83C\uDDEA!");
         search.editor().text("dragon");
         number.value(42.5);
         tags.add("ui");

@@ -2,6 +2,8 @@ package com.truesim.ui.controls.text;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Ui;
+import com.truesim.ui.controls.basic.Repeater;
+import com.truesim.ui.controls.basic.SliderScale;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.Tunable;
@@ -46,12 +48,14 @@ public final class NumberField implements UiListener, TextEditor.Listener {
     private double min = -Double.MAX_VALUE;
     private double max = Double.MAX_VALUE;
     private double step = 1;
+    private SliderScale scale = SliderScale.LINEAR;
     private int decimals;
     private Listener listener;
     private float dragX;
     private double dragStart;
     private boolean dragging;
 
+    @AllowAllocation("controls are made when a UI is built")
     private NumberField(Ui ui, String style, String label, String downLabel, String upLabel) {
         this.ui = ui;
         root = ui.element("numberfield", style);
@@ -68,8 +72,8 @@ public final class NumberField implements UiListener, TextEditor.Listener {
         root.add(editor.element());
         root.add(down);
         root.add(up);
-        ui.on(down, EventType.CLICK, this);
-        ui.on(up, EventType.CLICK, this);
+        new Repeater(ui, down, () -> stepBy(-1));
+        new Repeater(ui, up, () -> stepBy(1));
         ui.on(root, EventType.COMMAND, this);
         ui.interaction().on(handle, EventType.PRESS.bit() | EventType.MOVE.bit() | EventType.RELEASE.bit()
             | EventType.DRAG_START.bit(), this);
@@ -142,6 +146,30 @@ public final class NumberField implements UiListener, TextEditor.Listener {
         return this;
     }
 
+    /**
+     * Steps, drags and the steppers in {@code value}'s coordinate ({@link SliderScale#logarithmic} for a value spanning
+     * orders of magnitude): a key step or a stepper's click moves a hundredth of the range's coordinate (a page key a
+     * tenth), a drag a two-hundredth per {@code ui.input.numberDragPixels}; the result is rounded to the decimals. Needs
+     * a finite range the scale can show ({@link #range} first); returns this.
+     */
+    public NumberField scale(SliderScale value) {
+        if (!value.linear()) {
+            value.check(min, max);
+        }
+        scale = value;
+        return this;
+    }
+
+    /** The scale (linear by default). */
+    public SliderScale scale() {
+        return scale;
+    }
+
+    /** {@code from} moved {@code units} of the scale's coordinate, each {@code unit} of the range's. */
+    private double scaled(double from, double units, double unit) {
+        return scale.value(scale.fraction(from, min, max) + units * unit, min, max);
+    }
+
     /** Decimals shown and typed (0: whole numbers). */
     @AllowAllocation("settings change when a UI is built")
     public NumberField decimals(int n) {
@@ -190,13 +218,14 @@ public final class NumberField implements UiListener, TextEditor.Listener {
         set(Double.isNaN(typed) ? value : typed, true);
     }
 
+    private void stepBy(int steps) {
+        commit();
+        set(scale.linear() ? value + steps * step : scaled(value, steps, 0.01), true);
+    }
+
     @Override
     public void handle(UiEvent e) {
         switch (e.type()) {
-            case CLICK -> {
-                set(value + (e.currentSlot() == up.slot() ? step : -step), true);
-                e.consume();
-            }
             case COMMAND -> {
                 double steps = switch (e.command()) {
                     case UP -> 1;
@@ -207,7 +236,7 @@ public final class NumberField implements UiListener, TextEditor.Listener {
                 };
                 if (steps != 0) {
                     commit();
-                    set(value + steps * step, true);
+                    set(scale.linear() ? value + steps * step : scaled(value, steps, 0.01), true);
                     e.consume();
                 }
             }
@@ -222,7 +251,8 @@ public final class NumberField implements UiListener, TextEditor.Listener {
             case MOVE -> {
                 if (dragging && (e.buttons() & Pointer.PRIMARY) != 0) {
                     float pixels = DRAG_PIXELS.get() * (ui.layout().scale() > 0 ? ui.layout().scale() : 1);
-                    set(dragStart + Math.round((e.x() - dragX) / pixels) * step, true);
+                    long units = Math.round((e.x() - dragX) / pixels);
+                    set(scale.linear() ? dragStart + units * step : scaled(dragStart, units, 0.005), true);
                     e.consume();
                 }
             }

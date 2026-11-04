@@ -13,7 +13,7 @@ import com.truesim.annotations.AllowAllocation;
  * {@code more}, {@code previous}, {@code next}, {@code up}, {@code down} (filled arrows), {@code dropdown-arrow},
  * {@code collapsible-arrow}, {@code menu-arrow}, {@code crumb-separator}, {@code chevron-left}, {@code chevron-right},
  * {@code chevron-up}, {@code chevron-down}, {@code check}, {@code minus}, {@code plus}, {@code eye}, {@code eye-off},
- * {@code search}, {@code grip} (a drag handle).
+ * {@code search}, {@code grip} (a drag handle), {@code eyedropper} (a pipette).
  */
 public final class BuiltinIcons {
 
@@ -25,7 +25,8 @@ public final class BuiltinIcons {
 
     private static final String[] NAMES = {"close", "dismiss", "minimise", "maximise", "restore", "more", "previous",
         "next", "up", "down", "dropdown-arrow", "collapsible-arrow", "menu-arrow", "crumb-separator", "chevron-left",
-        "chevron-right", "chevron-up", "chevron-down", "check", "minus", "plus", "eye", "eye-off", "search", "grip"};
+        "chevron-right", "chevron-up", "chevron-down", "check", "minus", "plus", "eye", "eye-off", "search", "grip",
+        "eyedropper"};
 
     private static final float STROKE = 1.6f; // line width in grid units (16 across)
 
@@ -100,6 +101,8 @@ public final class BuiltinIcons {
             case "eye" -> Math.min(ring(x, y, 8, 8, 2.2f), lens(x, y));
             case "eye-off" -> Math.min(Math.min(ring(x, y, 8, 8, 2.2f), lens(x, y)), line(x, y, 3, 13, 13, 3));
             case "search" -> Math.min(ring(x, y, 7, 7, 4), line(x, y, 10, 10, 13.5f, 13.5f));
+            case "eyedropper" -> Math.min(Math.min(line(x, y, 3.5f, 12.5f, 9.5f, 6.5f), disc(x, y, 11, 5, 2.6f)),
+                line(x, y, 7.5f, 4.5f, 11.5f, 8.5f));
             case "grip" -> Math.min(Math.min(disc(x, y, 6, 4, 1.2f), disc(x, y, 10, 4, 1.2f)),
                 Math.min(Math.min(disc(x, y, 6, 8, 1.2f), disc(x, y, 10, 8, 1.2f)),
                     Math.min(disc(x, y, 6, 12, 1.2f), disc(x, y, 10, 12, 1.2f))));
