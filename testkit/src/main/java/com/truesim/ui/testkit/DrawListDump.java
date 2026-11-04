@@ -19,7 +19,8 @@ import java.util.Locale;
  */
 public final class DrawListDump {
 
-    private static final String[] KINDS = {"empty", "box", "shadow", "glyph", "image", "nine-slice", "line"};
+    private static final String[] KINDS = {"empty", "box", "shadow", "glyph", "image", "nine-slice", "line",
+        "triangle"};
 
     private DrawListDump() {
     }
@@ -66,6 +67,10 @@ public final class DrawListDump {
                     .append(n(list.floatAt(i, Primitive.PIXEL_RANGE)));
                 case Primitive.IMAGE, Primitive.NINE_SLICE -> out.append(" tex=").append(list.intAt(i, Primitive.TEXTURE));
                 case Primitive.LINE -> out.append(" width=").append(n(list.floatAt(i, Primitive.WIDTH)));
+                case Primitive.TRIANGLE -> out.append(" corners=").append(n(list.drawnX(i, Primitive.XA))).append(',')
+                    .append(n(list.drawnY(i, Primitive.YA))).append(' ').append(n(list.drawnX(i, Primitive.XB)))
+                    .append(',').append(n(list.drawnY(i, Primitive.YB))).append(' ')
+                    .append(n(list.drawnX(i, Primitive.XC))).append(',').append(n(list.drawnY(i, Primitive.YC)));
                 default -> {
                 }
             }
