@@ -4,9 +4,10 @@ import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;
 
 /**
- * The coverage of a primitive over vertices ({@link Primitive#PATH}, {@link Primitive#COLUMNS}) of a baked list, by the rules of the engine's shader (ui/draw.slang), for the CPU
- * previews and tests: each piece (a segment with its join and caps, a column's fill, or its stroke and connector) works out its own coverage of a pixel, and the primitive covers the most any piece does (their union: no
- * piece blends over another).
+ * The coverage of a primitive over vertices ({@link Primitive#PATH}, {@link Primitive#COLUMNS}) of a baked list by the
+ * rules of the engine's shader (ui/draw.slang), for the CPU previews and tests: a path is the union of its segments
+ * (each with its caps and the join at its end), a filled envelope its columns' spans; a stroked envelope is pieces
+ * drawn as lines ({@link #pieces}).
  */
 final class VertexCoverage {
 
@@ -213,17 +214,14 @@ final class VertexCoverage {
         int count = list.intAt(i, Primitive.VERTEX_COUNT);
         float x0 = list.floatAt(i, Primitive.COLUMN_X);
         float step = list.floatAt(i, Primitive.COLUMN_STEP);
-        int flags = list.intAt(i, Primitive.STROKE);
         for (int k = 0; k < count; k++) {
             float cx = x0 + k * step;
-            int xa = (int) Math.floor(cx - Math.abs(step) * 0.5f - 8);
-            int xb = (int) Math.ceil(cx + Math.abs(step) * 0.5f + 8);
+            int xa = (int) Math.floor(cx - Math.abs(step) * 0.5f);
+            int xb = (int) Math.ceil(cx + Math.abs(step) * 0.5f);
             for (int x = Math.max(0, xa); x < Math.min(w, xb); x++) {
                 float px = x + 0.5f;
-                if ((flags & Primitive.COLUMNS_FILL) != 0) {
-                    if (px < cx - Math.abs(step) * 0.5f || px >= cx + Math.abs(step) * 0.5f) {
-                        continue;
-                    }
+                if (px < cx - Math.abs(step) * 0.5f || px >= cx + Math.abs(step) * 0.5f) {
+                    continue; // a column's pixels: half-open, so neighbours never share one
                 }
                 for (int y = 0; y < h; y++) {
                     max(x, y, columnCover(list, i, first, count, k, px, y + 0.5f));
@@ -232,65 +230,64 @@ final class VertexCoverage {
         }
     }
 
-    /** A line from a to b {@code width} wide with butt ends, as the LINE kind draws it (at least a pixel wide). */
-    static float line(float ax, float ay, float bx, float by, float width, float px, float py) {
-        float dx = bx - ax;
-        float dy = by - ay;
-        float len = (float) Math.sqrt(dx * dx + dy * dy);
-        if (!(len > 0)) {
-            return 0;
-        }
-        dx /= len;
-        dy /= len;
-        float qx = px - ax;
-        float qy = py - ay;
-        float along = qx * dx + qy * dy;
-        float across = Math.abs(-qx * dy + qy * dx);
-        float half = Math.max(width, 1) * 0.5f;
-        return sat(half + 0.5f - across) * sat(Math.min(along, len - along) + 0.5f) * Math.min(width, 1);
+    /** A stroked piece of columns: a line from a to b, {@code width} wide. */
+    interface Piece {
+        void line(float xa, float ya, float xb, float yb, float width);
     }
 
-    /** Coverage of {@code px, py} by column {@code k}'s own pieces: its fill, or its stroke and incoming connector. */
-    static float columnCover(DrawList list, int i, int first, int count, int k, float px, float py) {
+    /**
+     * The pieces of stroked columns {@code i}, as the shader draws them: each column's vertical stroke over its span
+     * grown by half the width (when it spans half a pixel), then from the column before a connector (its last sample to
+     * this one's first) where their spans do not touch, or stairs (level, then up or down).
+     */
+    static void pieces(DrawList list, int i, Piece out) {
+        int first = list.intAt(i, Primitive.FIRST_VERTEX);
+        int count = list.intAt(i, Primitive.VERTEX_COUNT);
         float x0 = list.floatAt(i, Primitive.COLUMN_X);
         float step = list.floatAt(i, Primitive.COLUMN_STEP);
         float width = list.floatAt(i, Primitive.WIDTH);
-        int flags = list.intAt(i, Primitive.STROKE);
-        float cx = x0 + k * step;
-        float firstY = list.vertexAt(first + k, 0);
-        float lastY = list.vertexAt(first + k, 1);
-        float lo = list.vertexAt(first + k, 2);
-        float hi = list.vertexAt(first + k, 3);
-        if (!finite(firstY)) {
-            return 0;
-        }
-        if ((flags & Primitive.COLUMNS_FILL) != 0) {
-            float base = list.floatAt(i, Primitive.BASELINE);
-            float top = Math.min(base, lo);
-            float bottom = Math.max(base, hi);
-            return sat(py - top + 0.5f) * sat(bottom - py + 0.5f);
-        }
-        boolean tall = hi - lo >= 0.5f;
-        float c = 0;
-        if (tall) {
-            c = line(cx, lo - width * 0.5f, cx, hi + width * 0.5f, width, px, py);
-        }
-        if (k > 0 && finite(list.vertexAt(first + k - 1, 0))) {
+        boolean steps = (list.intAt(i, Primitive.STROKE) & Primitive.COLUMNS_STEPS) != 0;
+        for (int k = 0; k < count; k++) {
+            float cx = x0 + k * step;
+            float firstY = list.vertexAt(first + k, 0);
+            float lo = list.vertexAt(first + k, 2);
+            float hi = list.vertexAt(first + k, 3);
+            if (!finite(firstY)) {
+                continue;
+            }
+            boolean tall = hi - lo >= 0.5f;
+            if (tall) {
+                out.line(cx, lo - width * 0.5f, cx, hi + width * 0.5f, width);
+            }
+            if (k == 0 || !finite(list.vertexAt(first + k - 1, 0))) {
+                continue;
+            }
             float pLast = list.vertexAt(first + k - 1, 1);
             float pLo = list.vertexAt(first + k - 1, 2);
             float pHi = list.vertexAt(first + k - 1, 3);
             boolean touching = tall && pHi - pLo >= 0.5f && pLo <= hi + width && lo <= pHi + width
                 && Math.abs(step) <= 1.5f;
-            if (!touching) {
-                float px0 = cx - step;
-                if ((flags & Primitive.COLUMNS_STEPS) != 0) {
-                    c = Math.max(c, line(px0, pLast, cx, pLast, width, px, py));
-                    c = Math.max(c, line(cx, pLast, cx, firstY, width, px, py));
-                } else {
-                    c = Math.max(c, line(px0, pLast, cx, firstY, width, px, py));
-                }
+            if (touching) {
+                continue;
+            }
+            if (steps) {
+                out.line(cx - step, pLast, cx, pLast, width);
+                out.line(cx, pLast, cx, firstY, width);
+            } else {
+                out.line(cx - step, pLast, cx, firstY, width);
             }
         }
-        return c;
+    }
+
+    /** Coverage of {@code px, py} by filled column {@code k}: from the baseline to its farthest sample. */
+    static float columnCover(DrawList list, int i, int first, int count, int k, float px, float py) {
+        float firstY = list.vertexAt(first + k, 0);
+        if (!finite(firstY)) {
+            return 0;
+        }
+        float base = list.floatAt(i, Primitive.BASELINE);
+        float top = Math.min(base, list.vertexAt(first + k, 2));
+        float bottom = Math.max(base, list.vertexAt(first + k, 3));
+        return sat(py - top + 0.5f) * sat(bottom - py + 0.5f);
     }
 }

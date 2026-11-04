@@ -210,11 +210,12 @@ final class CpuPreview {
 
     /** A segment with butt ends: coverage by the distance to its axis and along it; at least a pixel wide. */
     private void line(DrawList list, int i) {
-        float xa = list.floatAt(i, Primitive.X0);
-        float ya = list.floatAt(i, Primitive.Y0);
-        float xb = list.floatAt(i, Primitive.X1);
-        float yb = list.floatAt(i, Primitive.Y1);
-        float width = list.floatAt(i, Primitive.WIDTH);
+        line(list, i, list.floatAt(i, Primitive.X0), list.floatAt(i, Primitive.Y0), list.floatAt(i, Primitive.X1),
+            list.floatAt(i, Primitive.Y1), list.floatAt(i, Primitive.WIDTH));
+    }
+
+    /** A segment of primitive {@code i} (its colour and clip) from {@code a} to {@code b}, {@code width} wide. */
+    private void line(DrawList list, int i, float xa, float ya, float xb, float yb, float width) {
         long c = list.colorAt(i, Primitive.COLOR_A);
         float fade = Math.min(1, width);
         float half = Math.max(1, width) * 0.5f;
@@ -268,8 +269,16 @@ final class CpuPreview {
         vertexKind(list, i);
     }
 
+    /**
+     * Envelope columns: filled, by their coverage; stroked, each piece (a column's vertical stroke, a connector or the
+     * two of stairs) drawn as a line, as the shader draws them.
+     */
     private void columns(DrawList list, int i) {
-        vertexKind(list, i);
+        if ((list.intAt(i, Primitive.STROKE) & Primitive.COLUMNS_FILL) != 0) {
+            vertexKind(list, i);
+            return;
+        }
+        VertexCoverage.pieces(list, i, (xa, ya, xb, yb, width) -> line(list, i, xa, ya, xb, yb, width));
     }
 
     /** A triangle: anti-aliased edges by distance, hard edges by the half-open rule. */
