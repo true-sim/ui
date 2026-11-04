@@ -23,6 +23,8 @@
   --bg: #0d1117;
   --surface: rgba(#161b22, 0.86);
   --surface-raised: lighten(var(--surface), 5%);
+  // overlays (menus, drop-downs, pop-ups, tooltips, dialogs) are opaque: what is under them never shows through
+  --overlay: alpha(var(--surface-raised), 1);
   --edge: rgba(#8b949e, 0.28);
   --fg: #e6edf3;
   --fg-muted: #8b949e;

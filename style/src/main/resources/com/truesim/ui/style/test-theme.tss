@@ -23,6 +23,7 @@ $names: (hud: 1, card: 2, title: 3, value: 4, caption: 5, primary: 6, danger: 7,
   --bg: #2b0040;
   --surface: $hot;
   --surface-raised: lighten(var(--surface), 10%);
+  --overlay: alpha(var(--surface-raised), 1); // overlays opaque, as in the default theme
   --edge: $sun;
   --fg: $lime;
   --fg-muted: $cyan;

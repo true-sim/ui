@@ -58,6 +58,8 @@ public final class Dialog extends Control {
         titleLabel = ui.label("dialog-title", title);
         messageLabel = ui.label("dialog-message", message);
         buttons = part("dialog-buttons");
+        // the buttons' order is the platform's (the theme reverses them where accepting comes first)
+        ui.styles().facts(buttons.slot(), com.truesim.ui.style.Facts.of("platform", controls.platform()));
         root.add(titleLabel).add(messageLabel).add(buttons);
         backdrop.add(root);
         ui.visuals().width(backdrop.slot(), 100, Unit.PERCENT);

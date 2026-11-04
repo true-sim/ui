@@ -1789,6 +1789,7 @@ two scale with a thumbstick snap, cancel, rebinding the grab to the trigger, a l
 
 **Left**: pad bindings for bounds, spaces and pivots (taste); the XR `cancelDrag` B (its game default is the
 confirm setting's).
+
 ### Group A3, chartfix (2026-11-04): local branch a3-chartfix
 
 Legends that never cover the data, and the plot's background under the grid where the renderer can clear it. Engine

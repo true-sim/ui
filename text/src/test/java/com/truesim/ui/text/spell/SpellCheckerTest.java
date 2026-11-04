@@ -124,6 +124,10 @@ class SpellCheckerTest {
         assertThat(c.suggest("WROD")).startsWith("WORD");
         assertThat(c.suggest("mispelled")).isNotEmpty();
         assertThat(c.suggest("qqqqqqqqqqqqqq")).isEmpty();
+        assertThat(c.suggest("gxrdxn")).as("two edits away: offered for words of 6 letters and more").contains("garden");
+        assertThat(c.suggest("hxusx")).as("two edits away: not for shorter words, where they are mostly noise")
+            .doesNotContain("house");
+        assertThat(c.suggest("hxuse")).as("one edit away: offered whatever the length").contains("house");
         assertThat(c.suggest("hous").size()).isLessThanOrEqualTo(Math.round(SpellChecker.SUGGESTIONS.get()));
         SpellChecker.SUGGESTIONS.set(2);
         assertThat(c.suggest("hous")).hasSizeLessThanOrEqualTo(2);

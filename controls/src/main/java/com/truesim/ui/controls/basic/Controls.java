@@ -80,6 +80,7 @@ public final class Controls implements Ui.FrameListener {
     private int pendingFrames;
     private long now;
     private final Mnemonics mnemonics;
+    private String platform = systemPlatform();
     private com.truesim.ui.core.input.ScreenSampler sampler;
 
     /** The controls of {@code ui}: registers its frame listener. */
@@ -103,6 +104,26 @@ public final class Controls implements Ui.FrameListener {
     public Controls screenSampler(com.truesim.ui.core.input.ScreenSampler value) {
         sampler = value;
         return this;
+    }
+
+    /**
+     * The platform whose conventions styles follow, as the fact {@code platform} on parts that differ by platform
+     * (a dialog's {@code dialog-buttons}: {@code windows}, {@code linux}, {@code macos}); by default the system's.
+     */
+    public Controls platform(String value) {
+        platform = java.util.Objects.requireNonNull(value, "value");
+        return this;
+    }
+
+    /** The platform whose conventions styles follow: {@code windows}, {@code linux} or {@code macos}. */
+    public String platform() {
+        return platform;
+    }
+
+    /** The system's platform name for styles: macos, windows, else linux. */
+    static String systemPlatform() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return os.startsWith("mac") ? "macos" : os.startsWith("windows") ? "windows" : "linux";
     }
 
     /** The screen sampler, or null. */

@@ -43,6 +43,9 @@ public final class SpellChecker {
     /** The most suggestions offered for a word. */
     public static final Tunable SUGGESTIONS = Tunable.of("ui.spell.suggestions", 6, 1, 20,
         "The most corrections a misspelt word's menu offers");
+    /** Words at least this long (code points) get corrections two edits away too; shorter ones only one (noise). */
+    public static final Tunable TWO_EDITS_FROM = Tunable.of("ui.spell.twoEditsFrom", 6, 1, 64,
+        "How long a misspelt word must be (letters) for corrections two edits away to be offered");
 
     /** Where the user dictionary is kept (the engine: a file in the player's profile). */
     public interface UserWords {
@@ -78,7 +81,7 @@ public final class SpellChecker {
 
     /** The settings spell checking reads. */
     public static List<Tunable> tunables() {
-        return List.of(IGNORE_URLS, IGNORE_NUMBERS, IGNORE_MIXED_CASE, IGNORE_CAPITALS, SUGGESTIONS);
+        return List.of(IGNORE_URLS, IGNORE_NUMBERS, IGNORE_MIXED_CASE, IGNORE_CAPITALS, SUGGESTIONS, TWO_EDITS_FROM);
     }
 
     /** Adds {@code dictionary} for its locale (replacing one of the same locale); returns this. */
@@ -423,20 +426,21 @@ public final class SpellChecker {
                 at = query.indexOf(rep[0], at + 1);
             }
         }
-        // edit distance: one, then two edits
+        // edit distance: one, then two edits for words long enough that two edits are not mostly noise
+        int reach = query.codePointCount(0, query.length()) >= Math.round(TWO_EDITS_FROM.get()) ? 2 : 1;
         List<String> near = new ArrayList<>();
         Map<String, Integer> found = new HashMap<>();
-        active.index().query(query, 2, (number, distance) -> found.merge(active.words().word(number), distance,
+        active.index().query(query, reach, (number, distance) -> found.merge(active.words().word(number), distance,
             Math::min));
         for (int i = 0; i < user.size(); i++) {
             String u = user.word(i);
             int d = BkTree.distance(query, u);
-            if (d <= 2) {
+            if (d <= reach) {
                 found.merge(u, d, Math::min);
             }
         }
         if (!query.equals(w)) {
-            active.index().query(w, 2, (number, distance) -> found.merge(active.words().word(number), distance,
+            active.index().query(w, reach, (number, distance) -> found.merge(active.words().word(number), distance,
                 Math::min));
         }
         near.addAll(found.keySet());

@@ -263,7 +263,7 @@ class EditorDetailsTest {
         r.settle();
         assertThat(a.editable().lineCount()).isEqualTo(1);
         assertThat(a.scrollY()).isZero();
-        assertThat(TextEditor.tunables()).hasSize(10); // 5 of editing, 5 of spell checking
+        assertThat(TextEditor.tunables()).hasSize(11); // 5 of editing, 6 of spell checking
         assertThatThrownBy(() -> TextEditor.field(new Ui(Tss.compileString("x.tss", ""), null), null, "x"))
             .isInstanceOf(IllegalStateException.class);
     }
