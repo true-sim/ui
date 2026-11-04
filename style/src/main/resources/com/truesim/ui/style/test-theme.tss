@@ -6,6 +6,11 @@
 @import "data-test";
 @use "basic-test"; // the basic and container controls of ui-controls
 @use "text-edit-test"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "charts-test"; // charts (ui-charts, com.truesim.ui.charts)
+@use "controls-test"; // group A3: mnemonics, HDR colours and the eyedropper, spelling
+@use "props-test"; // generated property panels and collection editors (ui-props)
+@use "console-test"; // the developer console (ui-console)
+@use "tools-test"; // the immediate-mode façade and the UI debugger (ui-controls)
 
 $hot: #ff00ff;
 $lime: #39ff14;
@@ -18,6 +23,7 @@ $names: (hud: 1, card: 2, title: 3, value: 4, caption: 5, primary: 6, danger: 7,
   --bg: #2b0040;
   --surface: $hot;
   --surface-raised: lighten(var(--surface), 10%);
+  --overlay: alpha(var(--surface-raised), 1); // overlays opaque, as in the default theme
   --edge: $sun;
   --fg: $lime;
   --fg-muted: $cyan;
@@ -91,3 +97,5 @@ panel.meter {
 
 @import "windows-test";
 @import "oswindows-test"; // docking's OS windows
+@import "files-test"; // the file browser and its dialogs
+@import "scene-test"; // camera views, gizmos and the view cube (ui-scene, ui-gizmo)

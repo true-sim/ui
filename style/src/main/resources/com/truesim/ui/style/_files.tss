@@ -1,0 +1,60 @@
+// The file browser and its dialogs (ui-controls, com.truesim.ui.controls.files): element types file-browser,
+// file-bar, file-path (breadcrumbs or textfield.file-path-field), file-main, file-views, file-footer,
+// label.file-name-label, textfield.file-name-field, label.file-error, file-name, file-place; the views are
+// table-view.file-table, list-view.file-list and list-view.file-places; the dialog is dialog.file-dialog. Icons by id:
+// back, forward, up, edit, new-folder, folder, file, home, drive, favourite, recent ("icons/<id>", registered by the
+// game).
+
+@use "tokens";
+@use "mixins" as *;
+
+image.icon#back { image: "icons/back" var(--fg) contain; }
+image.icon#forward { image: "icons/forward" var(--fg) contain; }
+image.icon#edit { image: "icons/edit" var(--fg) contain; }
+image.icon#new-folder { image: "icons/new-folder" var(--fg) contain; }
+image.icon#folder { image: "icons/folder" var(--accent) contain; }
+image.icon#file { image: "icons/file" var(--fg-muted) contain; }
+image.icon#home { image: "icons/home" var(--fg) contain; }
+image.icon#drive { image: "icons/drive" var(--fg) contain; }
+image.icon#favourite { image: "icons/favourite" var(--fg) contain; }
+image.icon#recent { image: "icons/recent" var(--fg) contain; }
+
+dialog.file-dialog { max-width: 820px; width: 780px; } // opaque as every dialog (--overlay)
+
+file-browser {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  width: 740px;
+  height: 420px;
+}
+
+file-bar { layout: flex; direction: row; align-items: center; gap: tokens.$space-xs; }
+file-path {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  grow: 1;
+  shrink: 1;
+  min-width: 0px;
+  height: 28px;
+  padding: 0 tokens.$space-s;
+  background: box(var(--bg));
+  border: 1px var(--edge);
+  radius: tokens.$radius-s;
+  clip: true;
+}
+textfield.file-path-field { grow: 1; width: auto; border: 0 transparent; }
+
+file-main { layout: flex; direction: row; gap: tokens.$space-s; grow: 1; shrink: 1; min-height: 0px; }
+list-view.file-places { width: 160px; grow: 0; shrink: 0; align-self: stretch; }
+file-views { layout: flex; direction: column; grow: 1; shrink: 1; min-width: 0px; }
+table-view.file-table, list-view.file-list { grow: 1; shrink: 1; min-height: 0px; }
+
+file-name, file-place { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; }
+label#date { font-family: tokens.$font-numbers; color: var(--fg-muted); }
+
+file-footer { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; }
+label.file-name-label { color: var(--fg-muted); }
+textfield.file-name-field { grow: 1; width: auto; }
+label.file-error { color: #ff6b6b; @include text(caption); }

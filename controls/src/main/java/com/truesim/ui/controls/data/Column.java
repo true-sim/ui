@@ -27,7 +27,12 @@ import java.util.function.ToIntFunction;
 public final class Column<R> {
 
     private final String header;
-    private final ValueRenderer<R> renderer;
+    private final ValueRenderer<R> own;
+    private ValueRenderer<R> renderer;
+    private final Function<? super R, ?> value;
+    private String styled = "";
+    private String key;
+    boolean hidden;
     private Comparator<? super R> comparator;
     private float width = 120;
     private boolean resizable = true;
@@ -39,36 +44,40 @@ public final class Column<R> {
     int id = -1;
     TableView<R> table;
 
-    private Column(String header, ValueRenderer<R> renderer, Comparator<? super R> comparator) {
+    private Column(String header, ValueRenderer<R> renderer, Comparator<? super R> comparator,
+        Function<? super R, ?> value) {
         this.header = Objects.requireNonNull(header, "header");
-        this.renderer = Objects.requireNonNull(renderer, "renderer");
+        this.own = Objects.requireNonNull(renderer, "renderer");
+        this.renderer = own;
+        this.value = value;
         this.comparator = comparator;
     }
 
     /** A column of an int field: shown as a number, sorted numerically. */
     @AllowAllocation("columns are made when a UI is built")
     public static <R> Column<R> ofInt(String header, ToIntFunction<? super R> field) {
-        return new Column<>(header, Renderers.ofInt(field), Comparator.comparingInt(field));
+        return new Column<>(header, Renderers.ofInt(field), Comparator.comparingInt(field), field::applyAsInt);
     }
 
     /** A column of a double field with at most {@code decimals} decimals, sorted numerically. */
     @AllowAllocation("columns are made when a UI is built")
     public static <R> Column<R> ofDouble(String header, ToDoubleFunction<? super R> field, int decimals) {
-        return new Column<>(header, Renderers.ofDouble(field, decimals), Comparator.comparingDouble(field));
+        return new Column<>(header, Renderers.ofDouble(field, decimals), Comparator.comparingDouble(field),
+            field::applyAsDouble);
     }
 
     /** A column of a text field, sorted by its characters. */
     @AllowAllocation("columns are made when a UI is built")
     public static <R> Column<R> ofText(String header, Function<? super R, ? extends CharSequence> field) {
         return new Column<>(header, Renderers.ofText(field), (a, b) -> CharSequence.compare(field.apply(a),
-            field.apply(b)));
+            field.apply(b)), field);
     }
 
     /** A column of a boolean field, false first. */
     @AllowAllocation("columns are made when a UI is built")
     public static <R> Column<R> ofBoolean(String header, Predicate<? super R> field) {
         return new Column<>(header, Renderers.ofBoolean(field), (a, b) -> Boolean.compare(field.test(a),
-            field.test(b)));
+            field.test(b)), field::test);
     }
 
     /** A column of any field shown by {@code renderer}, sorted by {@code order} (null: not sortable). */
@@ -76,14 +85,14 @@ public final class Column<R> {
     public static <R, V> Column<R> of(String header, Function<? super R, ? extends V> field,
         ValueRenderer<? super V> renderer, Comparator<? super V> order) {
         Column<R> c = new Column<>(header, Renderers.of(field, renderer),
-            order == null ? null : Comparator.comparing(field, order));
+            order == null ? null : Comparator.comparing(field, order), field);
         c.sortable = order != null;
         return c;
     }
 
     /** A column showing the whole row through {@code renderer}, sorted by {@code order} (null: not sortable). */
     public static <R> Column<R> ofRow(String header, ValueRenderer<R> renderer, Comparator<? super R> order) {
-        Column<R> c = new Column<>(header, renderer, order);
+        Column<R> c = new Column<>(header, renderer, order, Function.identity());
         c.sortable = order != null;
         return c;
     }
@@ -93,9 +102,58 @@ public final class Column<R> {
         return header;
     }
 
-    /** The renderer of the column's cells. */
+    /** The renderer of the column's cells: its own, or the one its header cell's style names. */
     public ValueRenderer<R> renderer() {
         return renderer;
+    }
+
+    /**
+     * What identifies the column in a table's layout description ({@link TableView#layoutDescription()}): the
+     * header unless set.
+     */
+    public String key() {
+        return key == null ? header : key;
+    }
+
+    /** Identifies the column by {@code value} in layout descriptions; returns this. */
+    public Column<R> key(String value) {
+        key = value;
+        return this;
+    }
+
+    /** Looks the style's renderer name up again after the next layout (the registry changed). */
+    void restyle() {
+        styled = null;
+    }
+
+    /** Whether the column is hidden ({@link TableView#hide}). */
+    public boolean hidden() {
+        return hidden;
+    }
+
+    /**
+     * Takes the renderer named {@code name} in {@code registry} for the column's values ({@link DataStyles#RENDERER}
+     * on its header cell; empty: its own); returns whether the renderer changed. Int, double and boolean columns box
+     * their values for a named renderer.
+     */
+    @AllowAllocation("the style names another renderer: an adapter is made")
+    boolean styled(String name, ValueRenderers registry) {
+        if (name == styled) {
+            return false;
+        }
+        styled = name;
+        ValueRenderer<?> named = name.isEmpty() || registry == null ? null : registry.named(name);
+        ValueRenderer<R> want = named == null ? own : adapt(named);
+        if (named == null && renderer == own) {
+            return false;
+        }
+        renderer = want;
+        return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ValueRenderer<R> adapt(ValueRenderer<?> named) {
+        return Renderers.of((Function<? super R, Object>) value, (ValueRenderer<Object>) named);
     }
 
     /** The order the column sorts by, or null. */

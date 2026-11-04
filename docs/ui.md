@@ -1191,7 +1191,9 @@ O(log n) per point, and only the new pixel columns are re-decimated.
 - **Picking**: the pointer ray against analytic shapes (capsules, tori, quads), with a screen-space tolerance in
   pixels. This is part of the same pointer pipeline, and gizmos come before scene objects.
 - **Screen-constant size**: scaled per view by distance × tan(fov/2) × setting.
-- **Depth**: drawn on top with the occluded parts faded, a style choice.
+- **Depth**: drawn on top with the occluded parts faded, a style choice. The fade is decided per pixel by the
+  renderer against the scene's depth of the frame being drawn (`Gizmo.depthTest`, `Primitive.FLAG_DEPTH`), or per
+  part on the CPU (`GizmoOcclusion`) where the renderer has no depth for the view.
 - **Math in doubles** (D37) with camera-relative drawing (`CameraRelative`), so no jitter far from the origin.
 - **Space**: local, world, parent, view. **Pivot**: median, individual origins, active, cursor, bounds centre. The
   selection is multi-node.
@@ -1325,10 +1327,15 @@ The binding table below uses gamepad positions (south, east, west, north) so the
 | boxSelect / boxZoom (modifiers) | Shift+LMB drag / RMB drag | — | — | — |
 | resetView (Binary) | double click, Home | north | double tap | — |
 | **ui.gizmo** | | | | |
-| translate/rotate/scale/universal (Binary) | W / E / R / T | d-pad (when the gizmo is focused) | toolbar | — |
-| toggleSpace (Binary) | X | — | toolbar | — |
-| snap (Binary, held) | Ctrl (held) | LT held | toolbar toggle | grip held |
+| translate/rotate/scale/universal (Binary) | W / E / R / T | d-pad up / right / down / left (when the gizmo is focused) | toolbar | — |
+| bounds (Binary) | B | — | toolbar | — |
+| nextMode (Binary: translate, rotate, scale, bounds, universal) | — | — | toolbar | right A |
+| toggleSpace / previousSpace (Binary) | X / Shift+X | — | toolbar | left X / — |
+| nextPivot / previousPivot (Binary: median, individual, active, cursor, bounds centre) | . / Shift+. | — | toolbar | left Y / — |
+| snap (Binary, held) | Ctrl (held) | LT held | toolbar toggle | thumbstick pressed (either hand) |
 | cancelDrag (Binary) | Escape, RMB | east | — | B |
+| grabLeft / grabRight (Binary, held; both: two-handed scale and turn) | — | — | — | left / right grip |
+| handLeft / handRight (Pose: where a hand grabs from) | — | — | — | grip pose (each hand) |
 | **ui.docking** | | | | |
 | dockModifier (Binary, held: no docking while held) | Shift (held while dragging) | — | — | — |
 | nextWindow (Binary) | Ctrl+F6 | — | — | — |
@@ -1337,6 +1344,9 @@ The binding table below uses gamepad positions (south, east, west, north) so the
 | complete, historyUp/Down | Tab, ↑/↓ | — | — | — |
 
 - Text editing actions apply only while the text context is on top (D61). Keys typed as text never fire game actions.
+- The gizmo's keys: B is free in every `ui` group (bounds); period is Blender's pivot key, Shift with X and period goes
+  backwards. The d-pad switches gizmo modes only while the game says a gizmo is focused (`UiCommands.gizmo`); then it
+  moves no focus (the left stick and arrows still do), otherwise it navigates and switches nothing.
 - Shortcut labels in menus show the bound glyph of the last device used (D62).
 
 ---
@@ -1622,7 +1632,8 @@ PRs:
 - `engine`: generated inspectors for materials, nodes and settings; the SLF4J sink; the accessibility bridge;
 - `build-logic`: wiring for the annotation processor, if needed.
 
-**Stage 13: property builder and inspectors, including collections**
+**Stage 13: property builder and inspectors, including collections** — **Built in the ui** (A3 props; the engine's
+inspectors left)
 - Scope:
   - the metadata model, merged from the Slang-generated material records, `Setting`s and annotations;
   - the annotation processor, with the reflection fallback;
@@ -1748,6 +1759,835 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
+
+The seven areas below were built in parallel on their own branches from `a3-remaining` (b7aed4b: the new
+`UiCommand`s and `UiInput.mnemonic()`), then merged, with the engine's parts built on the merge. Builds:
+`-Ptruesim.common-state=../common-state-tree -Ptruesim.scene=../scene-a3-scene -Ptruesim.common-math=../common-math-au`
+(ui-scene needs the scene branch `a3-scene-raycast`: `SpatialIndex.raycast` with a `RayFilter`; release scene first).
+
+#### Merge decisions
+
+- *Chart style keys in ui-controls* (`com.truesim.ui.controls.charts.ChartStyles` and its enums), as the props' keys
+  are: the shipped themes style charts, so every module that compiles a theme must know the keys without ui-charts.
+- *One service for modules above the controls*: `TunableSource` (charts, scene, gizmo); the scene branch's identical
+  `TunableHolder` went.
+- *Triangles on the transform table*: the charts' `TRIANGLE` primitive keeps its corners in words 9 to 14, recorded
+  like its box and baked with it (`DrawList.baked`); the gizmos draw their filled shapes with it.
+- The file dialog is opaque (the theme's 0.86 surface showed the browser's text through it on the GPU).
+- `PropertyPanel` no longer rebuilds the root before an edit through a setter (it wrote the old value back into the
+  edited object; found by the engine's settings screen).
+
+#### Engine (`ui-rest`: `ui-rest-render`, `ui-rest-input`, `ui-rest-integ`)
+
+| Part | Built |
+|---|---|
+| Renderer | The transform table and dirty ranges (`GpuUiRenderer`, `draw.slang`); `TRIANGLE` in the uber and per-kind paths (anti-aliased flagged edges, a half-open rule on the others: no seams); world panels drawn directly (`worldVertexMain`/`worldFragmentMain`) or into a texture (`WorldPanelRenderer`) |
+| Input | Every new command bound (`ui.docking.windowMove` Alt+F7, `windowResize` Alt+F8, tabs, `CHART_RESET`, gizmos, console toggle without typing the grave; completion and history only while the console's line has the text, `UiCommands.console`), mnemonics and pointer modifiers (`UiKeyboard`, `Pointer.GIZMO_SNAP`), touch, pen, XR-ray and virtual-cursor pointers |
+| Eyedropper | `GpuScreenSampler`: a block of scene colour before the display transform (HDR kept), read back without waiting; the game hands `UiPlugin.screenSampler()` to its `Controls` |
+| Scene | `UiPlugin.scene(graph, index)`: picking through `ScenePicking` with the camera of the frame (no delay), `PickMeshes`, ~~`DepthOcclusion` for gizmos (a level of the depth pyramid, a frame or more old)~~ gizmo occlusion by the depth of the same frame (group A3, occl), `GpuCameraView` (the minimap: a view of the same graph into a bound texture, the same frame), `GpuPicking` (ID buffer: 0.007 ms GPU, a frame late; the CPU path stays the default) |
+| Console | `UiPlugin.console(...)`: `ConsoleLogProvider` (SLF4J 2), `SettingVariables` over the engine's settings with the constraint overlay's reasons, `FileHistoryStore`, `FolderScripts`, `FolderAssets`, `NamedNodes`, `SettingPermissions` |
+| Inspectors | `SettingsSource`/`SettingsScreen` (the generated settings screen), `MaterialParametersSource`; nodes wait for the component stores (D46) |
+| Settings | Every A3 tunable a setting (`UiPlugin.tunables(ui)`, the console's included) |
+| Benchmarks | Module `engine-bench` (`./gradlew :engine-bench:uiBench`) writes engine `docs/benchmarks-ui.md` with the section 11 targets |
+| Screenshots | Every gallery in both themes (`GalleryScreenshots`), the settings screen, world panels, the minimap, gizmo occlusion |
+
+#### Left after the merge
+
+- Every row of engine `docs/benchmarks-ui.md` is within budget on a quiet machine (2026-11-04, after the follow-ups
+  below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
+  0.13 ms p50, 0.21 ms p99; engine-bench `-Ponly=console` runs one part).
+- Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
+  and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
+  in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
+  loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
+- `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
+
+#### Follow-ups decided by the lead (2026-11-04)
+
+- Engine rebased onto origin/main (window options v0.175.0, technique registry v0.176.0; `SettingVariables` maps
+  technique slots to choices). ui and scene had not moved.
+- Gizmo occlusion is exact in the same frame (section "occl"); every gizmo operation is a rebindable action
+  ("gizmoact"); chart legends never cover data and the plot's background lies under the grid ("chartfix"); the
+  benchmark misses are fixed ("perf").
+- Overlays (menus, drop-downs, pop-overs, hover cards, tooltips, dialogs) are opaque in both themes (`--overlay`,
+  the raised surface made opaque); panels keep the 0.86 surface.
+- A dialog's buttons follow the platform: the fact `platform` on `dialog-buttons` (`Controls.platform`, the system's
+  by default); Windows and Linux [Open][Cancel] (`row-reverse` in the theme), macOS [Cancel][Open]. Focus order stays
+  the tree's (cancel, then accept).
+- Spelling offers corrections two edits away only for words of `ui.spell.twoEditsFrom` (6) letters or more.
+- Kept: mnemonics underlined while Alt is held, the 11-pixel loupe, 8 atlas pages (`ui.text.atlas.maxPages`), the
+  chart palette and colormap, the gizmo look and 4-deep scene picking, the props and console defaults, box select
+  from a row; world panels default to the texture mode (`WorldPanelRenderer.add(panel)`); OS windows stay top-level.
+
+### Group A3, gizmoact (2026-11-04): local branch a3-gizmoact
+
+Every gizmo operation as a rebindable action of `ui.gizmo`. Engine branch `ui-rest-gizmoact` (from `ui-rest`).
+
+**Built**
+
+| Item | What | Where |
+|---|---|---|
+| Commands | `GIZMO_BOUNDS`, `GIZMO_NEXT_MODE`, `GIZMO_PREVIOUS_SPACE`, `GIZMO_NEXT_PIVOT`, `GIZMO_PREVIOUS_PIVOT` appended to the gizmo line; `Gizmo` handles them (ignored while dragging, as every switch); `GizmoMode.next`, `GizmoSpace.previous`, `GizmoPivot.next/previous` | ui-core `UiCommand`, ui-gizmo |
+| Actions | `ui.gizmo.bounds` B, `nextMode` (no key), `previousSpace` Shift+X, `nextPivot` period, `previousPivot` Shift+period (not while typing); the mode actions on the d-pad, taken only while a gizmo is focused (`UiCommands.gizmo(BooleanSupplier)`: then the d-pad moves no focus; otherwise it navigates and the switches give nothing) | engine-ui `UiActions`, `UiCommands` |
+| XR | `grabLeft`/`grabRight` (grips; both held: two-handed) and the poses `handLeft`/`handRight` (grip poses) drive `GizmoGrab` through `XrGizmoGrab` (`UiPlugin.gizmoGrab`: each frame after the UI's input; `cancelDrag` cancels, the grip must be let go before it grabs again); `snap` on either thumbstick (grabs and, through `XrPointers`' modifiers, ray drags); right A next mode, left X next space, left Y next pivot (`XrPointers.defaults`) | engine-ui `XrGizmoGrab`, `XrPointers`, `UiPlugin` |
+
+**Decisions**
+
+- *B and period*: B is unused by every `ui` group (bounds); period is the pivot key of Blender's pivot menu; Shift goes
+  backwards (Shift+X, Shift+period), as Shift+Tab does.
+- *The d-pad by focus, not by a context*: a pushed context covering `ui.gizmo` would also take Escape, east and LT
+  from navigation; `UiCommands` instead drops the focus move while a focused gizmo's switch is held, and the switch
+  pressed with a focus move while none is focused.
+- *XR snap on the thumbsticks*, not the grip (now the grab) nor the trigger (the ray's click while grabbing).
+- *No pad bindings for bounds, spaces, pivots*: the four d-pad directions keep the design's four modes; the face
+  buttons are navigation's.
+
+**Tests**: `GizmoCommandsTest` (bounds by command and a face drag, the next mode round, pivots both ways moving the
+gizmo, the space backwards, switches ignored while dragging); engine `UiCommandsTest` (each new key, rebinding,
+typing blocks them, the d-pad by focus without repeats) and `XrGizmoGrabTest` (recorded grip poses: one hand follows,
+two scale with a thumbstick snap, cancel, rebinding the grab to the trigger, a lost hand lets go, allocation free).
+
+**Left**: pad bindings for bounds, spaces and pivots (taste); the XR `cancelDrag` B (its game default is the
+confirm setting's).
+
+### Group A3, chartfix (2026-11-04): local branch a3-chartfix
+
+Legends that never cover the data, and the plot's background under the grid where the renderer can clear it. Engine
+branch `ui-rest-chartfix` (from `ui-rest`).
+
+| Part | Built | Where |
+|---|---|---|
+| Legend positions | `LegendPosition` gains `BEST` (`legend-position: best`: in the plot, at the first of top right, top left, bottom left, bottom right, right, left, bottom, top with the least data under the box, as matplotlib's `'best'`; probe points `ui.chart.legendProbe` pixels apart over the box, each covered when a shown series `contains` it or has a sample within reach (`nearest`); picked again when data, ranges, size or entries change) and `OUTSIDE_TOP`, `OUTSIDE_BOTTOM`, `OUTSIDE_LEFT`, `OUTSIDE_RIGHT` (the plot gives up the box's room plus its margins: above the plot between the title and top axes, below the bottom axes, beside the outermost Y axes; rows wrap at the chart's width; beside the plot a column). The legend is measured before the chart is arranged and placed after it, in the same frame (`legendMeasure`, `legendPlace`); its box is public (`legendLeft/Top/Right/Bottom`) | `Chart`, `LegendPosition`, `ChartTunables` |
+| Themes | default: `legend-position: outside-top`, entries in a row without a box, centred over the plot under the title; test: `outside-right` (its garish box) | `_charts.tss`, `_charts-test.tss` |
+| Plot background | `plot-background` (a colour on `chart`, `ChartStyles.PLOT_BACKGROUND`): the chart draws it first, under its grid (background, grid, data, as charts look), its edges on whole pixels. The default theme moves its `rgba(#0d1117, 0.35)` from `chart-plot`'s background (drawn over the grid) to it, and its grid's alphas from 0.16 / 0.06 to 0.11 / 0.04 (what showed through the old background); the test theme `#200020`, with a square bordered `chart-plot` | `Chart`, `ChartStyles`, themes |
+| Engine | `GpuUiRenderer`: the boxes drawn right after a folded backdrop (or first of all) that are square, borderless, unclipped, without a gradient and on whole pixels of the image, opaque or translucent over the clear alone (inside the backdrop's corner and border band, over no box cleared before) are cleared as rectangles (`vkCmdClearAttachments`, `PassContext.clear`, `Commands.clearAttachments`) to what drawing them leaves; `clearedBoxes()` names them; `foldBackdrop(false)` draws them as before | engine-ui, engine-graph, engine-vulkan |
+
+#### Decisions
+
+- *Outside the plot by default*: `best` still covers data in charts whose data fill every corner (oscillating lines,
+  scatter, stacked areas: about half the gallery); a row above the plot never does, costs nothing per frame and never
+  jumps. `best` stays for legends inside the plot.
+- *The plot's background clears*: drawn under the grid and first after the folded panel, the 3790 x 950 translucent
+  box is cleared to its colour over the panel's instead of blended (the streaming chart's GPU time 0.219 to about
+  0.17 ms p50, its line chart 0.187 to about 0.135). An opaque colour in the theme, drawn, was measured too: no
+  faster (0.231 ms); without a plot background at all 0.145.
+
+#### Tests
+
+`LegendTest` (best moves away from a rising, then a falling line, never over data; falls back to the least covered
+place; each outside position takes room and never meets the plot, entries still toggle), `ChartsGalleryTest` (no
+legend box over a sample or shape of its chart in either theme, plain and posed: with the old `top-right` it fails
+on "Linked charts, three Y axes"), engine `UiRendererTest.boxesDrawnFirstOverAFoldedPanelAreClearedWithTheSamePixels`
+(a chart's panel, plot background, an opaque box: cleared, the image equal to drawing them; not cleared over the
+panel's corners, over a box cleared before, off whole pixels, rounded; cleared without a backdrop). GPU screenshots
+`final/ui-charts/charts-*.png`.
+
+#### Benchmarks
+
+engine-bench `uiBench` (RX 9070 XT, quiet machine, three runs after): the streaming chart's filled area on the GPU
+0.2192 / 0.2241 ms (p50 / p99) before, 0.166-0.174 / 0.169-0.177 after; its line 0.1866 / 0.1884 before,
+0.132-0.139 / 0.133-0.140 after. CPU rows unchanged within their run-to-run noise.
+
+#### Left
+
+- `best` places by samples, not segments: a steep line between two far samples may pass under it unseen.
+
+### Group A3, occl (2026-11-04): local branch a3-occl
+
+Gizmo occlusion exact in the same frame: the UI's primitives can carry a depth, and the renderer fades them per
+pixel against the scene depth it draws over. Engine branch `ui-rest-occl` (from `ui-rest`).
+
+| Part | Built | Where |
+|---|---|---|
+| Depth tested primitives | `Primitive.FLAG_DEPTH` (flag 128, header bit 15) on a solid `BOX`, a `LINE` or a `TRIANGLE`; words 7-8 (colour B, unused by these kinds otherwise) hold its view depth (distance along the view's forward axis): word 7 the depth at the first corner (box: its one depth; line: its first end; triangle: a) as a float whose low 8 mantissa bits are the occluded opacity as unorm8 (`Primitive.depthWord`: 15 mantissa bits left, 3e-5 relative); word 8 a line's second end's depth (float), a triangle's `halves(zb / za - 1, zc / za - 1)`, a box's 0. Recorded by `DrawList.depthBox`, `depthLine`, `depthTriangle`; transforms and clip offsets move and scale them, never their depth (`baked()` no longer fades words 7-8 of these); `DrawList.depthAt` is the CPU reference of the shader's interpolation (reciprocals under perspective, depths under an orthographic view; a line clamped to its segment, a triangle by barycentric weights past its edges) | `Primitive`, `DrawList` |
+| Gizmo | `Gizmo.depthTest(true)`: axes, rings (but their back halves, faded on the CPU as before), arrow tips, plane squares, scale cubes and bounds handles recorded depth tested with the theme's `gizmo-occluded` opacity; its `GizmoOcclusion` is then not asked. `GizmoOcclusion`/`RayOcclusion` stay for views the renderer has no depth for (camera views), headless and tests. Trackball and centre discs are not faded (as before) | `Gizmo` |
+| Previews and dumps | `DrawListDump` writes `depth=` and `occluded=` for these; the controls' `CpuPreview` draws triangles and fades depth tested primitives by a `SceneDepth`; `ScenePreviewTest` adds `scene-gallery-depth*.png` (the gallery's gizmos depth tested, faded by the depth of its boxes ray cast per pixel) | `testkit`, `controls` tests |
+| Engine | `draw.slang` (uber and box, line, triangle entry points): `depthTest` reads `Keys.SCENE_DEPTH` of the same frame (`GpuUiRenderer` reads it with `g.optional`, after transparency), the image pixel scaled to the depth's render region (dynamic resolution included), reverse depth to view depth by `GpuUiRenderer.depthCamera` (near / depth, or (1 - depth) x range orthographic), faded where farther than the scene by more than `ui.gizmo.depthBias` (1e-4 relative); the plugin sets the camera from its scene bridge's; `UiScene.update` follows the camera again (the game may move it in its update). `DepthOcclusion` and `ui.gizmo.depthLevel` removed | engine-ui |
+
+#### Decisions
+
+- *Depth in colour B's words* rather than a per-primitive plane or new words: lines, triangles and boxes of a gizmo
+  never use colour B, a triangle has no other free word, and the format change stays two words and one flag. The
+  occluded opacity rides in the depth's lowest mantissa bits (a triangle has no ninth word).
+- *View depth, not the device's depth*: the UI records what its `SceneView` knows; the renderer turns its depth into
+  the same quantity with the camera's projection, so the UI needs no knowledge of reverse or infinite depth.
+- *Opt-in per gizmo*: the renderer can test only against the view it draws the UI over; a gizmo in a camera view
+  keeps the CPU occlusion.
+
+#### Tests
+
+`DrawListTest` (packing, `depthAt` under both projections, `baked`, allocation), `GizmoMoreTest` (depth tested
+handles: every kind, the theme's opacity, depths at their ends, no CPU occlusion asked), engine
+`GizmoOcclusionGpuTest` (a box moved in front of the X arrow: faded to 0.28 exactly in the frame it moved in, to two
+pixels of its silhouette, and whole again the frame it moved away), the shader constants test. Screenshot
+`integ/gizmo-depth-occlusion.png`.
+
+#### Left
+
+- Depth tested primitives on world panels (no depth bound there) and in XR views; a gradient box cannot be depth
+  tested (its colour B is the gradient's).
+
+### Group A3, perf (2026-11-04): local branches `a3-perf` (ui) and `ui-rest-perf` (engine)
+
+The benchmark rows that missed (engine `docs/benchmarks-ui.md`).
+
+| Part | Built | Where |
+|---|---|---|
+| Lines and envelopes over vertices | `Primitive.PATH` and `COLUMNS` draw a range of the list's vertex table (`DrawList.VERTEX_FLOATS` 4: a path's x, y, length; a column's first, last, lowest, highest y), expanded on the GPU: joins (miter with a limit, bevel, round), caps, dashes by length (4 entries), each pixel drawn once at joins; columns stroked as before or filled a quad per 4 columns. Streaming rewrites only changed vertices (compare before write). The streaming chart went from 7,529 primitives (13,216 filled) to 2 or 3 | ui-core, `Canvas`, `LineSeries`, `line-join` miter/bevel, `line-miter-limit`; engine `draw.slang` |
+| Folded backdrop | A full-image box at the bottom of a layer is the pass's clear (its corners and border drawn along the edges): 100,000 glyphs over a backdrop 0.46 to 0.31 ms | engine `GpuUiRenderer` |
+| `ShapeCache` | Every `TextSystem` shapes through a cache of printable Latin runs (`ui.text.shapeCache`, 4,096 runs; 0 off), two generations (a full one ages, runs shown again move up: no frame where everything shapes again); a generation's turnover deletes the dying slots with a backward shift (see the note below) | ui-text |
+| Log rows | A row's time is two labels, `log-time` (seconds) and `log-millis`, in `log-clock`: both repeat, so the shape cache finds them; a flooded frame no longer shapes a new time per row (0.17 to 0.13 ms p50) | ui-console `LogView`, `_console*.tss` |
+| Timing | engine-bench times CPU frames back to back and GPU frames in a run of their own (a GPU wait between UI frames inflated CPU times; engine `docs/pitfalls.md`) | engine `bench` |
+
+*Lesson (CI, 2026-11-04):* an open-addressing table whose entries die by generation must not leave dead slots in
+probe chains when lookups stop at them: the first version of the two-generation `ShapeCache` treated a slot of a dead
+generation as empty, so live runs placed after it in the chain were not found (shaped again and kept twice). It passed
+on Windows and failed on Linux because the slot layout depends on `System.identityHashCode` of the face. Fixed by
+deleting the dying generation's slots at the turnover with backward-shift deletion (amortized constant, nothing
+allocated); `ShapeCacheTest` forces the collision (`homeBits(0)`: every run's home slot the same) and checks random
+runs over few home slots against a model of the generations. The other open-addressing tables of the UI were checked:
+`LongIntMap` (text, style) and the console's logger table never delete, `WordSet` rebuilds on removal, `Imm` keeps
+tombstones and rebuilds when they and live ids fill half the table, and the glyph atlas marks evicted glyphs instead
+of removing them.
+
+### Group A3, render (2026-11-04): local branch a3-render
+
+The draw list's transform table and dirty ranges, CSS's automatic minimum size of flex items, SVG icons and atlas
+page eviction. Engine branch `ui-rest-render` (engine-ui's renderer and shader).
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Automatic minimum size | A flex item whose main-axis minimum is auto and which does not clip its content (`Layout.clipsContent`, set from the `clip` style) shrinks no further than its min-content size (measured under an at-most constraint of 0: text its longest word, a container its items' minimums), or its specified size if smaller, within its maximum, never below its padding; a basis below it (`flex: 1`) grows from it. An explicit minimum wins; clipping and scrolling items keep 0. Measured only when an item is to be smaller than its hypothetical size, and kept per item until its layout changes. A wrapping container is never narrower than its widest item | `ui-layout` `FlexLayout`, `Layout`, `Ui.apply` |
+| Transform table | Each primitive's word 15 (`Primitive.TRANSFORM`, was reserved) names an entry of its list's transform table (`DrawList.TRANSFORM_FLOATS` 8 floats, 32 bytes: scale, offset x, y, opacity, four reserved; entry 0 the identity). A primitive draws at `scale * (p + clip offset) + offset`, its sizes times the scale, its colours' alpha times the opacity. An element that composes opacity, scale or a drawn offset over its subtree (`Visuals.composes`: a set override or a style value other than 1) owns an entry its subtree shares; an animation rewrites that entry (`DrawList.setTransform`, compared) and no primitive. The first change that makes an element an owner records its subtree once; it stays an owner until its layer is rebuilt | `DrawList`, `Primitive`, `Ui`, `Visuals.TransformListener` |
+| Clips follow transforms | A clip names the entry of its owner (`CLIP_FLOATS` 8: the transform index at float 7, `setClipTransform`): its rectangle and radius are drawn by it, so a scaled or moved subtree is cut where it draws; an ancestor's cut drawn by another entry is mapped into the clip's space when clips move | `DrawList`, `Ui.clipBox` |
+| Reading back | `DrawList.drawnX/Y`, `drawnScale`, `drawnOpacity`, `drawnClip`, and `baked()`: a copy with every transform and clip offset applied (CPU previews, `LayoutSanity`, `DrawListDump`, `SoftwareGlyphRenderer`). `LayoutSanity` transforms clipping ancestors' boxes too. Picking still reads the layout (drawn offsets and scales are not seen by it, as before) | `DrawList`, `ui-testkit`, `ui-text` |
+| Dirty ranges | `DirtyRanges`: a few sorted, disjoint ranges per table (primitives and transform entries), merged within `ui.draw.dirtyMergeGap` (16 primitives) and at most `ui.draw.dirtyRanges` (16; past it the closest two merge); `dirtyFrom/To` stay the span. The engine uploads each range apart | `ui-core` `DirtyRanges`, `DrawList`, engine `GpuUiRenderer` |
+| Engine | `ui/primitive.slang`: `TRANSFORM` (was `RESERVED`), `CLIP_FLOATS`, `TRANSFORM_FLOATS` (checked against `Primitive` and `DrawList`); `ui/draw.slang`: the push constants carry the layer's transform table (`transforms`, `clipFloats` gone), vertices placed by the entry, coverage worked out in the primitive's own coordinates with distances scaled to pixels (box, shadow, glyph range, weight and outline, line width), colour times opacity; entry 0 needs no memory read. `GpuUiRenderer` keeps a transform buffer per layer and uploads every dirty range of primitives and entries | engine `ui` |
+| SVG icons | `SvgIcon` parses an icon's filled shapes (`path` with every command, arcs as cubics; `rect` with radii, `circle`, `ellipse`, `polygon`, `polyline`; `g`; every `transform`) into a `GlyphOutline` in ems; `IconFace` makes them glyphs of the text atlas (MTSDF, generated, packed and evicted like text, never cached on disk). `UiImages.addSvg`, `loadSvg`, or `icons/<name>.svg` found on the classpath when a style names `icons/<name>` (a registered image or built-in icon of the name stays a texture); the UI draws them as glyph primitives tinted by the style's image colour, fitted like images and measured at their size. Our own parser: lwjgl-nanovg is not in the local repositories and downloading is not allowed | `ui-text` `SvgIcon`, `IconFace`, `controls` `UiImages`, `Ui` |
+| Atlas page eviction | At most `ui.text.atlas.maxPages` (8) MTSDF and raster pages: a new page past it clears the least recently used page (by the last frame a glyph of it was looked up or installed) that no draw list draws (`GlyphAtlas.pageGuard`, the UI's scan of its lists, run only then) and that has no glyph generating; with none, the atlas grows past the budget. Evicted glyphs keep their entries as `EVICTED`; `generation()` grows, text looks its glyphs up again, which queues them again. Colour pages are not evicted | `GlyphAtlas`, `AtlasSettings`, `TextBlock`, `Ui` |
+| Workarounds removed | The test theme's fixed heights of date cells and badges (labels no longer shrink under their text). Kept, as real sizing: the gallery's minimum-size panels and the test theme's step numbers (fixed-size boxes whose text would overflow anyway) | `_basic-test.tss` |
+
+#### The draw-list format change (for branches that record primitives)
+
+- Word 15 of a primitive is its transform index (`Primitive.TRANSFORM`); `DrawList.begin` resets it to 0
+  (`useTransform` sets it). Code that records with `DrawList`'s methods needs no change.
+- `DrawList.CLIP_FLOATS` is 8 (was 7): float 7 is the clip's transform index. Code reading `clips()` by
+  `CLIP_FLOATS` keeps working; code reading positions should use `drawnX/Y`/`drawnClip` or `baked()`.
+- The UI no longer fades colours by opacity nor bakes scales and offsets: `Painter.paint`'s `opacity` is always 1
+  (the entry fades what a painter records), `TextBlock.record` gets the unfaded colour.
+- `DrawList.transform(scale, x, y)` still bakes a transform while recording (the UI uses it for the clip's content
+  space only).
+
+#### Decisions
+
+- *An entry per composing element, shared by its subtree*, not one per element: a fading window rewrites one entry;
+  elements that never animate stay on entry 0. Becoming an owner records the subtree once (its primitives name the
+  new entry); the entry stays until the layer is rebuilt, so a hover that fades in and out records once.
+- *Opacity in the entry*, multiplied in the shader after coverage (premultiplied output), identical to fading the
+  colours (goldens, which print primitives as they draw, are unchanged by it).
+- *Scroll before transform*: the clip offset is added to a primitive's own coordinates, the entry applied after, so a
+  scaled panel's scroll pane scrolls by scaled pixels (it moved by unscaled ones before).
+- *The automatic minimum only where it can matter*: measured lazily when an item is to shrink below its hypothetical
+  size, cached until its layout changes; Yoga's semantics are `min-width: 0`, which the oracle now sets.
+- *An SVG parser of our own* (filled shapes, no strokes or CSS) rather than NanoSVG, which would need a download.
+- *Eviction never drops a drawn glyph*: the page guard asks the UI's draw lists; past the budget with every page
+  drawn, the atlas grows rather than flicker.
+
+#### Tests
+
+ui: `DirtyRangesTest` (merging, the most ranges, random coverage, allocation-free); `DrawListTest`
+(`primitivesDrawByTheirTransformEntryWhichAnAnimationRewritesAlone`, `theTransformTableGrows`,
+`changesFarApartAreSeparateDirtyRanges`); `AnimatorTest.aScaledClippingPanelClipsItsContentWhereItDraws` (an
+animation dirties no primitive and no clip, the clip scales and moves with its owner, `LayoutSanity` sane) and the
+transform test reading drawn values; `FlexLayoutTest.itemsShrinkNoFurtherThanTheirMinContentUnlessTheyClipOrHaveAMinimum`,
+`textShrinksToItsLongestWordAndARowToItsItemsMinimums`, `aWrappingContainerIsNeverNarrowerThanItsWidestItem`;
+`SizingTest` and `YogaOracleTest` adapted (1,304 of 2,000 trees, 9,255 elements compared, as before);
+`SvgIconTest` (view box, every path command, shapes and transforms, sizes, errors, a ring's distance field);
+`GlyphAtlasTest.pastItsPageBudgetTheLeastRecentlyUsedPageNoTextDrawsIsEvicted`,
+`iconsAreGlyphsOfTheirFaceAndNeverCached`; `SvgIconsTest` (three self-written SVG resources drawn as tinted glyphs,
+fitted, measured; files, code, missing names). Engine: `UiRendererTest.aScaledAndMovedSubtreeDrawsAndClipsWhereItsTransformEntryPutsIt`
+(GPU read-back and screenshot `transformed-clipped.png`), `changesFarApartUploadApart`, an animated entry in the
+allocation test; the constants test covers `TRANSFORM_FLOATS`.
+
+Goldens regenerated: the basic gallery (both themes): the spinner and progress bar animate by entries, so the
+gallery settles (no element records) a few frames earlier and their phase differs; in the test theme, labels in
+fixed-size cells keep their height and centre a pixel or two higher. Draw-list dumps print primitives as they draw
+(`baked()`), so other goldens did not change.
+
+#### Benchmarks (Ryzen 9 9950X3D, RX 9070 XT, without JaCoCo; other agents were building: noisy)
+
+| Case | Before | After |
+|---|---|---|
+| HUD (506 elements, 4,896 glyphs), idle, CPU | 0.0001 ms p99 | 0.0001 ms p99 |
+| HUD, 10% changing, CPU (`HudBenchmarkTest`) | 0.24 to 0.25 ms median, 0.28 to 0.36 p99 | 0.27 ms median, 0.33 to 0.39 p99 |
+| HUD, four cards fading (animated opacity), CPU | 0.025 ms median, 323,892 bytes a frame | 0.0002 ms median, 128 bytes a frame |
+| HUD, two counters far apart changing | 412,603 bytes a frame | 503 bytes a frame |
+| Renderer submit, 50 of 500 elements changing (`UiBenchmark`) | 8.5 us, 408,256 bytes a frame | 5.3 us, 292,096 bytes a frame |
+| HUD at 4K, GPU, adaptive | 0.103 ms | 0.104 ms |
+| 100,000 glyphs, GPU, adaptive: alone / over a translucent backdrop | 0.303 / 0.451 ms | 0.307 / 0.461 ms |
+| Layout, HUD 500 elements 10% changing (`LayoutBenchmark`) | 50.6 us p50 | 55.5 us p50 |
+| Layout, form 500 rows, 10% changing | 60.9 us p50 | 64.2 us p50 |
+
+#### Left
+
+- The 100,000-glyph-over-a-backdrop case is still 0.45 to 0.46 ms against 0.4 ms (not worked on).
+- The 10% changing HUD (CPU) and the layout's HUD may be 5 to 10% slower (dirty ranges, the automatic minimum's
+  extra measure of changed items); to re-measure on a quiet machine.
+- SVG: strokes, CSS, gradients and `use` are not read; `fill-rule="evenodd"` needs holes wound the other way. Icons
+  draw only through a text system with an atlas (a UI without text shows nothing for them).
+- Picking does not follow drawn transforms (as before): a scaled element is hit at its layout box.
+- An element that once composed keeps its entry until its layer is rebuilt (a small table, never cleaned up sooner).
+
+### Group A3, charts (2026-11-04): local branch a3-charts
+
+Design section 7 and stages 9, 10 and 11 (Group C) as the new module `ui-charts` (directory `charts`, package
+`com.truesim.ui.charts`, on top of `ui-controls`, published like the others). No engine work yet: what the engine must do
+is listed under Left.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Model | `Chart`: any number of `Axis` objects (X at the bottom or top, Y left or right, stacked outwards), scales `LINEAR`, `LOG`, `SYMLOG` (constant per axis), `TIME` (seconds since 1970 UTC plus a zone offset), `CATEGORY` (names); ranges are versioned `AxisRange`s, so linking axes is sharing one (`Axis.link`), across charts too; a `Crosshair` (versioned) shared by charts shows the hovered X in all of them; axes can be hidden, inverted, auto-fitted (`autoFit`), kept out of fitting (`fits(false)`), followed (`follow`); series name their axes (`Series.axes`); every series, legend item, annotation and drag tool can be shown and hidden | `Chart`, `Axis`, `AxisRange`, `Crosshair` |
+| Ticks | nice numbers (1, 2, 5 times a power of ten, nearest the spacing asked for on a log scale) with minors; log decades (every n-th when narrow, 2 to 9 as minors, linear within a decade); symlog zero and signed powers thinned to the spacing; time by calendar (microseconds to seconds as nice numbers, then 1 s to 1 week, 1/2/3/6 months, nice years) with labels by the step (`mm:ss.fff`, `HH:mm:ss`, `HH:mm`, `MM-dd`, `yyyy-MM`, `yyyy`); categories within their names. Labels are text without allocation (`TickFormat`: decimals of the step, scientific beyond 1e7 or below 1e-6, Hinnant's civil dates); X labels wider than their room thin the ticks; label blocks are reused by their text, so a pan shapes only the labels coming into view | `Ticks`, `TickFormat` |
+| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it: no rotated text); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
+| New primitive | `Primitive.TRIANGLE` (kind 7): the bounding box in words 1-4, colour A, corners in words 9-14, per-edge anti-aliasing flags (`EDGE_AB`, `EDGE_BC`, `EDGE_CA`: a shape's outline anti-aliased, its shared inner edges hard); `DrawList.triangle`. Recorded through the public API only; `DrawList` changed by one method (`triangle`, using `start`/`emit` and the range transform), `Primitive` by the constants | `ui-core` |
+| Data | `Column`s by absolute index (`first`..`end`): `Columns.of` over `VersionedDoubleArray`, `VersionedFloatArray`, `VersionedDoubleRing`, `VersionedFloatRing` (appended samples visited by `changesSince`), plain `double[]`/`float[]` (`changed()`), getters with a `Versioned` trigger, and `Columns.index(start, step)` (implicit evenly spaced X) | `Column`, `Columns` |
+| Series | `line` (stairs `Step.POST/PRE/MID`, `area` to a baseline), `scatter`, `stems`, `digital` (lanes at the plot's bottom), `shaded` (band between two columns), `stackedArea`, `bars` (grouped, `stacked`, `horizontal`), `histogram` (bins, range, density, cumulative; binned on change), `histogram2d`, `heatmap` (`HeatTexture`: a `UiTextures` texture coloured by the `colormap`, cells several texels wide so linear filtering keeps them sharp), `pie` (a donut by `donut-hole`, share labels), `candlestick` (or `ohlc`), `errorBars` (vertical or horizontal), `infiniteLines`, `image`, `text`, `annotate` (callouts kept in the plot); `Subplots` (rows of charts, `linkColumns`, `linkRows`, `linkAllX`, one crosshair) | `*Series`, `InfiniteLines`, `Annotation`, `Subplots` |
+| Decimation (UI23) | `MinMaxPyramid`: a segment tree over blocks of `ui.chart.pyramidBlock` samples (power of two; 8 by default), partial blocks read directly; for rings laid over the ring's slots, so an appended sample updates its block and ancestors in O(log n) (`Tracked`, `XYSeries.poll`: appended ranges only, a rebuild on any other change). `Decimator.minMax`: per pixel column the index range (arithmetic for evenly spaced X, else a search guided by the last column's width), first, last, min and max (M4); the line draws a stroke per column and a connector only where neighbouring columns' spans do not touch. `Decimator.lttb`: Largest-Triangle-Three-Buckets in the axes' transformed units. Per series `Decimation.NONE`, `MIN_MAX`, `LTTB`, `AUTO` (min-max for lines and areas above `ui.chart.decimateAbove` samples a pixel, LTTB for markers; LTTB falls back to min-max above `ui.chart.lttbMaxInput`) | `MinMaxPyramid`, `Decimator`, `XYSeries`, `Tracked` |
+| Hit queries | nearest sample by binary search on sorted X (by X for the crosshair, in two dimensions for clicks); a `ScatterGrid` (uniform grid in transformed units, built on change, ring search) for unsorted data; bars, pie slices, heatmap cells and images by geometry; `Chart.hitTest`, `axisAt`, `legendEntryAt`; all without allocation | `XYSeries`, `ScatterGrid`, kinds' `contains` |
+| Interaction | hover crosshair (shared), nearest-point highlights, tooltips merged (Grafana) or per series (stacked so they do not cover each other) by `chart-tooltips`; legend click hides an item, hover highlights its series (`:hover` look of its part); wheel zooms about the pointer (all axes, the selected ones when any is, Shift X only, Ctrl or Cmd Y only; over an axis that axis); drag pans (on an axis that axis); secondary-button drag zooms to a box (a thin box one direction); Shift-drag selects (`Chart.selection()`, a `DragRect` the game reads as a query range); clicking an axis selects it; `DragPoint`, `DragLine`, `DragRect` (move and resize) bound to `VersionedDouble`s; double click and `UiCommand.CHART_RESET` fit everything again and resume follow and auto-fit; zooming or panning an axis pauses its follow and auto-fit | `Chart`, `DragTool` |
+| Styles | `ChartStyles` (registered as a `StyleKeyHolder` service): `stroke`, `line-width`, `line-dash`, `line-join`, `fill`, `fill-opacity`, `marker`, `marker-size`, `marker-fill`, `marker-outline`, `palette`, `colormap`, `bar-width`, `cap-width`, `donut-hole`, `digital-height`, `up-color`, `down-color`, `tick-length`, `minor-tick-length`, `tick-spacing`, `minor-ticks`, `fit-padding`, `legend-position`, `swatch-size`, `chart-tooltips`, `tooltip-offset`; standard keys for fonts, colours, boxes, padding, gaps, radii, shadows. Partials `_charts.tss` (seaborn deep palette, viridis) and `_charts-test.tss`, one `@use` in each theme; style names for marker shapes and donuts | `ChartStyles`, themes |
+| Tunables | `ChartTunables` (`ui.chart.zoomStep`, `decimateAbove`, `pyramidBlock`, `lttbPerPixel`, `lttbMaxInput`, `maxPoints`, `gridPerCell`, `hoverDistance`, `maxTicks`, `followLead`, `dragPixels`, `grabPixels`, `arcPixels`, `heatmapTexels`), listed by `Ui.tunables()` through the new `TunableSource` service of `ui-core` | `ChartTunables`, `ui-core`, `Ui` |
+| Gallery | `ChartsGallery` (test fixture of `ui-charts`): the ImPlot-parity demo page, 16 tiles (linked charts with three Y axes each, log and symlog, time with stairs and digital, scatter markers, grouped bars on a category axis, stacked horizontal bars, areas, histogram, 2D histogram, heatmap, pie and donut, candlesticks, error bars and stems, annotations and drag tools, 2 x 2 subplots), `pose` for the hovered look; in `GallerySanityTest` (both themes, posed) | `charts/src/testFixtures` |
+
+#### Decisions
+
+- *Charts are three elements, not one.* A painter cannot add a clip, so the plot is a child with `clip: true` whose
+  painter records the series, and an overlay child takes what draws over the series and outside the plot (legend,
+  tooltips). Axes, ticks and labels are the chart element's own drawing. The chart places its children after layout.
+- *A triangle primitive rather than approximations.* Areas, bands, pie slices and triangle markers need triangles;
+  boxes per pixel column fill dense envelopes (exact at the pixel), triangles the trapezoids of sparse data, with
+  anti-aliasing on outlines only, so translucent fills show no seams.
+- *Lines keep the segment primitive.* Joins are discs at vertices (`line-join: round`), dashes are split on the CPU
+  with the phase carried along the polyline; decimated lines need neither.
+- *Pyramid blocks of 8 by default* (benchmarked 8, 16, 32, 64): 4 bytes a sample (40 MB for 10 million) for the
+  fastest envelope; a tunable for memory against time.
+- *UI24: the CPU path stays.* It meets the targets (below), keeps the envelope exact in doubles, needs no readback for
+  hit queries and adds no frame of latency. The GPU compute alternative for the engine phase: the columns uploaded as
+  storage buffers (appended ranges only; values relative to the axis origin, or double-float pairs to stay exact), a
+  compute pass with one workgroup per pixel column finding its index range (arithmetic or a binary search in the
+  buffer) and reducing first, last, min and max in shared memory (or over a GPU min-max pyramid kept by a compute pass
+  on appends), writing per-column segments for an indirect instanced line draw. At 10 million visible samples that
+  reads about 80 MB a frame without a pyramid; it is worth it only when the CPU envelope is the bottleneck.
+- *Fitting* happens with the first data, on a reset and for auto-fitting axes; an axis with `fits(false)` keeps the range
+  code gave it (a streaming window's span). Follow mode keeps the span and puts the newest sample at the end, less
+  `ui.chart.followLead`.
+- *Colormaps interpolate in sRGB* (as they are made), and draw in linear light.
+- *Style keys with plain names* (`stroke`, `line-width`, `fill`...) live in `ChartStyles`; a module declaring the same
+  names (gizmos) must reuse them, not declare them again (`StyleKeys` refuses a second key of a name).
+- *Text reshaping without allocation:* `FontRegistry`'s chain key compared family lists with `List.equals`, which walks
+  an iterator: an allocation per reshape without escape analysis whenever two styles hold equal but distinct lists;
+  now compared by index.
+
+#### Tests
+
+`TicksTest` (nice steps, linear, log, symlog, category and time ticks, number and time formats, civil dates against
+`java.time`), `AxisTest` (transforms both ways for every scale, inverted, zoom keeps the point under the pointer, pan,
+box, fitting, linking), `DecimationTest` (the pyramid against brute force over random ranges: arrays, block sizes,
+NaN, rings appended, wrapped, partly filled and cleared; the envelope against brute force for sorted, duplicated,
+evenly spaced, log and inverted X; LTTB against the reference implementation; the scatter grid against brute force),
+`SeriesTest` (every kind: what it draws, its nearest sample and geometry hits, stacking, hiding items), `CanvasTest`
+(dashes and their phase, clipping, every marker, wedges, quads, ring order checks), `InteractionTest` (scripts of
+synthetic input: wheel zoom over the plot, axes and with modifiers, selected axes, pans, box zoom, box select and
+moving it, legend toggles and highlights, drag tools, double click and `CHART_RESET`, streaming with follow and
+auto-fit, a shared crosshair, per-series tooltips in the test theme, charts without text), `ChartAllocationTest`
+(streaming 1,000 samples a frame with follow, hovering, wheel and pan; the whole demo page idle and hovered: no
+allocation, without escape analysis), `ChartsGalleryTest` (LayoutSanity in both themes plain and posed; with
+`TRUESIM_SCREENSHOTS=true` the CPU previews), `ChartBenchmarkTest` (`TRUESIM_BENCHMARK=true`); `GallerySanityTest`
+and `UiTunablesTest` in `ui-controls`.
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo, while other agents built: noisy, to be re-measured)
+
+| Target | Budget | Measured |
+|---|---|---|
+| 1,000,000 samples streaming 1,000 a frame, 3,930 pixel columns (4K), CPU | ≤ 0.5 ms | envelope 0.21 ms median, 0.30 ms p99; whole frame (poll, pyramid appends, envelope, recording axes, plot and overlay) 0.38 ms median, 0.66 ms p99 |
+| 10,000,000 samples zooming and panning every frame, CPU | ≤ 1 ms | sorted X stored: envelope 0.38 ms median (1.2 p99), frame 0.95 ms median (p99 up to 6 ms under load); evenly spaced X: envelope 0.20 ms median (0.51 p99), frame 0.52 ms median (2.0 p99) |
+| Pyramid memory | — | 4 bytes a sample at blocks of 8 (40 MB for 10 million), 2 at 16, 1 at 32, 0.5 at 64 |
+
+#### Left
+
+- **Engine**: the `TRIANGLE` kind in the UI shader (`ui/draw.slang`, `primitive.slang`): its quad is the bounding box
+  (grown by a pixel for anti-aliasing), moved by its clip's offset with its corners; coverage is the product over its
+  three edges of the signed distance's coverage for anti-aliased edges (flags 1, 2, 4 in header bits 8-10) and a hard
+  half-open test for the others (a top-left rule, so triangles sharing an edge never cover a pixel twice); in the
+  per-kind path a `triangleMain`. `engine-ui` depends on `ui-charts` (the shipped themes need `ChartStyles`' keys at
+  run time) and registers `ChartTunables` like the others (they arrive through `Ui.tunables()`). GPU screenshots of
+  `ChartsGallery` in both themes (`charts-{default,test}.png`, plain and posed). The chart benchmarks recorded in
+  engine-bench; the GPU line targets (1M streaming ≤ 0.2 ms GPU) measured.
+- Engine-side line quality (design 7 GPU): instanced segments with miter joins and a bevel fallback, round caps and
+  dashes by cumulative length in the shader would replace the CPU's discs and dash splitting; SDF markers instanced.
+- A nearest-sampled image flag would let heatmaps use one texel a cell.
+- Not built: rotated text (Y axis titles sit above their axes), axis tags, heatmap value labels, histogram binning on
+  the GPU, decimation of bars and candlesticks beyond `ui.chart.maxPoints`, a custom scale (ImPlot's transform
+  callbacks), ~~legends outside the plot~~ (built: chartfix).
+- `common-state` with `VersionedDoubleRing`/`VersionedFloatRing` must be released (`ui-core` asks for 0.4.0; the build
+  uses `-Ptruesim.common-state=../common-state-tree`).
+
+### Group A3, controls (2026-11-04): local branch a3-controls
+
+Mnemonics, repeat buttons, logarithmic sliders, HDR colours and an eyedropper, grapheme-level password masking, spell
+checking, and windows and tabs by commands. Engine-agnostic: `ui-core` (`ScreenSampler`, command fallbacks),
+`ui-text` (`com.truesim.ui.text.spell`), `ui-controls` (`basic`, `text`, `windows`). No engine work in this branch.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Mnemonics | `&` marks the letter in button, menu-title, menu-item, tab and dialog-button text and in labels for fields (`Controls.labelFor(text, target)`); `&&` is an ampersand, an `&` not before a letter or digit stays. Names and shown text have no marker. `Mnemonics` (one per `Controls`): each label gets a style part `span.mnemonic` with the fact `mnemonics=shown` or `hidden` following `UiInput.mnemonicsShown()`, and `Ui.underline(label, index, part)` draws the letter's underline while the part's `text-decoration` underlines (in its colour), so a theme shows them always, while Alt is held (the default theme) or never. `UiInput.mnemonic()` goes to the deepest open menu (its one item with the letter activates, a submenu opens; several: focus cycles; an open menu takes every letter), else to the buttons and labels-for in the focused scope (the nearest ancestor announced `WINDOW` or `DIALOG`, the trapping modal scope, with no focus what is in no window): one is clicked (a menu bar's title opens its menu, a checkbox toggles, a label focuses its target), several cycle the focus as Windows does | `basic.Mnemonics`, `Button`, `MenuItem`, `Menu`, `MenuBar`, `Controls`, `Ui.underline` |
+| Repeat button | `Repeater` runs an action on the press, then after `ui.button.repeatDelay` (0.4 s) at `ui.button.repeatRate` (20/s), the action system's defaults, at most once a frame, pausing while the held pointer is off the element; `ACCEPT` runs it once; the press's click is swallowed. `RepeatButton` (a `Button`), `Controls.repeatButton`. Used by number-field steppers, time-picker arrows and date-picker month arrows | `basic.Repeater`, `RepeatButton`, `text.NumberField`, `TimePicker`, `DatePicker` |
+| Slider scales | `SliderScale`: `LINEAR`, `logarithmic(base)`, `symlog(linear, base)` (ranges crossing 0); `Slider.scale(...)` maps thumbs, fill, presses and drags; keys step a hundredth of the track (a page `ui.slider.pageFraction`) in the scale's coordinate, then snap to the step, at least one step; `ticks(count)` (even in the scale), `ticksAt(values...)`, `scaleTicks()` (powers of the base; zero and the powers either side for symlog; the step's multiples for linear); `Slider.range(min, max)`. `NumberField.scale(...)`: keys and steppers a hundredth of the range's coordinate, drags a two-hundredth per `ui.input.numberDragPixels` | `basic.SliderScale`, `Slider`, `text.NumberField` |
+| HDR colours | `ColorPicker.hdr(maxStops)`: the colour is a base colour (area, strip, hex) times `2^stops`; a `color-intensity` row (a `slider.intensity` over 0 to `maxStops` and a `color-intensity-value` label, `+1.3 EV`); components above 1 kept in the model (half floats); the preview splits into `color-preview-clipped` (clipped to 1, as SDR shows it) and `color-preview-hdr`; hex shows and takes the base only (the intensity stays); `hdr(0)` turns it off | `basic.ColorPicker` |
+| Eyedropper | `ScreenSampler` (ui-core): `request(x, y, size)` a block of the presented frame (odd, up to 31 px), `poll(ScreenSample)` copies the newest answer (linear, HDR kept), `stop()`; asked every frame, the newest answer shown, so nothing waits. `PatternScreenSampler` answers from a pattern after a latency (default: the frame after next), for tests and galleries. `Eyedropper`: a full-screen `eyedropper` element on its own blocking layer (z 450) takes the pointer, a `color-loupe` (painted: `loupe-pixels` cells, the centre outlined by `color-loupe-center`'s border, at `loupe-gap` from the pointer, flipped at screen edges) follows it; a click or `ACCEPT` picks the pixel (at once when the newest answer is for that point, else when it arrives), `CANCEL` or the secondary button cancels, the focus goes back. `Controls.screenSampler(...)`; a picker shows its `button.eyedropper` (icon `eyedropper`, `:checked` while picking) when the controls have one. A built-in `icons/eyedropper` | `ui-core` `input.ScreenSampler`, `ScreenSample`, `PatternScreenSampler`; `basic.Eyedropper`, `ColorPicker`, `BuiltinIcons` |
+| Password masking | One mask per extended grapheme cluster (an emoji ZWJ sequence, a flag, a skin-toned emoji, a letter with combining marks): the slice shapes the cluster's first character as the mask and the rest as zero-width spaces, so indices stay the text's; Left and Right move logically by clusters while masked, a click never lands inside one, Backspace deletes a whole cluster (`EditableText.deleteBackCluster`), a double click selects all | `text.Slice`, `TextEditor`, `ui-text` `EditableText` |
+| Spell checking | ui-text `spell`: `AffixRules` (the `.aff` subset: `SET`, `FLAG` char/long/num, `TRY`, `REP`, `KEY`, `NOSUGGEST`, `FORBIDDENWORD`, `NEEDAFFIX`, `PFX`/`SFX` with conditions, cross products and continuation flags for a second suffix); `Dictionary` (`.dic` + `.aff` streams or resources, or a plain list) expanded at load into a `WordSet` (one char pool, open addressing, looked up by `CharSequence` ranges without allocating); `SpellChecker`: dictionaries per locale, a user dictionary (`addToDictionary`, `removeFromDictionary`, saved through `UserWords`), session `ignore`, `version()`; `check(text, from, to, Misspelt)` allocates nothing; words are letters, marks and digits with inner apostrophes and hyphens (a hyphenated word is right whole or by parts); case: a lower-case entry is right capitalised and in capitals, a capitalised one in capitals; settings `ui.spell.ignoreUrls`, `ignoreNumbers`, `ignoreMixedCase`, `ignoreCapitals`; `suggest(word)` (at most `ui.spell.suggestions`): the replacement table, a `BkTree` (optimal string alignment, distance 1 then 2; swaps first), the user's words, split words, in the word's case. `TextEditor.spelling(checker, controls)`: the part `span.misspelt` (`color`, `squiggle-wavelength`, `squiggle-amplitude`, `squiggle-thickness`; 0 wavelength: straight) draws squiggles as line primitives; per-paragraph results shifted with the paragraph arrays, only damaged paragraphs checked again: the visible ones as they are drawn (no frame waits), the rest within `ui.text.spellBudget` ms a frame; the word being typed (ending at the caret) is not marked; the context menu (right click or `CONTEXT_MENU`) on a misspelt word offers corrections, "Add to dictionary", "Ignore" (`spellMenuText` localises them); passwords are never checked | `ui-text` `spell`; `text.TextEditor`, `TextStyles` |
+| Windows and tabs by commands | `FloatingWindow`: `WINDOW_MOVE` and `WINDOW_RESIZE` with the focus in it start `keyboardMove()`/`keyboardResize()`; `Interaction.addCommandFallback` (commands no element consumed): `WindowManager` takes `NEXT_WINDOW` (`focusNext()`) and, with nothing focused, `WINDOW_MOVE`/`WINDOW_RESIZE` for the active window; dock panes: `NEXT_TAB`/`PREVIOUS_TAB` (wrapping, focus on the tab), `CLOSE_TAB` (asks the shown panel; the next tab focused once its rebuilt pane is laid out), `NEXT_WINDOW` to the next pane across the space's windows (its remembered focus or its tab); `TabPane`: the same three anywhere in the pane (the new tab focused: the old page leaves the tree) | `windows.FloatingWindow`, `WindowManager`, `DockSpace`; `basic.TabPane`; `ui-core` `Interaction` |
+| Styles | `_controls.tss` and `_controls-test.tss` (one `@use` each in both themes): `span.mnemonic`, the intensity row and preview halves, the eyedropper button, screen and loupe, `span.misspelt`; keys `loupe-pixels`, `loupe-gap` (`BasicStyles`), `squiggle-*` (`TextStyles`, a new `StyleKeyHolder` service) | `style`, `controls` |
+| Galleries | `ControlsGallery`: mnemonics on the menu bar, its items, Save and a label for the key-binding field ("&Jump key"), the Next button repeats, a logarithmic frequency slider with decade ticks, the colour picker in HDR with an eyedropper over a `PatternScreenSampler` (`Gallery.openEyedropper(x, y)`); `TextGallery`: a password of four clusters, the notes area spell checked (squiggles under "mispelled wrod") | `testFixtures` |
+
+#### Decisions
+
+- *Mnemonic underlines through a style part, not a flag in code*: the theme decides when they show (`span.mnemonic`
+  plain, or with the fact `mnemonics=shown`), so "always" needs no key of its own: `text-decoration: underline` on
+  `span.mnemonic` (the test theme does it).
+- *Mnemonic scope by semantics*: the nearest ancestor announced as a window or dialog is the scope, so windows,
+  dialogs and docking's OS windows need no registration.
+- *Repeat timing as UI tunables with the action system's defaults* (`ui.button.repeatDelay` 0.4 s,
+  `ui.button.repeatRate` 20/s): the engine's `ui.repeatDelay`/`ui.repeatRate` cannot reach a pointer hold.
+- *Scales act on the coordinate*: keys step a fixed share of the track on every scale, so a logarithmic slider steps
+  multiplicatively; a step set still snaps.
+- *HDR as base times stops*: the area, strip and hex stay in the displayable range people pick in; the intensity is
+  one exposure control, as in DCC tools.
+- *Sampling is asynchronous by contract* (request, then poll the newest answer); a click commits on the answer for its
+  own point, never on a stale one.
+- *Spell-check index: a BK-tree* over the expanded forms rather than symmetric deletes: the forms do not change, its
+  memory is four int arrays (symmetric deletes at distance 2 would need millions of entries for en_US), and a query
+  runs on a context-menu click, not per frame: 18 ms median on 150,000 synthetic forms, five times faster than a
+  scan (benchmark below). If that is too slow with a real dictionary, symmetric deletes at distance 1 plus the tree
+  at distance 2 only when nothing is found is the next step. Forms are expanded at load so checking is
+  one hash lookup that allocates nothing.
+- *No word list was found* in the repositories, the JDK or the Gradle and LWJGL caches: the mechanism ships with a
+  small self-written sample (`en-sample.aff`/`.dic`, 1,340 stems, about 4,000 forms; project licence). Candidates the
+  user could add: SCOWL-based Hunspell en_US/en_GB (wordlist.aspell.net; SCOWL's permissive MIT-like licence, with
+  parts under other permissive terms; LibreOffice's dictionaries repository), and other languages' Hunspell
+  dictionaries (licences vary: LGPL/MPL/GPL; check each).
+
+#### Tests
+
+`MnemonicsTest` (parsing, underline shown only while the modifier is held and always in the test theme, buttons,
+duplicates cycling, disabled, labels for fields, the menu bar's titles and open menus, submenus, scopes of windows and
+dialogs), `RepeatAndScaleTest` (delay, rate, pausing off the button, ACCEPT once; number-field steppers; scale
+mappings and round trips for five scales, ticks, keys in the scale's space, snapped steps, number-field drags),
+`ColorHdrTest` (stops, base hex, the preview halves; the eyedropper's latency, clicks before and after the answer,
+HDR kept or clipped, cancel by CANCEL and the secondary button, ACCEPT), `PasswordClustersTest` (six clusters six
+masks, caret stops, Backspace by clusters, clicks), `SpellCheckerTest` (affix rules with long flags, continuation
+flags, NEEDAFFIX, FORBIDDENWORD, NOSUGGEST, numeric flags; case; settings; suggestions; user dictionary and its
+store; locales; the BK-tree against a brute-force scan), `SpellEditorTest` (squiggles, only the edited paragraph
+rechecked, the typed word unmarked, 2,000 paragraphs over several frames within the budget, the spelling menu by
+keys and by a right click: replace, add, ignore; passwords not checked), `WindowCommandsTest`, `TabCommandsTest`,
+`A3AllocationTest` (mnemonics toggling, a held repeat button, a logarithmic slider by keys, a spell-checked area
+scrolling, the eyedropper following the pointer: no allocation), `A3PreviewTest` (CPU previews, with
+`TRUESIM_SCREENSHOTS=true`). Goldens regenerated: `basic-gallery.txt`, `basic-gallery-test-theme.txt` (the gallery
+changed).
+
+#### Benchmarks (Ryzen 9 9950X3D, JaCoCo off; other agents were building: noisy)
+
+| What | Measured |
+|---|---|
+| Checking prose with the sample dictionary (`SpellBenchmarkTest`) | 60 ns a word, allocation-free |
+| 150,000 synthetic forms (en_US-sized, random words, denser than real ones): BK-tree build | 284 ms (on the first suggestion, or `Dictionary.prepareSuggestions()` at load) |
+| A distance-2 suggestion query, BK-tree vs a full scan | 18 ms median, 30 ms p99 vs 93 ms median |
+
+#### Engine (to do there)
+
+- Bind the `ui` group's actions to `WINDOW_MOVE` and `WINDOW_RESIZE`: proposed Alt+F7 and Alt+F8 (Windows and KDE),
+  no gamepad default; `NEXT_WINDOW` Ctrl+F6 (and Alt+F6 on KDE); `NEXT_TAB`/`PREVIOUS_TAB` Ctrl+Tab and Ctrl+Shift+Tab
+  (and Ctrl+PageDown/PageUp), the shoulder buttons on a gamepad; `CLOSE_TAB` Ctrl+W (Ctrl+F4).
+- Fill `UiInput.mnemonic()` (a letter or digit pressed with Alt, not when Alt is part of another binding) and
+  `mnemonicsShown()` (Alt held alone; on Windows the system's "underline access keys" setting may keep it on).
+- Implement `ScreenSampler` over the presenter: copy a `size x size` block around the pointer from the frame's
+  scene-referred HDR image (before the display transform) into a small read-back buffer each frame a request stands,
+  hand it back the frame it lands (no wait, no stall), and call `Controls.screenSampler(...)`; with several OS windows,
+  the window under the pointer (`request` false outside every window).
+- Register the new tunables as settings (they are in `Ui.tunables()`): `ui.button.repeatDelay`,
+  `ui.button.repeatRate` (default them from `ui.repeatDelay`/`ui.repeatRate`), `ui.text.spellBudget`,
+  `ui.spell.ignoreUrls`, `ui.spell.ignoreNumbers`, `ui.spell.ignoreMixedCase`, `ui.spell.ignoreCapitals`,
+  `ui.spell.suggestions`.
+- Spell checking: a `SpellChecker.UserWords` store in the player's profile, the locale from the game's language, and
+  where to load full dictionaries from.
+- GPU screenshots of the changed galleries (the HDR preview half and the loupe show HDR values above 1 only there).
+
+#### Left
+
+- The eyedropper's loupe shows the sampler's pixels as they come (no zoom control); docking's OS windows sample the
+  window under the pointer only once the engine's sampler knows them.
+- Spelling: no compounds, no morphological analysis, no per-span language; suggestions do not use keyboard
+  adjacency (`KEY` is read, not used); a full dictionary was not tried here (none available).
+- A pre-existing allocation (also on the base commit, not from this branch): frames alternating between hovering a
+  gallery button, wheel-scrolling a text area on the overlay layer and hovering elsewhere allocate about 8 KB per
+  10,000 frames; found while writing `A3AllocationTest`, not investigated.
+- From the brief, not done: a loupe for touch selection handles (the magnified text needs a clip inside a painter's
+  content, left for the draw-list transform work), a grace for overlays across windows. Built of the small items: a
+  touch selection handle dragged past a field's or area's edge scrolls it that far, as a mouse selection does
+  (`PasswordClustersTest.aTouchHandleDraggedPastAFieldsEdgeScrollsIt`).
+
+### Group A3, data (2026-11-04): local branch a3-data
+
+The data controls' leftovers of group A2 and the file browser of the plan additions: box selection, horizontal
+lists and wide rows, hidden and grouped table columns with header groups, renderers chosen by styles, records by their
+metadata, a loading look for lazy tree nodes, and open and save dialogs over an engine-agnostic file model.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Box selection | Dear ImGui 1.91's box select in every virtual view (lists, trees, tables; multiple selection): a drag from empty space (or from a row where rows do not drag: lists not reorderable, trees not draggable, tables) draws a `selection-box` over the viewport and covers rows by index range; Shift adds, the shortcut modifier toggles; past an edge the view scrolls (`ui.list.boxScrollRate`, `ui.list.boxScrollEdge`), so rows never bound are selected too; rows show the result while dragging (`Selection.previewed`), the selection changes once, on release (`Selection.box`); CANCEL (a drag ended without a release) drops it, a click in empty space selects nothing; keys unchanged. `BoxSelect` does the same on a free 2D canvas of the caller's items (rectangles and selected flags) | `VirtualView`, `Selection`, `BoxSelect`, `DataTunables` |
+| Horizontal lists, wide rows | `ListView.horizontal(true)`: items in a row, virtualized along x (a fixed `width` or measured), LEFT and RIGHT move, `[axis=horizontal]` for themes; the wheel scrolls sideways in any view that only scrolls that way. Rows of vertical lists and trees grow to their content: the widest row seen makes the content wide and every row that wide, so wide rows and deep trees scroll sideways (tables place their own cells) | `VirtualView`, `ListView`, `ScrollView` |
+| Hidden columns | `TableView.hide(column, on)` (in its place in the display order; frozen columns follow), `allColumns()`; `ColumnMenu.attach(controls, table)`: the header's context menu with a check per column, both ways | `TableView`, `basic.ColumnMenu` |
+| Layout description | `TableView.layoutDescription()`: `column "<key>" <width> [hidden]` per column in display order, `frozen <n>`, `sort "<key>" ascending/descending`, `group "<key>"`; restored by `layoutDescription(text)` (unknown keys skipped); `onLayoutChanged` for saving; `Column.key` (the header by default) | `TableView`, `Column` |
+| Grouped rows | `TableView.groupBy(columns)` (outermost first, up to four levels): a `table-group-row` before each group (`[level=n]`, `:expanded`; expander, the column's header, its cell view of the group's value, the count, an optional `groupSum`), collapsible by a click, ACCEPT, LEFT and RIGHT; headers are not selectable (`RowSource.selectable`: ranges, select-all and boxes skip them). `GroupedRows` keeps the groups incrementally from the source list's change log: leaves in order with counts and sums in Fenwick trees (a row index to a header or view position in O(log G)); changed rows leave their group and find their new one by binary search over representatives; a new or emptied group regroups from scratch (O(n)). `TableView.baseOrder` sorts before everything (folders first) | `GroupedRows`, `TableView`, `DataView.builds` |
+| Header groups | `TableView.headerGroup(title, columns)`: a `table-header-group-row` above the headers, one `table-header-group-cell` per run of adjacent shown columns of a group (split at the frozen edge, by moves and by hiding) | `TableView` |
+| Renderers by style | The style key `renderer: <name>` on `list-view`, `tree-view` or a column's `table-header-cell` chooses the renderer registered under that name (`ValueRenderers.name`; the built-ins are named `text`, `number`, `check`, `enum`, `vector`, `color`, `record`); views are made again when it changes | `DataStyles.RENDERER`, `StyledRenderer`, `Column.styled` |
+| Records by metadata | The registry's second step is now real: a record shows its components (`record-view#<Class>` of `record-field#<component>`: a `label.record-name` and the component's view through the registry, records nesting); accessors become direct calls once per class (`LambdaMetafactory`), so binding allocates nothing; built-in records (vectors, colours) keep their renderers | `RecordRenderer`, `ValueRenderers` |
+| Loading look | While a node loads its children (`TreeRows.loading`), a `tree-loading` row follows it (an indent, three `tree-loading-dot`s lit in turn per `loading-period`, a `label#loading`: `TreeView.loadingText`); never selected; type-ahead skips it | `TreeRows.placeholder`, `TreeView` |
+| Type-ahead in tables | `TableView.typeAhead(text)`; the search moved into `VirtualView.typeAhead` (lists use it too) | `VirtualView`, `TableView` |
+| File model | `FileModel`: list, stat, roots, home, parent, child, resolve, steps, create folder, rename, places (`FilePlaces`: favourites, recent at most `ui.files.recentLimit`, describe and restore), an optional watch polled once a frame. `NioFileModel` (any `java.nio` file system, its watch service), `MemoryFileModel` (roots like `/` and `D:/`, for tests and galleries) | `controls.files` |
+| File browser | `FileBrowser`: a bar (back, forward, up, `Breadcrumbs` turning into a path field, list or details, new folder), places (`ListView`), a details `TableView` (name with icon, size, modified, type; sort by header, folders first; type-ahead; rename in place) or a `ListView`, a name field, a filter `DropDown`; modes open (one or several), save, folders; Backspace goes up; the folder's watch lists it again; errors show in `label.file-error` | `FileBrowser`, `FileCells` |
+| File dialogs | `FileDialog.open`, `save`, `folder`: the browser in a `Dialog` (`dialog.file-dialog`), accept and cancel, an overwrite confirmation (`dialog.file-confirm`, opaque) when saving over a file, a filter's extension added to new names, the chosen folder first in the recent places | `FileDialog` |
+| Styles | `_data.tss`, `_data-test.tss` (appended) and new partials `_files.tss`, `_files-test.tss` (one `@import` each); icons by id: `back`, `forward`, `edit`, `new-folder`, `folder`, `file`, `home`, `drive`, `favourite`, `recent` | themes |
+| Galleries | `DataGallery` adds a grouped table (a header group, a hidden column, a collapsed group, sums), a horizontal list, a record, a loading tree node and a box-select canvas; `FilesGallery` (new): a browser, and a save dialog asking to replace a file; both in `GallerySanityTest` | `testFixtures` |
+
+#### Decisions
+
+- *Box selection previews, then commits.* The selection is a set of items, and adding entries allocates. While
+  dragging, rows show the result computed from the selection and the box (allocation-free); the set changes once on
+  release. A box covers rows by index range along the axis (rows fill the cross axis), so virtualization needs
+  nothing more.
+- *A box from rows only where rows do not drag*: reorderable lists and draggable trees keep their row drags; there a
+  box starts in empty space (Dear ImGui's choice for full-row items).
+- *Groups by comparators, not keys.* A group is a run of rows comparing equal by the group columns' comparators (the
+  order the view sorts by), found by binary search over representatives, so no key objects are made (ints are not
+  boxed). Representatives of immutable rows stay valid when the row is replaced; a representative changed in place
+  regroups.
+- *A table layout description of its own* (none existed): text lines in the style of `DockLayout`, saved by the game.
+- *The column menu lives in `basic`* (it is a `Menu`), so `data` still does not depend on `basic`.
+- *The file browser reads listings when navigating* (a user action), never per frame; per frame it compares the
+  watch, the view choice, the filter and the selection versions.
+
+#### Tests
+
+`BoxSelectionTest` (replace, add, toggle, CANCEL, a click in empty space, scrolling past the edge selecting rows never
+bound, rows that drag, tables, trees, the canvas helper, no allocation while dragging), `GroupedTableTest` (headers,
+counts, sums, collapsing by pointer and keys, two levels, incremental updates equal to regrouping from scratch over 60
+frames of 40 random changes with groups appearing, hidden columns, the column menu, the layout description round trip,
+header group runs, no allocation with rows changing), `ListsMoreTest` (horizontal lists, wide rows, loading rows and
+their dots, no allocation while loading, renderers by style, records by components without allocation),
+`FileModelTest` (memory, places, `java.nio` in a temporary folder only), `FileBrowserTest` (listing, filters, hidden
+files, sorting, navigation, breadcrumbs, the path field, Backspace, places, open, save with the overwrite
+confirmation, folders, new folder and rename, the watch, type-ahead, the real file system in a temporary folder),
+`DataThemesTest` and `GallerySanityTest` over the new parts and galleries, `DataFilesPreviewTest` (CPU previews).
+Changed: `RenderersTest` (records by metadata), `DataGalleryTest` (the tree's loading row).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; other agents were building: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Table of 100,000 rows grouped by two columns (64 groups, a sum), sorted, 100 changes a frame (most moving between groups) | ≤ 0.5 ms | 0.151 to 0.155 ms median, 0.35 to 0.39 ms p99 (`DataBenchmarkTest`) |
+| The same, regrouped from scratch (a group appearing or emptying) | — | 5.4 ms median |
+| 1,000,000-row sorted, filtered view, 100 changes a frame (unchanged code, measured again) | ≤ 0.5 ms | 0.023 to 0.026 ms median, 0.057 to 0.065 ms p99 |
+
+Allocation-free (without escape analysis): a box dragged while scrolling, a grouped table with rows changing, a
+loading row's dots, lists of records scrolling.
+
+#### Left
+
+- The CPU preview draws a layer's text after all its boxes, so a dialog over a dialog's table shows the table's text
+  in the preview; the GPU draws in order (to check in the engine's screenshots).
+- A group appearing or emptying regroups from scratch (O(n), 5 ms at 100,000 rows).
+- Box selection across the cross axis (a grid of items) and in a table's cell selection; `BoxSelect` does not scroll
+  a scrolled canvas.
+- File dialogs: no rename in the list view, no drag and drop of files, no thumbnails; listings are synchronous (a slow
+  file system should list in the background behind `FileModel`); native OS dialogs maybe later.
+
+### Group A3, props (2026-11-04): local branch a3-props
+
+Stage 2's binding and stage 13's property builder (design 4.2, 5.11; UI17 to UI20), without the engine's inspectors:
+new modules `ui-props` and `ui-props-processor`.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Binding | `Binding<M,C>`: two-way between a model end and a control end (`Bindable`: a value with a version; adapters for `VersionedValue`, `VersionedDouble`/`Int`/`Long`/`Boolean`, and `Bindable.through(whole, lens)` for a field of a record in another bindable). UI to model on edit (converted, validated, written), model to UI by version, both compared once a frame (two loads, no allocation when nothing changed); a refused value marks the bound element `:invalid` with a message and stays shown while other fields of the record change. `Converter<M,C>` (identity, `of`, `inverse`, `then`, `degrees`), `Validator<T>` (null or a message; `of`, `range`, `and`), `Lens<R,F>` (`of`, `then`, `identity`, `element(i)`, `entry(k)`). `Ui.bindings()` polls them at the start of each update, before the frame listeners, so neither direction waits a frame | `ui-core` `bind`, `Ui` |
+| Metadata | `PropertyModel<T>` (ordered `Property<T,V>`s, the type's annotations, a factory, a sealed type's permitted subtypes, its source), `Property<T,V>` (a `Lens`: name, declared type, element and key types of collections, getter, wither or setter, annotations as typed facts, label), `Annotations`; 30 annotations (`@Label @Tooltip @Range @Step @Unit @Color(hdr) @Angle @Slider @Field @Multiline @Password @EnumStyle @Hidden @ReadOnly @Group @Order @Foldout @ShowIf @Validate @AssetType`, `@ListStyle @Addable @Removable @Reorderable @MinSize @MaxSize @Unique @ElementLabel @Factory`, `@Inspectable`); `Hints` makes any annotation in code (the engine's sources, the generated classes); `AnnotationHandler` gives custom annotations facts, an editor and a validator | `ui-props` |
+| Sources | `PropertySource` (priority, `model(type)`), merged per type by `PropertyModels` (cached): a higher source's properties come first and win per annotation type, a lower one's extra properties follow, accessors from the one that can write. `annotated()` (priority 0): the generated class, else reflection | `PropertyModels`, `PropertySource` |
+| Processor | `PropertiesProcessor` (JDK only, by annotation name): for each record or class with a property annotation, `@Inspectable`, or a sealed parent of one, writes `<Type>Properties` (nested names joined by `_`): a `Property` constant per property with direct getter and wither (canonical constructor) or setter calls, element and key types, its runtime annotations through `Hints` (custom ones too: every value kind, arrays, nested annotations), `MODEL` (factory: `DEFAULTS`, a no-argument constructor, else defaults; subtypes), and direct static accessors. Private and generic types are skipped with a note (reflection serves them). Wired with plain Gradle (`testFixturesAnnotationProcessor`, `testAnnotationProcessor`) | `ui-props-processor` |
+| Reflection | The fallback: records by their components (accessor `MethodHandle`s, the canonical constructor spread), classes by field order with public getters (`getX`, `isX`) and setters or public fields, superclasses first; annotations of component, field and accessors; generic element types | `ReflectionModels`, `Defaults` |
+| Pipeline (UI17) | `PropertyBuilder.forType(T).replace(Steps.X, step).remove(key)...build(controls, holder)`: FILTER (`@Hidden`, `@ShowIf` re-evaluated when the value changes), ORDER, GROUP, EDITOR (code > style `editor` > annotations and handlers > type > fallback), LAYOUT (code > style `props-layout` > default), BIND (lens into the root holder, validators from `@Range`, `@Validate`, sizes, uniqueness, handlers). Elements `props.panel[model][layout]`, `props.row[type][kind][annotation...][property][group][model][label]` with `label.prop-label` and the editor. Styles set the layout, editor, `label-placement`, `visible`, `order` per row; read after styles resolve (a theme switch rebuilds what changed in the same frame); a row's styles are re-read only when its resolved style changed, and nothing is rebuilt unless a chosen value did. Code overrides (`layout`, `editor(property, name)`, `visible`, `collection`) beat styles | `PropertyBuilder`, `Steps`, `PropertyPanel`, `PropertyRow` |
+| Editors | `number` (NumberField; range, step, decimals, `@Unit`), `slider` (with the value beside it), `angle` (degrees over radians), `checkbox`, `text`/`multiline`/`password` (written on Enter or leaving; the field's own `:invalid` while typing), `dropdown`/`radio`/`segmented` (`@EnumStyle`, `@Label` on constants), `color` (ColorPicker over a draw-list colour `long` or an 8-bit sRGB `int`), `asset` (a field with fact `asset=<kind>`), `record` (a nested panel in a collapsible, through the lens chain), `collection`, `readonly`; registered by name, per type and per annotation | `Editors`, `EditorFactory`, `PropertyEditor` |
+| Layouts | `form` (titled groups), `grid` (groups as tile grids), `inspector` (groups as collapsibles kept across rebuilds), `compact`, `row` (a table row) | `Layouts`, `LayoutStrategy` |
+| Collections (UI18) | `CollectionEditor` for lists, sets, maps and arrays of records, sealed types and simple values: `collection[property][element][type][kind]` with a header (count, operations) over a kind's view; kinds by style `collection` (> `@ListStyle` > type: map, chips for sets of enums or strings, foldouts for sealed or interface elements, else table): `table` (rows of nested `row` panels under column labels; above `virtualize-above` a `TableView` editing cells in place through a mirror list), `foldouts` (collapsible nested panels; above the threshold a master-detail list), `master-detail` (`ListView`, rows dragged to reorder, the selection's panel), `chips` (tags, enum constants added from a menu, text typed), `compact` (a summary and a dialog with a master-detail editor), `map` (key and value editors, keys unique); kinds registered by code are selectable by style | `CollectionEditor`, `CollectionKind`, `CollectionViews` |
+| Operations | add (`@Factory`, `DEFAULTS`, constructor, defaults; a type chooser dialog over a sealed type's subtypes), remove, reorder (up and down, drags in lists), duplicate (a deep copy through the metadata), clear, a context menu per item (with `contextAction`s); shown by style `ops` (> `@Addable/@Removable/@Reorderable`), `ops-placement` (each item's end, or on hover with the bar's own `:hover`; views that select keep item operations in the header on the selection), `confirm`; buttons `button.props-op#<op>` with icons `image#op-<op>` and text `op-label`. `@MinSize`, `@MaxSize`, `@Unique` and map keys disable what would break them (`reason`, the tooltip with `tooltips(...)`) and refuse writes (`:invalid`, `message`) | `CollectionEditor`, `CollectionOps` |
+| Edits and undo | Every write reports an `Edit` (path `waypoints[1].speed`, operation, root before and after, `undo`/`redo` into the holder) to `onEdit` listeners; a pointer-held gesture (a drag, a slider) is one edit, reported when released. Immutable updates through lens chains (`CollectionOps`: new lists, sets, maps, arrays) give a new root sharing everything off the path | `Edit`, `PropertyPanel`, `CollectionOps` |
+| Themes | `_props.tss` and `_props-test.tss` (one `@use` in each theme); the test theme picks inspector panels and asks before clear and remove. `PropsStyles` (the keys) lives in ui-controls so the themes compile without ui-props | `ui-style`, `controls.props` |
+| Controls hooks | `Control.dispose()`, `ScrollView.dispose()`, `TextEditor.dispose()` (views and fields destroyed without it stop by themselves); `Ui.removeFrameListener` during the listeners' pass takes effect at once without skipping another | `ui-controls` |
+| Gallery | `PropsGallery` (testFixtures of ui-props): a squad record with groups, every editor, a nested record, and a collection of each kind; in `GallerySanityTest` (both themes) and previewed by `PropsPreviewTest` | `ui-props`, `ui-controls` tests |
+
+#### Decisions
+
+- *UI19, both techniques kept* (measured below): generated models build faster cold (61 to 67 ms against 80 to 92 ms
+  for the gallery's ten types in a fresh JVM) and warm (3.8 against about 60 µs a type) and write 7 to 9 times
+  faster (6 to 8 against 55 to 58 ns a `with`); reads are close (1.5 to 3.8 against 4.1 to 4.3 ns). Reflection stays
+  as the fallback for types compiled without the processor. Most of the cold cost is the JDK's first proxy and
+  lambda machinery (the first type: about 38 ms against 55 ms), not the models.
+- *Annotations as annotation instances* (`Hints` makes them with a proxy, equal to the JDK's): custom annotations and
+  handlers work the same for annotated types and external sources.
+- *Bindings poll before the frame listeners*, in `Ui`, not through `Controls`: no frame of delay in either direction.
+- *Style choices re-read after layout* (`afterLayout`), so a theme switch shows the new editors and kinds in the frame
+  it applies; only when the element's resolved style changed, and nothing is rebuilt unless a chosen value did (hover
+  restyles allocate nothing).
+- *Hidden rows stay in the tree* (`layout.visible(false)`): their style rules (`visible: true`) keep applying.
+- *`virtualize-above` is a style key*, as design 5.11 has it (a presentational threshold per collection), not a
+  tunable.
+
+#### Tests
+
+ui-core `BindingTest` (both directions, an edit and a model change in one frame, validators and `:invalid`,
+converters and conversion failures, primitive holders, lenses of mutable objects, collection lenses, 40 bindings
+polled without allocating). ui-props: `ModelsTest` (generated and reflected models agree on every property, value
+and annotation; beans; merging by priority; hints; defaults; collection operations and deep copies), `PipelineTest`
+(edits and model changes both ways for every editor kind, each step replaced and removed, styles choosing layout,
+editors, visibility, order and label placement, code beating styles, a theme switch, every layout, handlers and
+`@Validate`, gesture-coalesced edits and undo), `CollectionsTest` (a theme alone switches `List<Waypoint>` from
+table to master-detail and hides duplicate; the sealed-type add chooser; min, max, unique and map keys; nested edits
+in lists giving the expected new root and undo round trips; confirm; hover placement; chips, compact, context menus
+with code actions; virtualized tables and foldouts, a cell edit writing back), `UnitsTest`, `GalleryTest`
+(LayoutSanity, both themes), `PropsAllocationTest` (idle and hover frames over the gallery allocate nothing),
+`ModelBenchmarkTest` (UI19, `TRUESIM_BENCHMARK=true`). ui-props-processor: `PropertiesProcessorTest` (sources
+compiled in process with `-Werror`: every annotation value kind and escape, beans, sealed hierarchies, skipped types,
+the unnamed package; the written models load and work). ui-controls: `GallerySanityTest.propsGallery` (both themes),
+`PropsPreviewTest`.
+
+#### Benchmarks
+
+UI19 (`ModelBenchmarkTest`, Windows, other agents building: noisy): first builds of ten types in a fresh JVM, 5 runs
+each: generated 61.4 / 63.9 / 65.0 / 63.0 / 67.4 ms, reflection 84.8 / 83.3 / 81.8 / 79.9 / 91.6 ms; built again
+3.8 µs against 59 to 73 µs a type. Access on `Squad` (warm, median of 15): get 1.5 to 3.8 ns generated, 4.1 to 4.3
+ns reflection; with 6.4 to 8.0 ns against 55 to 58 ns.
+
+#### Left
+
+- The engine's inspectors (design 5.11): `PropertySource`s for `Setting`s (the settings screen) and for the Slang
+  material records, and node components through the D46 stores; their GPU screenshots.
+- A foldout list above `virtualize-above` shows as a master-detail list (nested panels of any height are not
+  recycled); a map is never virtualized.
+- The generated classes build annotations through `Hints` proxies; writing an implementing class per annotation would
+  cut the cold first build further (most of it is the JDK's first proxy).
+- An unsaved typed value in a text editor shown while the collection around it is rebuilt (add, remove) is lost.
+
+### Group A3, tools (2026-11-04): local branch a3-tools
+
+Design 5.10 and stages 14 and 15 (decisions UI3, UI27, UI28): the developer console (new module `ui-console`), the
+immediate-mode façade, the UI debugger, pseudo-localisation, the text scale and the palette. The OS accessibility
+bridge was assessed and not built (below).
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Commands | `ConsoleCommand.named("spawn").describe(..).arg(Arg.integer("count").range(1, 100)).arg(Arg.choice("kind", ..).optional()).developer().cheat().action(call -> ..)`: typed arguments (`integer`, `decimal`, `bool`, `text` (`rest()`: the rest of the line), `choice` (strings or an enum), `asset(type)` and `node()` through the engine's `AssetProvider` and `NodeProvider` (completion and an existence check), `setting()`, `command()`, `script()`), checked before the action runs, read by name from the `Invocation`; tiers and the cheat flag through `ConsolePermissions` (the refusal says why; refused commands are not offered) | `ui-console` |
+| Parser | `CommandLine`: words, `"double"` quotes with `\"` `\\` `\n` `\t` `\;`, `'single'` quotes, a backslash outside quotes, `;` between statements, `//` comments; tokens keep their positions; an unclosed quote runs to the end (the line is being typed); `quote()` round trips | `CommandLine` |
+| Shell | `ConsoleShell`: commands, aliases (`alias low "render.bloom OFF; render.scale"`, the words after an alias appended), `exec file` through a `ScriptSource`, nesting capped by `ui.console.execDepth`, built-ins `help`, `alias`, `unalias`, `exec`, `echo`, `reset`, `toggle`, `find`; an unknown name suggests the nearest (two edits away); output to a `LogSink` with logger `console`, stamped by a settable clock | `ConsoleShell`, `Builtins` |
+| Settings as variables | `ConsoleVariables` (list, find) and `ConsoleVariable` (kind, value, default, min, max, choices, availability, `set` returning why a value is refused) are what the engine implements over its settings and the constraint overlay; `render.bloom` prints `render.bloom = CHEAP (default CHEAP; one of OFF, CHEAP, PHYSICAL): Bloom technique [unavailable: ...]`, `render.bloom physical` sets it (choices ignore case; numbers are checked against their kind and range first) or prints the overlay's reason; `TunableVariables` exposes `Ui.tunables()` where no engine stands behind the console; `ConsoleVariables.of` joins several | `ConsoleVariables`, `ConsoleVariable`, `TunableVariables` |
+| Completion | `ConsoleShell.complete(line, caret)`: the word under the caret in its statement; first words complete commands (allowed ones), aliases and settings (by prefix, then containing), each with a detail (description, `= value`); arguments complete by their `Arg` (choices, on/off, assets, nodes, settings, commands, scripts), setting values by kind (`current` marked); the hint is the signature with the argument at the caret marked (`spawn <count: 1..100> [kind: orc\|elf]`); `apply` quotes candidates that need it; `commonPrefix` | `Completer`, `Completion` |
+| History | `ConsoleHistory(appId, HistoryStore)`: older and newer, keeping the line being typed; repeats kept once; `ui.console.historyLimit` lines; saved after each run through the engine's store (`HistoryStore.memory()` for tests) | `ConsoleHistory`, `HistoryStore` |
+| Log ring (UI28) | `LogSink.log(level, logger, message, source, millis)` of preformatted records; `LogRing`: `ui.console.logCapacity` records made once, text copied into their own buffers (cut at `ui.console.maxLine` with an ellipsis, control characters flattened), a record equal to the last one coalesced (`x3`), loggers interned once; `LogInbox`: any thread, a short lock, the oldest dropped when full, drained once a frame (a burst larger than the ring hands over only what the ring keeps); both allocation-free | `LogRing`, `LogInbox`, `LogRecord`, `LogLevel` |
+| Log view | `LogRows`: the records a view shows, filtered by a level mask, a logger (and the loggers under it) and an incremental search (a longer search narrows the matches, another scans the ring once), kept as a ring of sequence numbers; new records join and gone ones leave once a frame. `LogView` (a `VirtualView`): rows of time, level, logger (short name), message, repeat count and source, with the fact `level` on the row; it follows the newest record while scrolled to the end; a click on a logger filters by it, on a source copies it to the clipboard | `LogRows`, `LogView` |
+| Console widget | `Console`: its own layer (`console`, z 600), dropping down from the top by the theme's `console` and `console:expanded` offsets and their transition; `CONSOLE_TOGGLE` from anywhere (the focus goes to the command line and back); the filter bar (level toggles `:checked`, the logger chip, a search field); the command line: Enter runs the line (echoed at level `command`, added to the history), `COMPLETE` takes the only candidate, else the common start, else picks the first (the next press takes it), `HISTORY_UP/DOWN` (and UP, DOWN) walk the pop-up while it lists candidates and the history otherwise, `CANCEL` closes the pop-up, then the console; the pop-up shows the hint and up to `ui.console.completions` candidates (a click takes one); commands `clear`, `log.level`, `log.logger`, `log.search`, `history`; `cmd:` links of rich text run commands (`linkListener()`, shown in the gallery) | `Console`, `_console.tss`, `_console-test.tss` |
+| Debugger commands | `DebugCommands.register(shell, debugger)`: `ui.inspect [on\|off]`, `ui.overlay <bounds\|clips\|picking\|dirty> [on\|off]`, `ui.pick` (developer commands) | `DebugCommands` |
+| Immediate-mode façade (UI3) | `Imm`: `begin`/`end` windows (moved by their title; on the `imm` layer or a host), `beginGroup`/`endGroup`, `beginChild`/`endChild` (a region the wheel scrolls), `pushId`/`popId`, `sameLine`, `text`, `labelText`, `separator`, `button`, `selectable`, `checkbox`, `slider`/`sliderInt`, `drag`, `inputText` (a `StringBuilder` both ways), `combo`, `treeNode`/`treePop`, `beginTable`/`tableNextRow`/`tableNextColumn`/`endTable`; ids hash the label (`label##id`) in their scope; elements are reused while called, collected in the frame they were not, moved only when the calls' order changes; a frame's input shows in its calls (no latency); the theme's own `button`, `checkbox`, `textfield` and `separator` types and new `imm-*` types; misuse (an id twice, unbalanced calls) throws | `controls.imm`, `_tools.tss`, `_tools-test.tss` |
+| UI debugger | `UiDebugger`, written with `Imm` on the `inspector` layer (above the debug layer): the element tree (open along the selection), picking by pointer (the press goes to the debugger), the selected element's id path, style name, states, facts, rectangle and every resolved value with its rule and `file:line` (`StyleResolver.explain`; `Rule.source` from the compiler); a frame window from `FrameStats` (input, frame code, styles, layout, record, total, passes, recorded elements, upload bytes); overlays on the debug layer drawn by a painter: bounds, clips, picking grid cells (`Picking.grid`, `cellCount`), dirty (the elements the last frame recorded), hover and selection, their looks from the parts `debug-bounds` to `debug-selected` | `controls.debug`, `FrameStats`, `StyleResolver.explain`, `Rule`, `Picking` |
+| Text and colour settings | `ui.textScale` (0.5 to 3) multiplies every resolved `font-size` in the resolver (labels, fields, `em` sizes; one re-resolve when it changes); `ui.palette` (`theme`, `dark`, `light`, `high-contrast`) switches the theme's token set (both themes have a `high-contrast` set, from A1); `ui.l10n.pseudo` (`off`, `on`, `mirrored`) and `ui.l10n.pseudoExpansion` (0.35) show every label accented, longer by its own letters and bracketed (mirrored: forced right to left), accessible names keeping the real text | `StyleResolver.TEXT_SCALE`, `Ui.PALETTE`, `PseudoLocale` |
+| Labels on one line | `text-wrap: false` (`Styles.TEXT_WRAP`) shapes a label without wrapping (log rows; clip the box to cut it) | `Styles`, `Ui` |
+| Galleries | `ConsoleGallery` (ui-console test fixtures: the console open over a HUD with `cmd:` links, every level, a coalesced repeat, `spawn 3 ` typed with the pop-up and the hint), `ImmGallery` (a spawner tool and a scene tool), `DebuggerGallery` (the debugger over the controls gallery, bounds and clips on, a button selected) | test fixtures |
+
+#### Decisions
+
+- *The console widget lives in `ui-console`* with its model (the design's module), above `ui-controls`; so
+  `GallerySanityTest` cannot see its gallery: `ConsoleGalleryTest` runs `LayoutSanity` on it in both themes, and its
+  tunables are listed by `ConsoleTunables.all()`, not `Ui.tunables()`.
+- *The log keeps text, not argument objects*: records are preformatted by the sink (SLF4J formats before it hands
+  them over), so the ring holds no references and appending is a copy.
+- *The completion pop-up sits in the console's layer*, placed under the command line after layout, rather than an
+  `Overlay`: it moves with the console's drop and needs no other layer.
+- *Imm builds its widgets from elements*, not from `Controls`: the basic controls register for polling for good and
+  have no destroy path, while the façade's widgets come and go with the calls. They use the theme's types where they
+  exist.
+- *The debugger draws its overlays with a painter on the debug layer and its windows on a layer above it*, so the
+  overlays never cover the inspector; picking puts a blocker on that layer so the press selects instead of clicking.
+- *The text scale is applied in the resolver*, at one place, so every control (editors and painters included) and
+  every `em` size follows; a change re-resolves every style once.
+- *Pseudo-localisation pads with the label's own letters* (about the width of real added letters), not dots.
+- *A `FontRegistry` fix*: chain lookups compared family lists with `List.equals`, which made an iterator per reshape
+  when two rules gave equal lists (the console's log rows found it); they compare by index now.
+
+#### Tests
+
+ui-console: `CommandLineTest` (14 parser fixtures, positions, unclosed quotes, the statement at the caret, quoting
+round trips), `CompletionTest` (21 completion fixtures, replacement and caret, quoting, hints with the marked
+argument, details, the common prefix), `ConsoleShellTest` (typed arguments and their errors, permissions, settings
+round trips with `FakeVariables`: set, refused by the overlay, out of range, locked, reset, toggle, text; tunables as
+variables, nearest names, aliases with appended words and their nesting, scripts, built-ins, declarations, assets and
+nodes), `ConsoleHistoryTest`, `LogRingTest` (wrapping, coalescing, cutting, interning, filters, incremental search, a
+wrapped ring, changes in place, four threads through the inbox, a full inbox, a burst larger than the ring; appending
+and filtering allocation-free), `ConsoleTest` (toggle and focus, Enter, the three steps of Tab, a click on a
+candidate, history, links, the filter bar, logger and source clicks, the inbox, following the end; frames idle,
+flooded with 200 records a frame and scrolling allocation-free), `ConsoleGalleryTest` (both themes: `LayoutSanity`,
+every interactive node named, previews), `DebugCommandsTest`. ui-controls: `ImmTest` (state by id, a click in its own
+frame, same line, collection and return, order following the calls, every widget's values, tree nodes, tables,
+moving windows, misuse, named widgets; steady frames idle, changing and hovered allocation-free), `UiDebuggerTest`
+(inspector text, explain with `file:line`, picking, timings, overlays, the tree), `TextSettingsTest` (the transform,
+labels, text scale, palette, the controls gallery pseudo-localised), `GallerySanityTest` (`immGallery`,
+`debuggerGallery`, both themes), `ToolsPreviewTest`. ui-style: `StyleExplainTest` (origins of inline values and rules
+with their lines, Java rules, the text scale, live font sizes).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; other agents were building at the same time: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Log flood: 1,000 lines a frame into the open console (drain, filter, the visible rows bound, record), 1920 x 1080 | 0.3 ms (section 11's changing HUD) | 0.35 to 0.53 ms median, 0.63 to 0.77 ms p99 (`ConsoleBenchmarkTest`); layout is 0.33 ms of it: the ~16 visible rows show new records every frame, ~96 labels shaped anew |
+| Log flood: 100,000 lines from another thread shown in one frame | — | 1.4 ms median (the ring keeps 10,000; a burst hands over only those) |
+| Appending 1,000 lines to the ring | — | 0.047 to 0.058 ms median (about 50 ns a line) |
+
+#### OS accessibility bridge (UI27): assessed, not built
+
+The UI side is ready: `Semantics.of(store, interaction)` gives every layer's tree with roles, names (live text),
+states and actions, and every new control here is named (the galleries' `Semantics.unnamed` is empty). A Windows UI
+Automation bridge through FFM needs, in the engine (`engine-platform`, Windows only):
+
+- COM objects written in FFM: a vtable of upcall stubs and a reference count per object for `IUnknown`,
+  `IRawElementProviderSimple` (provider options, `GetPropertyValue` returning `VARIANT`s: `BSTR` names through
+  `SysAllocString`, control types, `VT_BOOL` states), `IRawElementProviderFragment` (`Navigate` to parent, siblings
+  and children, `GetRuntimeId` as a `SAFEARRAY`, `BoundingRectangle` in screen pixels, `SetFocus`) and
+  `IRawElementProviderFragmentRoot` (`ElementProviderFromPoint`, `GetFocus`); `IInvokeProvider`, `IToggleProvider`
+  and `IValueProvider` for buttons, checkboxes and fields;
+- answering `WM_GETOBJECT` with `UiaReturnRawElementProvider`: SDL's window procedure subclassed
+  (`SetWindowLongPtrW(GWLP_WNDPROC)` with an upcall, `CallWindowProcW` for the rest; SDL's message hook cannot
+  return a result), the `HWND` from `SDL_PROP_WINDOW_WIN32_HWND_POINTER`;
+- a snapshot of the semantics tree taken on the UI thread when the store's version changed, read by UIA's calls on
+  its own threads;
+- `UiaRaiseAutomationEvent` for focus changes (what Narrator follows) and property-change events for names, values
+  and toggles.
+
+That is some 1,500 lines of COM by hand, checkable only by hand with Narrator or by another 1,000 lines of an
+`IUIAutomation` client in FFM for a test, on Windows only; a minimal slice (roles, names, focus) still needs every
+interface above except the patterns. Not built in this group; nothing outside the JDK is needed when it is.
+
+#### Left
+
+- The engine's parts: the SLF4J provider writing to a `LogInbox`, settings as `ConsoleVariables`, the
+  `HistoryStore`, `ScriptSource`, `AssetProvider`, `NodeProvider` and `ConsolePermissions`, the `ui.console.toggle`
+  action producing `CONSOLE_TOGGLE` (and `COMPLETE`, `HISTORY_UP/DOWN` while the command line has the text context),
+  registering `ConsoleTunables.all()`, and the console as a world panel in VR (a world-space `Ui` holding the
+  console and a virtual keyboard, anchored to the hand or in front).
+- The log flood at 1,000 lines a frame is above 0.3 ms: shaping the visible rows' new text dominates (a cache of
+  shaped runs for repeated messages would help); to measure again on a quiet machine.
+- The controls gallery pseudo-localised shows truncation and overflow in other areas' controls (`TextSettingsTest`
+  prints them); not fixed here.
+- The OS accessibility bridge (above).
+
+### Group A3, scene (2026-11-04): local branch a3-scene
+
+Scene picking, world panels and camera views (`ui-scene`), and 3D gizmos with the view cube and XR grabs
+(`ui-gizmo`): stage 4's leftovers and stage 12. Both modules sit on `ui-controls` (they draw and style through `Ui`)
+and `scene-core`; scene gains one method (below), on the local scene branch `a3-scene-raycast`.
+
+#### Built
+
+| Part | Built | Where |
+|---|---|---|
+| Picking beyond the screen | `WorldPicking` in `ui-core`: after the screen layers' hit test (unless a blocking layer stopped it) the scene bridge appends what each pointer's world ray hits, nearest first, as elements standing for scene nodes and panels (on a hidden `scene` layer that takes no screen input and draws nothing), so the one `Interaction` routes them: capture and bubble, pass-through, pointer capture, hover, clicks with counts, long press, context, wheel, tooltips, drag and drop with one `DragSession`. `Pointer.ray` (doubles) for XR pointers and screen pointers whose ray the engine knows | `ui-core` `event.WorldPicking`, `Interaction.worldPicking`, `input.Pointer` |
+| `Interactive` | The component (a sparse set by node slot in `ScenePicking`; scene-core has no component stores yet, D46): listeners for any mask through `UiListener`, capture listeners, narrow phase `BOUNDS`, `MESH` (`PickMesh`) or `CUSTOM` (`NarrowPhase`), hooks for a tooltip (a scene tooltip overlay anchored to the node's projected box), a context menu (`Menu.openAt`), a drag payload and accepted drop formats. Adding puts the node on the interactive `SceneLayer`; a node's element sits under its nearest interactive scene-graph ancestor's, so events bubble up the scene graph; `node(event)`, `targetNode`, `hitPoint`, `hitDistance`, `ray(pointerId)`, `hovered`, `pressed` | `ui-scene` `Interactive`, `ScenePicking` |
+| Scene picking | `SpatialIndex.raycast(..., interactive mask, RayFilter, hit)` with each node's narrow phase; up to `ui.pick.sceneHits` objects along the ray (each further one a raycast skipping those found) for pass-through; screen pointers take the ray of the camera view they are over or the main `SceneView`, XR pointers their own (`ui.pick.rayLength`) | `ScenePicking.pick` |
+| Mesh narrow phase | `PickMesh`: positions and indices in the mesh's space, a triangle `Bvh` (common-math) built on the first ray that reaches the mesh, shared by every node showing it (the engine keeps it with the mesh asset); the world ray goes into the node's space (translation, rotation, per-axis scale), distances stay those of the world ray | `PickMesh`, `ScenePicking.mesh` |
+| World panels | `WorldPanel`: a world-space `Ui` on a rectangle placed in the world or following a node; the ray against its plane, then the panel UI's own 2D hit test at the local pixel (a panel where nothing is hit lets the ray through unless it is opaque, `passThrough(false)`), merged by distance with the scene's hits; `ScenePicking.input` hands each panel the pointers whose front-most hit it is (or that its UI captured, at their point on its plane even off it) and `update` updates the panels at their sizes. `transform()` gives the engine the panel's world transform and pixel size for drawing | `WorldPanel`, `ScenePicking.input/update` |
+| `SceneView`, anchors | A camera as the UI sees it (doubles, camera-relative maths): rays from UI points, projection, units per pixel, perspective or orthographic, a viewport in UI pixels. `SceneAnchor`: an `OverlayAnchor` at a world point or a node's projected box | `SceneView`, `SceneAnchor` |
+| Camera views | `CameraView`: a `camera-view` element showing the newest finished image of a `CameraViewSource` (a `UiTexture` and the image's size in it, asked for at the control's pixel size every frame; frames in flight show the last finished image, stretched, so the main view waits for nothing), its frame from the theme, tinted by `color`; pointers over it pick through its camera; markers are overlays anchored through its view (`marker`, `anchor`). `FakeCameraSource` (test fixture) renders a map picture a frame after each request | `CameraView`, `CameraViewSource`, `scene/src/testFixtures` |
+| Gizmos | `Gizmo`: translate (axes, planes, screen centre), rotate (axis rings, view ring, trackball), scale (axes, uniform), bounds (8 corners, 6 faces, the opposite side fixed), universal; spaces local, world, parent, view (`GIZMO_TOGGLE_SPACE` cycles, `GIZMO_PREVIOUS_SPACE` back); pivots (`GIZMO_NEXT_PIVOT`/`GIZMO_PREVIOUS_PIVOT` cycle) median, individual, active, cursor, bounds centre; a multi-node selection (children of selected nodes follow their parents, not moved twice); `GIZMO_TRANSLATE/ROTATE/SCALE/BOUNDS/UNIVERSAL`, `GIZMO_NEXT_MODE`; `GIZMO_CANCEL`, `CANCEL` or a right click cancel and restore, `ACCEPT` commits; snapping to `ui.gizmo.snapTranslate/snapRotate/snapScale` while `Pointer.GIZMO_SNAP` is held (or the reverse, `ui.gizmo.snapByDefault`); typed values while dragging (distance, degrees, factor; `DELETE_BACK` edits); `GizmoListener` begin, update, commit, cancel with `GizmoTransforms` (local transforms for undo) | `ui-gizmo` `Gizmo`, `GizmoSolver`, `GizmoApply`, `GizmoShapes` |
+| Drag solving | In doubles relative to the gizmo's origin: the ray against the axis line (closest points), the handle's plane, the view plane; rings by the angle on their plane, or by the pointer's angle about the projected centre when seen edge-on (as Blender does); the trackball by screen motion; results applied to each node's world transform about the pivot, then into its parent's space (`setLocal`) | `GizmoSolver`, `GizmoApply` |
+| Gizmo picking and drawing | Analytic shapes (segments, rings of 48 segments, squares, spheres) against the ray with `ui.gizmo.pickTolerance` pixels (XR rays: `ui.gizmo.xrPickAngle` degrees), the nearest miss winning, before the scene's objects (`HandlePicker`); axes seen end-on and planes edge-on are hidden. Drawn as projected primitives on the `overlay` layer at a screen-constant size (`gizmo-size` height; XR: `ui.gizmo.xrAngularSize` from the head), filled shapes (planes, arrow tips, the view cube's faces) as triangles (`DrawList.triangle`); every colour, width and size from style parts, `:hover` on the hovered handle's part, `:pressed` while dragged. Hidden parts faded (UI26) by `gizmo-occluded`'s opacity as a `GizmoOcclusion` says: the back halves of rings always; the scene by `RayOcclusion` (the `SpatialIndex` by boxes, the selection ignored) or the engine's depth test | `Gizmo`, `GizmoShapes`, `GizmoOcclusion`, `RayOcclusion` |
+| View cube | `ViewCube`: a `view-cube` element with the cube turned as the camera sees it (faces, edges, a hovered marker from parts); click a face, edge or corner: `Listener.align` with the camera rotation looking from there (world up kept); drag: `Listener.orbit` (`ui.viewCube.orbitSpeed`) | `ViewCube` |
+| XR | Ray picking and dragging of handles; `GizmoGrab`: a direct grab (a grip with the hand in a selected node's box, `ui.gizmo.xrGrabRadius`, or at the gizmo's centre) follows the hand rigidly; two hands move with their midpoint, turn with the line between them and scale with their distance; snapping by a held snap; the same undo hooks; fed from the `ui.gizmo` grab actions and hand poses by engine-ui's `XrGizmoGrab` (group A3, gizmoact) | `GizmoGrab` |
+| Styles and settings | `_scene.tss` and `_scene-test.tss` (one `@import` each in both themes): `camera-view`, `gizmo` and its parts, `view-cube` and its parts, `panel.minimap-marker`; no new style keys (parts read `color`, `opacity`, `width`, `height`, `radius`). Tunables reach `Ui.tunables()` through a new `TunableHolder` service (`ui-core`), which `Ui.tunables()` loads: `SceneTunables`, `GizmoTunables` | themes, `Ui.tunables`, `TunableHolder` |
+| Gallery | `SceneGallery` (`ui-gizmo` test fixture): a synthetic scene behind five gizmos (one per mode, one hovered, one partly occluded), a view cube, a minimap with a fake picture and a marker; in `GallerySanityTest` and `ScenePreviewTest` (both themes) | `gizmo/src/testFixtures` |
+| scene | `SpatialIndex.raycast(..., layerMask, RayFilter, Hit)`: a narrow phase decides each reached node's distance (or a miss); boxes beyond the nearest hit so far are not tested | scene `a3-scene-raycast` (ddadbd5) |
+
+#### Decisions
+
+- *Scene nodes and panels as elements*, not a second event system: each interactive node and panel has an element of
+  its own on a hidden layer, so routing, capture, click counts, long presses, drag sessions and states are the screen
+  UI's code. Costs an element per interactive node (1,000 at 1%), allocated when the component is added.
+- *A narrow phase inside the index's raycast* (the one scene change): without it the index answers only the nearest
+  box, and a mesh missed inside its box would hide everything behind it.
+- *World panels are UIs of their own* (`worldSpace`), fed pointers by the bridge; their elements route within their
+  own UI. A drag session therefore does not cross from a world panel to the scene or the screen UI (screen UI and
+  scene nodes share one session).
+- *A camera view element is transparent to clicks* unless it listens itself: pointers over it pick through its camera
+  by its rectangle, so a click on the minimap reaches the scene object under it.
+- *Gizmos drawn by the UI* as projected lines and boxes on the overlay layer (the engine needs nothing to show them);
+  ~~filled planes, tips and cube faces are abutting lines until the draw list has a polygon primitive~~: triangles since the merge.
+- *Occlusion through an interface*: the engine's depth test is exact; `RayOcclusion` (boxes, this frame) works without
+  it. Hidden parts are faded, never hidden (UI26).
+- *Drags update in the frame phase* from the captured pointer's ray each frame, not from MOVE events, so XR rays (whose
+  screen position does not move) drag as mice do.
+
+#### Tests
+
+- `ScenePickingTest`: clicks with counts, hover states, pass-through to nodes behind and from screen elements, capture
+  off the node, bubbling to interactive ancestors (and back on removal), mesh triangles against boxes, custom narrow
+  phases, XR recorded poses, drag and drop from a list slot to a 3D node and back in one session, world panels (local
+  points, pass-through, opaque, following a node, capture off the rectangle), context menus, tooltips, wheel and long
+  press on nodes, camera views picking through their camera, pruning.
+- `ScenePickingBenchmarkTest`: counted narrow-phase visits at 100,000 nodes (tests only of interactive nodes whose
+  boxes the ray enters) and the timing benchmark below. `SceneAllocationTest`: pointers over nodes, meshes, a panel
+  and a minimap, presses, drags, an XR ray sweeping: allocation-free.
+- `GizmoTest`: the X arrow dragged 10,000 km from the origin moves the node exactly along x; snapping; typed values and
+  cancel restoring the start (undo hooks in order); every pivot for two nodes 10,000 km out; scale by axis, uniform
+  and a bounds face; spaces with a turned parent; trackball, view ring, a right click cancelling; the pixel tolerance.
+  `GizmoXrAndViewCubeTest`: an XR ray picking and dragging a handle; a recorded hand grab (rigid follow), two-handed
+  scale, cancel; the view cube's alignments, hover, click and orbit. `WorldPickingTest` (`ui-core`): world hits after
+  screen hits, pass-through, a blocking layer.
+- `GallerySanityTest.sceneGallery` (both themes); CPU previews `scene-gallery.png`, `scene-gallery-test-theme.png`.
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo, other builds running: noisy)
+
+| Target | Budget | Measured |
+|---|---|---|
+| Picking per pointer, 100,000 nodes (a fifth dynamic), 1% interactive, bounds | ≤ 20 µs | 3.6 µs median, 13.3 µs p99 (`ScenePickingBenchmarkTest`, half the pointers on interactive nodes) |
+| The same, mesh narrow phase (320-triangle spheres) | ≤ 50 µs | 3.2 µs median, 11.5 µs p99 |
+| Narrow-phase tests of nodes without `Interactive` | 0 | 0 (1.15 tests a pick, all of interactive nodes the ray reaches) |
+
+#### Left
+
+- GPU picking (ID buffer, TLAS ray query; UI5: skinned objects) and its benchmark against the CPU path: the engine's.
+- Vertex and surface snapping for gizmos (through `SpatialIndex` and mesh BVHs), typed values for plane handles and
+  bounds (two or three numbers), axis constraint keys (Blender's G then X).
+- A polygon (or quad) primitive in the draw list would draw plane handles, arrow tips and cube faces exactly.
+- Drag sessions across world panels and the scene; component stores in scene-core (D46) to hold `Interactive`.
+
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 
 Two options of docking's windows: a paper white per window, and windows see-through while dragged.
@@ -1822,9 +2662,9 @@ two phases (no frame of latency for the game's changes), built-in icons and touc
 
 #### Left
 
-- Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
+- ~~Flex items shrink to their padding (Yoga's choice) instead of CSS's automatic minimum (min-content): a squeezed
   label's text overflows its box rather than the row overflowing. The galleries use minimum sizes; a layout change is
-  its own step (the Yoga oracle tests pin the current behaviour).
+  its own step (the Yoga oracle tests pin the current behaviour).~~ Built: see "Group A3, render".
 - `LayoutSanity` tolerates italic overhang by a share of the ink's height; it does not check text against elision
   (no element elides yet) nor overlaps across layers (pop-ups are meant to cover).
 - Touch handles are not magnified (no loupe) and do not scroll a field while dragged past its edge.
@@ -1920,13 +2760,26 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
 - From the branches: ~~incremental shaping of very long paragraphs~~ (built: below), ~~touch selection handles~~,
   spell checking,
   grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
-  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
-  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  `keyboardResize` and `focusNext` (windows); ~~a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms~~ (built: "Group A3, render"), mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
   the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
+  ~~spell checking~~,
+  ~~grapheme-level password masking~~ (built: group A3 controls) (text); OS windows for docking, bindings of the
+  `ui` group for `keyboardMove`, `keyboardResize` and `focusNext` (the commands are handled since group A3 controls;
+  the engine's bindings are left) (windows); a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms, ~~mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  the colour picker~~ (built: group A3 controls) (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
   records by their
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
-  (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources
+  (data); ~~world panels, scene picking (`Interactive`, the mesh BVH)~~ (built: Group A3, scene, above), GPU picking,
+  touch, pen and XR pointer sources
   (groundwork).
+  `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
+  primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
+  the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), ~~renderers chosen by a style key,~~
+  ~~records by their metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look
+  for lazy tree nodes~~ (data: built, see "Group A3, data"); world panels, scene picking (`Interactive`, the mesh
+  BVH, GPU picking), touch, pen and XR pointer sources (groundwork).
 
 ### Group A1 (2026-11-03): built, local branches, not yet in CI
 
@@ -1966,14 +2819,16 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 
 **Left from A1:**
 - ~~The `Ui` engine plugin~~: built in A2 (`UiPlugin`).
-- Stage 2's binding, lenses, converters and effect channels (A2 built value renderers and editors, validators of
-  text, tweens, style transitions and `scale` drawn by per-range transforms).
+- Stage 2's ~~binding, lenses, converters~~ (built in A3, props: `ui-core` `bind`) and effect channels (A2 built
+  value renderers and editors, validators of text, tweens, style transitions and `scale` drawn by per-range
+  transforms).
 - ~~`common-state`'s `VersionedTree` and `VersionedRingBuffer`~~: built after A2 (`VersionedTree`,
   `VersionedDoubleRing`/`VersionedFloatRing`, below).
-- SVG icons through NanoSVG; atlas page eviction (colour emoji: built in A2, CBDT).
+- ~~SVG icons through NanoSVG; atlas page eviction~~ (built in "Group A3, render", SVG by a parser of our own;
+  colour emoji: built in A2, CBDT).
 - Touch, pen and XR pointer sources (the IME rectangle: built in A2).
 - 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
-- A multi-range dirty list: one range per list spans all changed elements of a frame.
+- ~~A multi-range dirty list: one range per list spans all changed elements of a frame.~~ Built: "Group A3, render".
 - ~~Colour emoji without a bundled font~~: Noto Color Emoji is bundled in A2 (`ui-fonts-emoji`).
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
 

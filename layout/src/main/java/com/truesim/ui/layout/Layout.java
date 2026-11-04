@@ -159,6 +159,7 @@ public final class Layout {
     float[] scrollX;
     float[] scrollY;
     private boolean[] independent;
+    boolean[] clipsContent;
     private boolean[] scrollMoved;
     private int[] scrollQueue = new int[16];
     private int scrollQueueCount;
@@ -187,6 +188,15 @@ public final class Layout {
     float[] sTarget;
     float[] sCross;
     float[] sTemp;
+    float[] sAutoMin; // a flex item's automatic minimum main size, NaN until needed in this run
+    // per slot, its min-content main size and what it was measured for (cross size, modes, owner sizes), kept until
+    // its layout changes: an unchanged item does not measure it again
+    float[] amValue;
+    float[] amKey;
+    int[] amModes;
+    boolean[] amValid;
+    float[] sCrossAvail; // the cross size its flex base size was measured in, for its min-content measure
+    int[] sCrossMode;
     boolean[] sFrozen;
     int[] sCol;
     int[] sRow;
@@ -718,6 +728,20 @@ public final class Layout {
         return this;
     }
 
+    /**
+     * Declares that the element clips its content (CSS {@code overflow} other than visible: a clipping or scrolling
+     * element), so as a flex item its automatic minimum size is 0, not its min-content size: it may shrink below its
+     * content, which it cuts or scrolls. Default off.
+     */
+    public Layout clipsContent(int slot, boolean value) {
+        own(slot);
+        if (clipsContent[slot] != value) {
+            clipsContent[slot] = value;
+            changed(slot);
+        }
+        return this;
+    }
+
     /** Which way an anchored element grows past its anchors to reach its minimum size (default end). */
     public Layout growDirection(int slot, GrowDirection horizontal, GrowDirection vertical) {
         own(slot);
@@ -859,9 +883,11 @@ public final class Layout {
         scrollX[s] = 0;
         scrollY[s] = 0;
         independent[s] = false;
+        clipsContent[s] = false;
         scrollMoved[s] = false;
         lcValid[s] = false;
         mcCount[s] = 0;
+        amValid[s] = false;
         laidOutAt[s] = 0;
         relX[s] = 0;
         relY[s] = 0;
@@ -940,6 +966,7 @@ public final class Layout {
         scrollX = grow(scrollX, n);
         scrollY = grow(scrollY, n);
         independent = grow(independent, n);
+        clipsContent = grow(clipsContent, n);
         scrollMoved = grow(scrollMoved, n);
         lcValid = grow(lcValid, n);
         lcAw = grow(lcAw, n);
@@ -962,6 +989,13 @@ public final class Layout {
         sTarget = grow(sTarget, n);
         sCross = grow(sCross, n);
         sTemp = grow(sTemp, n);
+        sAutoMin = grow(sAutoMin, n);
+        amValue = grow(amValue, n);
+        amKey = amKey == null ? new float[n * 3] : Arrays.copyOf(amKey, n * 3);
+        amModes = grow(amModes, n);
+        amValid = grow(amValid, n);
+        sCrossAvail = grow(sCrossAvail, n);
+        sCrossMode = grow(sCrossMode, n);
         sFrozen = grow(sFrozen, n);
         sCol = grow(sCol, n);
         sRow = grow(sRow, n);
@@ -1129,6 +1163,7 @@ public final class Layout {
             invalidAt[s] = update;
             lcValid[s] = false;
             mcCount[s] = 0;
+            amValid[s] = false;
             if (store.isRoot(s)) {
                 return;
             }

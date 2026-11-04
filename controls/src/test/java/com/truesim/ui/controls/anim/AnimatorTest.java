@@ -187,6 +187,42 @@ class AnimatorTest {
     }
 
     @Test
+    void aScaledClippingPanelClipsItsContentWhereItDraws() {
+        Rig r = new Rig();
+        Element outer = r.panel(null);
+        Element clipper = r.ui.panel(null);
+        outer.add(clipper);
+        r.ui.styles().inline(clipper.slot(), com.truesim.ui.style.InlineStyle.builder()
+            .set(com.truesim.ui.style.Styles.CLIP, true).build());
+        Element inner = r.ui.panel(null); // 100 wide like its parent: passes it by its offset
+        clipper.add(inner);
+        r.frame(16);
+        DrawList list = r.ui.layers()[0];
+        int at = r.ui.store().rangeStart(inner.slot());
+        int clip = Primitive.clip(list.header(at));
+        assertThat(clip).isNotZero();
+        float[] c = new float[5];
+        list.drawnClip(clip, c);
+        float x = r.ui.layout().x(clipper.slot());
+        assertThat(c[2] - c[0]).isEqualTo(100, offset(0.01f));
+        r.ui.visuals().scale(outer, 2); // first time: an entry, the subtree records once
+        r.frame(16);
+        list.clean();
+        r.ui.visuals().scale(outer, 3); // then the entry alone
+        r.ui.visuals().translate(outer, 5, 0);
+        r.frame(16);
+        assertThat(list.dirtyRanges().isEmpty()).isTrue();
+        assertThat(list.clipsDirty()).as("the clip is drawn by the entry: unchanged").isFalse();
+        list.drawnClip(clip, c);
+        float cx = x + 50;
+        assertThat(c[0]).as("the clip moved and scaled with its owner").isEqualTo(cx + 3 * (x - cx) + 5,
+            offset(0.01f));
+        assertThat(c[2] - c[0]).isEqualTo(300, offset(0.01f));
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(c[0], offset(0.01f));
+        com.truesim.ui.testkit.LayoutSanity.assertSane(r.ui, "a scaled clipping panel");
+    }
+
+    @Test
     void transformsAndOpacityApplyToTheSubtree() {
         Rig r = new Rig();
         Element outer = r.ui.panel(null);
@@ -203,16 +239,29 @@ class AnimatorTest {
         r.frame(16);
         assertThat(v.transformed(outer.slot())).isTrue();
         float cx = r.ui.layout().x(outer.slot()) + r.ui.layout().width(outer.slot()) / 2;
-        assertThat(list.floatAt(at, Primitive.X0)).isEqualTo(cx + 2 * (x0 - cx), offset(0.01f));
-        assertThat(Rgba.a(list.colorAt(at, Primitive.COLOR_A))).isEqualTo(0.5f, offset(0.01f));
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(cx + 2 * (x0 - cx), offset(0.01f));
+        assertThat(list.floatAt(at, Primitive.X0)).as("recorded untransformed").isEqualTo(x0);
+        assertThat(list.drawnOpacity(at)).isEqualTo(0.5f, offset(0.01f));
+        assertThat(Rgba.a(list.baked().colorAt(at, Primitive.COLOR_A))).isEqualTo(0.5f, offset(0.01f));
+        list.clean();
+        v.scale(outer, 3); // the entry is rewritten, no primitive
+        v.opacity(outer, 0.25f);
+        r.frame(16);
+        assertThat(list.dirtyRanges().isEmpty()).isTrue();
+        assertThat(list.transformRanges().isEmpty()).isFalse();
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(cx + 3 * (x0 - cx), offset(0.01f));
+        assertThat(list.drawnOpacity(at)).isEqualTo(0.25f, offset(0.01f));
+        v.scale(outer, 2);
+        v.opacity(outer, 0.5f);
         v.translate(inner, 10, 0);
         r.frame(16);
-        assertThat(list.floatAt(at, Primitive.X0)).isEqualTo(cx + 2 * (x0 - cx) + 20, offset(0.01f));
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(cx + 2 * (x0 - cx) + 20, offset(0.01f));
         v.clear(outer, Visuals.SCALE | Visuals.OPACITY);
         v.clear(inner, Visuals.TRANSLATE);
         v.clear(inner, Visuals.TRANSLATE);
         r.frame(16);
-        assertThat(list.floatAt(at, Primitive.X0)).isEqualTo(x0);
+        assertThat(list.drawnX(at, Primitive.X0)).isEqualTo(x0);
+        assertThat(list.drawnOpacity(at)).isEqualTo(1);
         r.ui.layout().width(outer.slot(), 300, Unit.PX);
         v.scale(outer, 1.5f);
         r.frame(16);

@@ -59,9 +59,9 @@ public final class DatePicker extends Control {
         this.firstDay = WeekFields.of(locale).getFirstDayOfWeek();
         this.today = LocalDate.now();
         Element header = part("date-header");
-        previous = new Button(controls, "previous", null, "Previous month");
+        previous = new RepeatButton(controls, "previous", null, "Previous month");
         previous.element().id("previous");
-        next = new Button(controls, "next", null, "Next month");
+        next = new RepeatButton(controls, "next", null, "Next month");
         next.element().id("next");
         title = label("");
         header.add(previous.element()).add(title).add(next.element());

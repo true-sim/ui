@@ -116,7 +116,7 @@ public final class LayoutSanity {
             int root = ui.layerStack().at(li).rootSlot();
             inks.clear();
             covers.clear();
-            walk(root, lists[li]);
+            walk(root, lists[li].baked()); // where primitives draw: transforms and clip offsets applied
             overlaps();
         }
     }
@@ -381,17 +381,22 @@ public final class LayoutSanity {
             && list.drawnX(i, Primitive.X1) > x1 + 0.5f && list.drawnY(i, Primitive.Y1) > y1 + 0.5f;
     }
 
-    /** The clip rectangle of the nearest clipping ancestor (its box within its own ancestors' clips), or null. */
+    /**
+     * The clip rectangle of the nearest clipping ancestor (its box within its own ancestors' clips, each where it draws:
+     * scaled and moved by its opacity, scale and offset), or null.
+     */
     private float[] clipOfAncestor(int slot) {
         float[] c = null;
         for (int a = store.parent(slot); a != UiStore.NONE; a = store.parent(a)) {
             if (!ui.styles().styleOf(a).get(Styles.CLIP)) {
                 continue;
             }
-            float x0 = layout.x(a);
-            float y0 = layout.y(a);
-            float x1 = x0 + layout.width(a);
-            float y1 = y0 + layout.height(a);
+            ui.visuals().compose(a); // where it cuts: scaled and moved as it draws
+            float k = ui.visuals().composedScale();
+            float x0 = layout.x(a) * k + ui.visuals().composedX();
+            float y0 = layout.y(a) * k + ui.visuals().composedY();
+            float x1 = x0 + layout.width(a) * k;
+            float y1 = y0 + layout.height(a) * k;
             if (c == null) {
                 c = new float[] {x0, y0, x1, y1};
             } else {

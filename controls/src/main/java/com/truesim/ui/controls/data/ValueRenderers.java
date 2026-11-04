@@ -18,12 +18,15 @@ import java.util.Set;
  * Renderers by type (design 4.3). {@link #find} resolves a class in this order, once per class (then a map lookup):
  * <ol>
  *   <li>a renderer registered for exactly that class;</li>
- *   <li>for records, the records renderer ({@link #records}) when one is set (later: by the record's metadata);</li>
+ *   <li>for records, the records renderer ({@link #records}): by default their components through cached
+ *       reflection (a {@code record-view} of {@code record-field}s);</li>
  *   <li>one registered for a superclass, then for an interface (nearest first);</li>
  *   <li>the built-ins: {@code Enum}, {@code Number}, {@code CharSequence}, {@code Boolean}, vectors and colours;</li>
  *   <li>{@code String.valueOf} as text.</li>
  * </ol>
- * Controls take a registry or a renderer of their own; {@link #named} keeps renderers by name for configuration.
+ * Controls take a registry or a renderer of their own; {@link #named} keeps renderers by name for configuration and
+ * for styles ({@link DataStyles#RENDERER}: {@code renderer: number}); the built-ins are named {@code text},
+ * {@code number}, {@code check}, {@code enum}, {@code vector}, {@code color} and {@code record}.
  * {@link #dynamic()} renders mixed values (a list of {@code Object}), choosing per value and recycling per renderer
  * and kind.
  */
@@ -39,7 +42,7 @@ public final class ValueRenderers {
     private final Map<ValueRenderer<?>, Integer> idOf = new HashMap<>();
     private final List<Class<?>> builtinTypes = new ArrayList<>();
     private final List<ValueRenderer<?>> builtins = new ArrayList<>();
-    private ValueRenderer<? super Record> records;
+    private ValueRenderer<? super Record> records = new RecordRenderer(this);
     private final ValueRenderer<Object> fallback = Renderers.text();
     private final Dynamic dynamic = new Dynamic();
 
@@ -55,6 +58,13 @@ public final class ValueRenderers {
         builtin(Vec3.class, vectors);
         builtin(Vec4.class, vectors);
         builtin(Color.class, Renderers.color());
+        names.put("text", fallback);
+        names.put("number", builtins.get(1));
+        names.put("check", builtins.get(3));
+        names.put("enum", builtins.get(0));
+        names.put("vector", vectors);
+        names.put("color", builtins.get(builtins.size() - 1));
+        names.put("record", records);
     }
 
     @AllowAllocation("registries are made when a UI is built")
@@ -71,7 +81,10 @@ public final class ValueRenderers {
         return this;
     }
 
-    /** Uses {@code renderer} for records without a renderer of their own; returns this. */
+    /**
+     * Uses {@code renderer} for records without a renderer of their own (by default their components by metadata:
+     * the renderer named {@code record}); null turns records over to the later steps. Returns this.
+     */
     public ValueRenderers records(ValueRenderer<? super Record> renderer) {
         records = renderer;
         resolved.clear();
@@ -103,6 +116,11 @@ public final class ValueRenderers {
     @AllowAllocation("once per class")
     private ValueRenderer<?> resolve(Class<?> type) {
         ValueRenderer<?> r = registered.get(type);
+        for (int i = 0; r == null && i < builtinTypes.size(); i++) {
+            if (builtinTypes.get(i) == type) {
+                r = builtins.get(i); // a built-in of exactly this class (vectors and colours are records)
+            }
+        }
         if (r == null && type.isRecord() && records != null) {
             r = records;
         }
@@ -177,7 +195,12 @@ public final class ValueRenderers {
     }
 
     /** {@link #dynamic()}. */
-    private final class Dynamic implements ValueRenderer<Object> {
+    final class Dynamic implements ValueRenderer<Object> {
+
+        /** The registry it chooses from. */
+        ValueRenderers registry() {
+            return ValueRenderers.this;
+        }
 
         @Override
         public int kind(Object value) {

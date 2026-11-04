@@ -114,6 +114,11 @@ public final class Styles {
         StyleKey.of("text-decoration", TextDecoration.class, TextDecoration.NONE);
     /** The character a password field shows for each of its characters ({@code "•"}); empty: the text itself. */
     public static final StyleKey<String> TEXT_MASK = StyleKey.of("text-mask", StyleTypes.string(), "");
+    /**
+     * Whether a label's text wraps at its box's width ({@code true}, the default) or stays on one line ({@code false}:
+     * a log line, a cell; clip the box to cut what does not fit).
+     */
+    public static final StyleKey<Boolean> TEXT_WRAP = StyleKey.of("text-wrap", StyleTypes.bool(), true);
 
     // ---------------------------------------------------------------- layout of the children
 

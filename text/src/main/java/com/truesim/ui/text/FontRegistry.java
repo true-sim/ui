@@ -65,7 +65,24 @@ public final class FontRegistry {
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof ChainKey k && weight == k.weight && italic == k.italic && families.equals(k.families);
+            return o instanceof ChainKey k && weight == k.weight && italic == k.italic && same(families, k.families);
+        }
+
+        /** Equal lists, compared by index: List.equals walks an iterator (an allocation without escape analysis). */
+        private static boolean same(List<String> a, List<String> b) {
+            if (a == b) {
+                return true;
+            }
+            int n = a.size();
+            if (n != b.size()) {
+                return false;
+            }
+            for (int i = 0; i < n; i++) {
+                if (!a.get(i).equals(b.get(i))) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         @Override

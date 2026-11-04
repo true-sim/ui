@@ -41,6 +41,16 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * job's bitmap is installed (their pages' layout follows the order jobs finish; what is drawn does not). They share
  * the lane, the per-frame budget and the placeholder rule, and are not cached on disk.
  *
+ * <p><b>Eviction.</b> MTSDF and raster pages are kept up to {@link AtlasSettings#maxPages()}: when a glyph needs a new
+ * page past it, the least recently used page (by the last frame one of its glyphs was looked up or installed) is
+ * cleared and packed again, unless it is drawn ({@link #pageGuard}: the UI says which pages its draw lists use, so a
+ * visible glyph is never evicted) or still has glyphs generating; with no such page the atlas grows past the budget.
+ * An evicted glyph's entry keeps its number and becomes {@link #EVICTED}; {@link #generation()} grows, so text looks
+ * its glyphs up again ({@link #entry} queues an evicted glyph again) and draws it once it is generated again. Colour
+ * pages are not evicted.
+ *
+ * <p><b>Icons</b> are glyphs of an {@link IconFace}: {@link SvgIcon} outlines, generated, packed and evicted as text.
+ *
  * <p>Used from the UI thread; only the generator and rasterizer run elsewhere.
  */
 public final class GlyphAtlas {
@@ -53,6 +63,8 @@ public final class GlyphAtlas {
     public static final byte READY = 3;
     /** Nothing to draw: no ink (a space), or it failed. */
     public static final byte EMPTY = 4;
+    /** Its page was evicted: looked up again ({@link #entry}), it is queued again. */
+    public static final byte EVICTED = 5;
 
     /** Pixels added on each side of a raster glyph's outline bounds: hinting moves edges by less than this. */
     public static final int RASTER_PAD = 2;
@@ -79,6 +91,12 @@ public final class GlyphAtlas {
     private long settingsVersion;
     private final List<UiTexture> pages = new ArrayList<>();
     private int pageCount;
+    private int current; // the page being packed
+    private long[] pageUsed = new long[8]; // per page: the frame one of its glyphs was last looked up or installed
+    private int[] pagePending = new int[8]; // per page: glyphs reserved on it still generating
+    private long frame;
+    private int evictions;
+    private java.util.function.IntPredicate pageGuard;
     private final SkylinePacker packer;
 
     private final LongIntMap index = new LongIntMap(1024);
@@ -87,6 +105,7 @@ public final class GlyphAtlas {
     private FontFace[] faces = new FontFace[256];
     private byte[] states = new byte[256];
     private int[] pageIds = new int[256];
+    private int[] pageIndex = new int[256]; // the index of its page among the MTSDF and raster pages, or -1
     private int[] slotX = new int[256];
     private int[] slotY = new int[256];
     private int[] widths = new int[256];
@@ -156,6 +175,7 @@ public final class GlyphAtlas {
             pageSize = size;
         }
         pageCount = 0;
+        current = 0;
         newPage();
         if (size != colorPageSize) {
             colorPages.clear();
@@ -184,6 +204,13 @@ public final class GlyphAtlas {
 
     @AllowAllocation("a new page, when one is full")
     private void newPage() {
+        if (pageCount >= Math.max(1, (int) settings.maxPages().get())) {
+            int victim = leastRecentlyUsed();
+            if (victim >= 0) {
+                evict(victim);
+                return;
+            }
+        }
         UiTexture page;
         if (pageCount < pages.size()) {
             page = pages.get(pageCount); // reused after a restart: clear it
@@ -193,8 +220,74 @@ public final class GlyphAtlas {
             page = textures.create("glyph atlas " + pages.size(), pageSize, pageSize, UiTexture.Format.RGBA8_UNORM);
             pages.add(page);
         }
+        if (pageCount == pageUsed.length) {
+            pageUsed = Arrays.copyOf(pageUsed, pageCount * 2);
+            pagePending = Arrays.copyOf(pagePending, pageCount * 2);
+        }
+        pageUsed[pageCount] = frame;
+        pagePending[pageCount] = 0;
+        current = pageCount;
         pageCount++;
         packer.reset(pageSize, pageSize);
+    }
+
+    /**
+     * The page to evict: the least recently used one that is not the current page, not used this frame, has no glyph
+     * generating and is not drawn ({@link #pageGuard}); -1 if none may go.
+     */
+    private int leastRecentlyUsed() {
+        int best = -1;
+        for (int i = 0; i < pageCount; i++) {
+            if (i == current || pageUsed[i] >= frame || pagePending[i] > 0
+                || pageGuard != null && pageGuard.test(pages.get(i).id())) {
+                continue;
+            }
+            if (best < 0 || pageUsed[i] < pageUsed[best]) {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** Clears page {@code i} for new glyphs: its glyphs become {@link #EVICTED}, it becomes the current page. */
+    private void evict(int i) {
+        UiTexture page = pages.get(i);
+        int id = page.id();
+        for (int e = 0; e < count; e++) {
+            if (pageIndex[e] == i && pageIds[e] == id && !isColor(e)) {
+                states[e] = EVICTED;
+                pageIds[e] = 0;
+                pageIndex[e] = -1;
+                Arrays.fill(uvs, e * 4, e * 4 + 4, 0);
+            }
+        }
+        Arrays.fill(page.pixels(), (byte) 0);
+        page.markDirty(0, 0, pageSize, pageSize);
+        pageUsed[i] = frame;
+        current = i;
+        packer.reset(pageSize, pageSize);
+        evictions++;
+    }
+
+    /**
+     * Tells the atlas which pages are drawn ({@code drawn.test(textureId)}): never evicted. The UI's frame sets it to
+     * a scan of its draw lists, run only when a page is to be evicted. Null: any page may go.
+     */
+    public void pageGuard(java.util.function.IntPredicate drawn) {
+        pageGuard = drawn;
+    }
+
+    /** Pages evicted so far. */
+    public int evictions() {
+        return evictions;
+    }
+
+    /**
+     * Grows whenever entries looked up before may have changed their glyphs: the atlas started over ({@link #epoch()})
+     * or evicted a page. Text looks its glyphs up again when it changed.
+     */
+    public int generation() {
+        return epoch + evictions;
     }
 
     /**
@@ -244,6 +337,12 @@ public final class GlyphAtlas {
         long key = (long) face.id() << 48 | (long) size64 << 32 | glyph & 0xFFFFFFFFL;
         int e = index.get(key);
         if (e >= 0) {
+            if (states[e] == EVICTED) {
+                states[e] = QUEUED;
+                enqueue(e);
+            } else if (pageIndex[e] >= 0) {
+                pageUsed[pageIndex[e]] = frame;
+            }
             return e;
         }
         e = add(key, face);
@@ -261,6 +360,7 @@ public final class GlyphAtlas {
         faces[e] = face;
         states[e] = QUEUED;
         pageIds[e] = 0;
+        pageIndex[e] = -1;
         geometries[e] = null;
         Arrays.fill(planes, e * 4, e * 4 + 4, 0);
         Arrays.fill(uvs, e * 4, e * 4 + 4, 0);
@@ -274,6 +374,7 @@ public final class GlyphAtlas {
         faces = Arrays.copyOf(faces, n);
         states = Arrays.copyOf(states, n);
         pageIds = Arrays.copyOf(pageIds, n);
+        pageIndex = Arrays.copyOf(pageIndex, n);
         slotX = Arrays.copyOf(slotX, n);
         slotY = Arrays.copyOf(slotY, n);
         widths = Arrays.copyOf(widths, n);
@@ -307,6 +408,7 @@ public final class GlyphAtlas {
      * changed, the atlas first starts over.
      */
     public void beginFrame() {
+        frame++;
         if (settings.layoutVersion() != settingsVersion) {
             restart();
         }
@@ -426,7 +528,7 @@ public final class GlyphAtlas {
     private MsdfGeometry prepare(int e) {
         FontFace face = faces[e];
         int glyph = (int) keys[e];
-        if (cache != null && cache.matches(emSize, pixelRange)) {
+        if (cache != null && face.source() != null && cache.matches(emSize, pixelRange)) {
             GlyphCache.Glyph cached = cache.get(face.source().key(), glyph);
             if (cached != null) {
                 if (cached.geometry() == null) {
@@ -439,7 +541,7 @@ public final class GlyphAtlas {
         }
         if (!face.outline(glyph, outline) || outline.isEmpty()) {
             markEmpty(e);
-            if (cache != null && cache.matches(emSize, pixelRange)) {
+            if (cache != null && face.source() != null && cache.matches(emSize, pixelRange)) {
                 cache.put(face.source().key(), glyph, null, null);
             }
             return null;
@@ -640,8 +742,17 @@ public final class GlyphAtlas {
     }
 
     private void markEmpty(int e) {
+        settle(e);
         states[e] = EMPTY;
         completions++;
+    }
+
+    /** Entry {@code e}'s reservation is done with (installed or empty): its page may be evicted again. */
+    private void settle(int e) {
+        int i = pageIndex[e];
+        if (i >= 0 && !isColor(e) && pagePending[i] > 0 && (states[e] == GENERATING || states[e] == QUEUED)) {
+            pagePending[i]--;
+        }
     }
 
     private byte[] generate(GlyphOutline o, MsdfGeometry g) {
@@ -684,8 +795,11 @@ public final class GlyphAtlas {
             newPage();
             packer.pack(w, h); // fits: an empty page takes anything up to its size
         }
-        UiTexture page = pages.get(pageCount - 1);
+        UiTexture page = pages.get(current);
         pageIds[e] = page.id();
+        pageIndex[e] = current;
+        pageUsed[current] = frame;
+        pagePending[current]++; // until installed or empty
         slotX[e] = packer.x();
         slotY[e] = packer.y();
         widths[e] = width;
@@ -705,12 +819,14 @@ public final class GlyphAtlas {
             return;
         }
         copy(e, pixels);
-        if (cache != null && geometries[e] != null && cache.matches(emSize, pixelRange)) {
+        if (cache != null && geometries[e] != null && faces[e].source() != null
+            && cache.matches(emSize, pixelRange)) {
             cache.put(faces[e].source().key(), (int) keys[e], geometries[e], pixels);
         }
     }
 
     private void copy(int e, byte[] pixels) {
+        settle(e);
         UiTexture page = textures.get(pageIds[e]);
         byte[] dst = page.pixels();
         int row = widths[e] * 4;

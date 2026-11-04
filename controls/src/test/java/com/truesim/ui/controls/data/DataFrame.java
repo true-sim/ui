@@ -12,7 +12,7 @@ import com.truesim.ui.text.TextSystem;
 final class DataFrame {
 
     /** Plain, exact geometry: 20 px rows, 10 px bars, 10 px buttons, no padding. */
-    static final StyleSheet SHEET = Tss.compileString("data-test.tss", """
+    static final String RULES = """
         root { layout: flex; direction: column; align-items: stretch; }
         panel { layout: stack; }
         label { font-family: "Inter"; font-size: 12px; color: white; line-height: 1.25; }
@@ -40,6 +40,22 @@ final class DataFrame {
         table-cell:selected { background: box(#00ff00); }
         value-editor { layout: flex; grow: 1; }
         value-check { width: 10px; height: 10px; }
+        """;
+
+    static final StyleSheet SHEET = Tss.compileString("data-test.tss", RULES);
+
+    /** The plain rules, with views taking presses in their empty space and the new parts sized. */
+    static final StyleSheet BOXES = Tss.compileString("data-test-boxes.tss", RULES + """
+        list-view, tree-view, table-view { pointer-events: all; }
+        selection-box { background: box(#ff000040); }
+        table-group-row { height: 20px; layout: flex; direction: row; group-indent: 10; }
+        table-group-indent { height: 4px; }
+        table-group-expander { width: 10px; height: 10px; }
+        table-header-group-row { height: 20px; }
+        tree-loading { height: 20px; layout: flex; direction: row; indent: 12; loading-period: 0.3s; }
+        tree-loading-dot { width: 4px; height: 4px; }
+        tree-loading-dot[lit=true] { width: 6px; }
+        list-view[axis=horizontal] list-item { width: 50px; height: auto; }
         """);
 
     final Ui ui;

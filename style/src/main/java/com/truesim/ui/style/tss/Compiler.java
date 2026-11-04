@@ -913,14 +913,15 @@ final class Compiler {
             if (r.declarations.isEmpty()) {
                 continue;
             }
+            String source = r.pos.file() + ":" + r.pos.line();
             for (Selector s : r.parsed) {
                 if (!s.hasPlaceholder()) {
-                    out.add(new Rule(s, r.declarations));
+                    out.add(new Rule(s, r.declarations, source));
                 }
             }
             for (Selector s : r.extended) {
                 if (!s.hasPlaceholder()) {
-                    out.add(new Rule(s, r.declarations));
+                    out.add(new Rule(s, r.declarations, source));
                 }
             }
         }

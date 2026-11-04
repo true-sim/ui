@@ -38,6 +38,7 @@ public final class TreeRows<T> implements RowSource<Node<T>> {
     @SuppressWarnings("unchecked")
     private Node<T>[] flat = (Node<T>[]) new Node<?>[64];
     private int count;
+    private boolean[] placeholder = new boolean[64]; // by row: a loading node's placeholder
     private long seenTree = Long.MIN_VALUE;
     private long seenOwn = Long.MIN_VALUE;
     private long structureVersion;
@@ -156,7 +157,10 @@ public final class TreeRows<T> implements RowSource<Node<T>> {
             seenTree = tree.structureVersion();
             seenOwn = ownVersion;
             for (int i = 0; i < count; i++) {
-                row[flat[i].id()] = -1;
+                if (!placeholder[i]) {
+                    row[flat[i].id()] = -1;
+                }
+                placeholder[i] = false;
                 flat[i] = null;
             }
             count = 0;
@@ -179,12 +183,21 @@ public final class TreeRows<T> implements RowSource<Node<T>> {
             for (int i = 0; i < node.childCount(); i++) {
                 visit(node.child(i));
             }
+            if (loading[node.id()]) {
+                // a row standing for the children still to come, after those already there
+                if (count == flat.length) {
+                    growFlat();
+                }
+                placeholder[count] = true;
+                flat[count++] = node;
+            }
         }
     }
 
     @AllowAllocation("grows to the most visible rows, amortized")
     private void growFlat() {
         flat = Arrays.copyOf(flat, flat.length * 2);
+        placeholder = Arrays.copyOf(placeholder, flat.length);
     }
 
     @Override
@@ -209,7 +222,21 @@ public final class TreeRows<T> implements RowSource<Node<T>> {
 
     @Override
     public long key(int index) {
-        return flat[index].id();
+        long id = flat[index].id();
+        return placeholder[index] ? ~id : id;
+    }
+
+    /**
+     * Whether row {@code index} is a loading placeholder: the row after an expanded node {@linkplain #loading loading}
+     * its children (and those already there); {@link #get} gives the loading node.
+     */
+    public boolean placeholder(int index) {
+        return index >= 0 && index < count && placeholder[index];
+    }
+
+    @Override
+    public boolean selectable(int index) {
+        return !placeholder(index);
     }
 
     @Override

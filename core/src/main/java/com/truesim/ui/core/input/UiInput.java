@@ -27,6 +27,9 @@ public final class UiInput {
     private final StringBuilder composition = new StringBuilder();
     private int compositionCursor;
 
+    private int mnemonic;
+    private boolean mnemonicsShown;
+
     /** Room for {@code maxCommands} commands a frame (more are dropped and counted). */
     @AllowAllocation("one per UI")
     public UiInput(int maxCommands) {
@@ -42,6 +45,7 @@ public final class UiInput {
     public void beginFrame() {
         commandCount = 0;
         text.setLength(0);
+        mnemonic = 0;
         for (int i = 0; i < pointerCount; i++) {
             pointers[i].scroll(0, 0);
         }
@@ -151,5 +155,28 @@ public final class UiInput {
     /** The cursor in the composition. */
     public int compositionCursor() {
         return compositionCursor;
+    }
+
+    /**
+     * A mnemonic key this frame: the letter or digit pressed with the mnemonic modifier (Alt on desktops), as a
+     * lower-case code point; menus and labels with an underlined letter react to it. Ends at the next frame.
+     */
+    public void mnemonic(int codePoint) {
+        mnemonic = Character.toLowerCase(codePoint);
+    }
+
+    /** This frame's mnemonic key (lower case), or 0. */
+    public int mnemonic() {
+        return mnemonic;
+    }
+
+    /** Whether the mnemonic modifier is held, so mnemonic letters show underlined (kept until changed). */
+    public void mnemonicsShown(boolean shown) {
+        mnemonicsShown = shown;
+    }
+
+    /** Whether mnemonic letters show underlined. */
+    public boolean mnemonicsShown() {
+        return mnemonicsShown;
     }
 }

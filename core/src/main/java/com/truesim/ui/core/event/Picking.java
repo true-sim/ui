@@ -450,4 +450,32 @@ public final class Picking {
         }
         return g.count;
     }
+
+    /**
+     * Layer {@code layerIndex}'s grid as last built, for debug overlays: {@code out} gets its origin x and y, its cell
+     * side (UI pixels), its columns and its rows; returns how many cells it has (0 when it holds nothing).
+     */
+    public int grid(int layerIndex, float[] out) {
+        ensureGrids();
+        Grid g = grids[layerIndex];
+        if (g.dirty) {
+            build(layerIndex, g);
+        }
+        if (g.count == 0) {
+            return 0;
+        }
+        out[0] = g.originX;
+        out[1] = g.originY;
+        out[2] = g.cell;
+        out[3] = g.cols;
+        out[4] = g.rows;
+        return g.cols * g.rows;
+    }
+
+    /** How many elements cell {@code column, row} of layer {@code layerIndex}'s grid lists (see {@link #grid}). */
+    public int cellCount(int layerIndex, int column, int row) {
+        Grid g = grids[layerIndex];
+        int cell = row * g.cols + column;
+        return g.cellStart[cell + 1] - g.cellStart[cell];
+    }
 }

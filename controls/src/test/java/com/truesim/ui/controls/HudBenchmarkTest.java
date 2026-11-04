@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.truesim.ui.core.Element;
+import com.truesim.ui.core.draw.DirtyRanges;
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.style.tss.SourceLoader;
@@ -88,6 +89,52 @@ class HudBenchmarkTest {
             }
             System.out.println("round " + round + ": idle " + stats(idle) + " | 10% changing " + stats(changing));
         }
+
+        // Four cards fading (an animated opacity) and two counters far apart changing: time and bytes uploaded.
+        long[] fading = new long[frames];
+        long fadeBytes = 0;
+        long farBytes = 0;
+        int[] cards = new int[4];
+        for (int c = 0; c < 4; c++) {
+            cards[c] = ui.store().parent(ui.store().parent(values[c * 9 * ROWS].slot()));
+        }
+        for (int round = 0; round < 3; round++) {
+            fadeBytes = 0;
+            farBytes = 0;
+            for (int f = 0; f < frames; f++) {
+                long t0 = System.nanoTime();
+                for (int c = 0; c < 4; c++) {
+                    ui.visuals().opacity(cards[c], 0.5f + 0.4f * (float) Math.sin(f * 0.05 + c));
+                }
+                ui.update(3840, 2160);
+                fading[f] = System.nanoTime() - t0;
+                fadeBytes += uploadBytes(list);
+                list.clean();
+            }
+            for (int f = 0; f < 1000; f++) {
+                ui.text(values[0], counter(text, f % 1000));
+                ui.text(values[values.length - 1], counter(text, (f + 500) % 1000));
+                ui.update(3840, 2160);
+                farBytes += uploadBytes(list);
+                list.clean();
+            }
+            System.out.println("round " + round + ": 4 cards fading " + stats(fading) + ", " + fadeBytes / frames
+                + " bytes a frame | 2 counters far apart: " + farBytes / 1000 + " bytes a frame");
+        }
+    }
+
+    /** The bytes a renderer uploads for {@code list}'s changes: its dirty ranges, transform entries and clips. */
+    static long uploadBytes(DrawList list) {
+        long bytes = 0;
+        DirtyRanges r = list.dirtyRanges();
+        for (int i = 0; i < r.count(); i++) {
+            bytes += (long) (r.to(i) - r.from(i)) * Primitive.BYTES;
+        }
+        r = list.transformRanges();
+        for (int i = 0; i < r.count(); i++) {
+            bytes += (long) (r.to(i) - r.from(i)) * DrawList.TRANSFORM_FLOATS * 4;
+        }
+        return bytes + (list.clipsDirty() ? (long) list.clipCount() * DrawList.CLIP_FLOATS * 4 : 0);
     }
 
     private static StringBuilder counter(StringBuilder text, int n) {

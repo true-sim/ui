@@ -25,6 +25,9 @@ import com.truesim.ui.style.Facts;
  * drags it ({@code :pressed} on the thumb); the arrow keys step it, page keys move a tenth (or
  * {@code ui.slider.pageFraction}), home and end go to the ends, the wheel steps it while the pointer is over it. A
  * range slider's thumbs take focus and keys each.
+ *
+ * <p>A {@link SliderScale} ({@link #scale}) maps values to the track: linear, logarithmic or symlog; thumbs, ticks
+ * ({@link #ticks}, {@link #ticksAt}, {@link #scaleTicks}), drags and keyboard steps work in its coordinate.
  */
 public final class Slider extends Control {
 
@@ -39,6 +42,7 @@ public final class Slider extends Control {
     private double min;
     private double max;
     private double step;
+    private SliderScale scale = SliderScale.LINEAR;
     private int dragging = -1;
 
     /** A single-value slider named {@code name} over {@code min..max}, bound to {@code value}. */
@@ -121,6 +125,37 @@ public final class Slider extends Control {
         return step;
     }
 
+    /**
+     * Maps values to the track by {@code value} (linear by default; {@link SliderScale#logarithmic},
+     * {@link SliderScale#symlog}); thumbs, ticks, drags and keyboard steps follow it; returns this.
+     */
+    public Slider scale(SliderScale value) {
+        value.check(min, max);
+        scale = value;
+        show();
+        return this;
+    }
+
+    /** The scale. */
+    public SliderScale scale() {
+        return scale;
+    }
+
+    /** Changes the range to {@code minimum..maximum} (the values are clamped into it); returns this. */
+    public Slider range(double minimum, double maximum) {
+        scale.check(minimum, maximum);
+        min = minimum;
+        max = maximum;
+        for (int i = 0; i < models.length; i++) {
+            double v = models[i].get();
+            if (v < min || v > max) {
+                models[i].set(Math.max(min, Math.min(max, v)));
+            }
+        }
+        show();
+        return this;
+    }
+
     /** The range's minimum. */
     public double min() {
         return min;
@@ -132,19 +167,56 @@ public final class Slider extends Control {
     }
 
     /**
-     * Shows {@code count} evenly spaced ticks ({@code slider-tick}) from the minimum to the maximum (0: none);
-     * returns this.
+     * Shows {@code count} ticks ({@code slider-tick}) evenly spaced along the track from the minimum to the maximum
+     * (evenly in the scale's coordinate: at powers on a logarithmic one; 0: none); returns this.
      */
     @AllowAllocation("ticks are made when a control is configured")
     public Slider ticks(int count) {
+        float[] at = new float[count < 2 ? 0 : count];
+        for (int i = 0; i < at.length; i++) {
+            at[i] = i / (float) (at.length - 1);
+        }
+        return placeTicks(at);
+    }
+
+    /** Shows ticks at {@code values} (placed on the scale; values outside the range are left out); returns this. */
+    @AllowAllocation("ticks are made when a control is configured")
+    public Slider ticksAt(double... values) {
+        int n = 0;
+        float[] at = new float[values.length];
+        for (double v : values) {
+            if (v >= min && v <= max) {
+                at[n++] = (float) scale.fraction(v, min, max);
+            }
+        }
+        return placeTicks(java.util.Arrays.copyOf(at, n));
+    }
+
+    /**
+     * Shows ticks at the scale's natural values: the powers of a logarithmic scale's base, zero and the powers either
+     * side on a symlog one, the step's multiples (at most 101) or ten intervals on a linear one; returns this.
+     */
+    @AllowAllocation("ticks are made when a control is configured")
+    public Slider scaleTicks() {
+        if (scale.linear()) {
+            int intervals = step > 0 && (max - min) / step <= 100 ? (int) Math.round((max - min) / step) : 10;
+            return ticks(intervals + 1);
+        }
+        double[] values = new double[64];
+        int n = scale.ticks(min, max, values);
+        return ticksAt(java.util.Arrays.copyOf(values, n));
+    }
+
+    @AllowAllocation("ticks are made when a control is configured")
+    private Slider placeTicks(float[] fractions) {
         for (Element t : ticks) {
             ui.destroy(t);
         }
-        ticks = new Element[count < 2 ? 0 : count];
+        ticks = new Element[fractions.length];
         for (int i = 0; i < ticks.length; i++) {
             Element t = part("slider-tick");
             grow(t);
-            float f = i / (float) (ticks.length - 1);
+            float f = fractions[i];
             if (vertical) {
                 ui.visuals().anchors(t.slot(), 0.5f, 1 - f, 0.5f, 1 - f);
             } else {
@@ -163,6 +235,11 @@ public final class Slider extends Control {
             root.add(th);
         }
         return this;
+    }
+
+    /** Tick {@code index}. */
+    public Element tick(int index) {
+        return ticks[index];
     }
 
     /** How many ticks show. */
@@ -220,8 +297,7 @@ public final class Slider extends Control {
     }
 
     private float fraction(double value) {
-        double f = (value - min) / (max - min);
-        return (float) Math.max(0, Math.min(1, f));
+        return (float) scale.fraction(value, min, max);
     }
 
     private void show() {
@@ -266,8 +342,7 @@ public final class Slider extends Control {
             float w = l.width(t);
             f = w <= 0 ? 0 : (x - l.x(t)) / w;
         }
-        f = Math.max(0, Math.min(1, f));
-        return min + f * (max - min);
+        return scale.value(f, min, max);
     }
 
     private int nearest(double value) {
@@ -297,6 +372,23 @@ public final class Slider extends Control {
     private double pageStep() {
         double page = (max - min) * Controls.SLIDER_PAGE.get();
         return step > 0 ? Math.max(step, Math.rint(page / step) * step) : page;
+    }
+
+    /**
+     * {@code value} moved {@code steps} key steps ({@code page}: page steps): by the step (or a hundredth of the range)
+     * on a linear scale; on another, by a hundredth of the track (a page: {@code ui.slider.pageFraction}) in the scale's
+     * coordinate, then snapped to the step, at least one step on.
+     */
+    private double stepped(double value, int steps, boolean page) {
+        if (scale.linear()) {
+            return value + steps * (page ? pageStep() : keyStep());
+        }
+        double unit = page ? Controls.SLIDER_PAGE.get() : 0.01;
+        double next = scale.value(scale.fraction(value, min, max) + steps * unit, min, max);
+        if (step > 0 && Math.abs(snap(next) - snap(value)) < step * 0.5) {
+            next = value + Math.signum(steps) * step; // the scale moved less than a step here: one step
+        }
+        return next;
     }
 
     @Override
@@ -329,7 +421,7 @@ public final class Slider extends Control {
                 if (d != 0) {
                     event.consume();
                     int i = range ? Math.max(0, focusedThumb(event.player())) : 0;
-                    set(i, models[i].get() + (d > 0 ? keyStep() : -keyStep()));
+                    set(i, stepped(models[i].get(), d > 0 ? 1 : -1, false));
                 }
             }
             case COMMAND -> command(event);
@@ -348,13 +440,13 @@ public final class Slider extends Control {
         double v = models[i].get();
         double next;
         if (c == UiCommand.RIGHT && !vertical || c == UiCommand.UP && vertical) {
-            next = v + keyStep();
+            next = stepped(v, 1, false);
         } else if (c == UiCommand.LEFT && !vertical || c == UiCommand.DOWN && vertical) {
-            next = v - keyStep();
+            next = stepped(v, -1, false);
         } else if (c == UiCommand.PAGE_UP) {
-            next = v + pageStep();
+            next = stepped(v, 1, true);
         } else if (c == UiCommand.PAGE_DOWN) {
-            next = v - pageStep();
+            next = stepped(v, -1, true);
         } else if (c == UiCommand.HOME) {
             next = min;
         } else if (c == UiCommand.END) {

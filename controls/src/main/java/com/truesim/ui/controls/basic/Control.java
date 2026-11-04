@@ -87,6 +87,14 @@ public abstract class Control implements UiListener, Controls.Polled {
         return ui.element(type, null);
     }
 
+    /**
+     * Stops polling this control (its elements are destroyed or about to be): generated panels rebuilt by a theme or
+     * a collection edit drop the controls they made.
+     */
+    public void dispose() {
+        controls.unpoll(this);
+    }
+
     /** Polls the model once a frame (registered with {@link Controls#poll}); the default does nothing. */
     @Override
     public void poll(long nanos) {

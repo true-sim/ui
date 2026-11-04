@@ -287,7 +287,7 @@ dropdown-list, menu {
   layout: flex;
   direction: column;
   padding: tokens.$space-xs;
-  background: box(lighten(#161b22, 4%));
+  background: box(var(--overlay));
   border: 1px var(--edge);
   radius: tokens.$radius-m;
   @include raised(3);
@@ -358,7 +358,7 @@ dialog {
   min-width: 280px;
   max-width: 480px;
   padding: tokens.$space-l tokens.$space-xl;
-  background: box(var(--surface-raised));
+  background: box(var(--overlay));
   border: 1px var(--edge);
   radius: tokens.$radius-l;
   @include raised(4);
@@ -370,6 +370,8 @@ dialog {
 label.dialog-title { @include text(title, 600); }
 label.dialog-message { color: var(--fg-muted); }
 dialog-buttons { layout: flex; direction: row; justify-content: end; gap: tokens.$space-s; }
+// buttons are added cancel first, then accept (macOS: [Cancel][OK]); Windows and Linux put accepting first
+dialog-buttons[platform=windows], dialog-buttons[platform=linux] { direction: row-reverse; justify-content: start; }
 
 layer#notifications { layout: anchors; }
 toast-stack {

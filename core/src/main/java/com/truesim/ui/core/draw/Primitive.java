@@ -11,7 +11,7 @@ package com.truesim.ui.core.draw;
  *  1-4  x0, y0, x1, y1: the rectangle in pixels, y down (a line's two end points)
  *  5-6  colour A (linear, straight alpha, four half floats, {@link Rgba}): fill, glyph or tint colour
  *  7-8  colour B: a gradient's end colour, a glyph's outline colour
- *  15   reserved (0): a transform and opacity index, later
+ *  15   transform: the index of its entry in the list's transform table (0: none), which scales, moves and fades it
  *
  * word  BOX                     SHADOW                 GLYPH                      IMAGE, NINE_SLICE         LINE
  *  9-10 radii (4 half floats:   radii                  uv (4 x unorm16:           uv (4 x unorm16)          -
@@ -23,6 +23,55 @@ package com.truesim.ui.core.draw;
  *  14   gradient angle          -                      weight offset (bold)       nine slice: source insets  -
  *       (radians, if GRADIENT)                                                    (4 x 8-bit texels l t r b)
  * </pre>
+ *
+ * <p>A {@link #TRIANGLE} (charts: areas, pie slices, triangle and diamond markers) keeps its bounding box in words 1-4
+ * (its quad, what clips and picking read), colour A as its fill, and its corners a, b, c as floats in words 9-14
+ * ({@link #XA} to {@link #YC}), in the same space as the box (transformed alike, moved by its clip's offset alike).
+ * Its flags say which edges are anti-aliased ({@link #EDGE_AB}, {@link #EDGE_BC}, {@link #EDGE_CA}): a polygon's
+ * outline, not the edges triangles of one shape share (those are hard, so no seam shows between them).
+ *
+ * <p><b>Depth tested</b> ({@link #FLAG_DEPTH}; a solid {@link #BOX}, a {@link #LINE} or a {@link #TRIANGLE} of a 3D
+ * handle, a gizmo's): the primitive is a projection of something in the scene the UI is drawn over, and the renderer
+ * fades it where the scene's depth of the frame being drawn is in front of it, per pixel, multiplying its colour by its
+ * occluded opacity there. Words 7-8 (colour B, which none of these kinds use) then hold its view depth (distance along
+ * the view's forward axis, scene units) at its corners:
+ *
+ * <pre>
+ * word  BOX                      LINE                       TRIANGLE
+ *  7    depth (float, its low 8 mantissa bits the occluded opacity as unorm8; {@link #depthWord}): one for the box,
+ *       at the line's first end, at the triangle's corner a
+ *  8    0                        depth at the second end    halves: depth at b over depth at a minus 1, the same for c
+ *                                (float)                    ({@link #halves})
+ * </pre>
+ *
+ * Between corners the renderer interpolates the reciprocal of the depth under a perspective view and the depth itself
+ * under an orthographic one (what is linear on the screen). Transforms and clip offsets move and scale such a
+ * primitive like any other but leave its depth as it is.
+ *
+ * <p><b>Primitives over vertices</b> ({@link #PATH}, {@link #COLUMNS}: a chart's lines and dense areas) draw
+ * {@link #VERTEX_COUNT} vertices of the list's vertex table from {@link #FIRST_VERTEX} on ({@link DrawList#vertices()},
+ * {@link DrawList#VERTEX_FLOATS} floats each), expanded on the GPU into a quad per segment or column: one primitive and
+ * a few floats per point instead of a primitive per segment, and a stream appending points rewrites only their
+ * vertices. Their words 1-4 hold the box they may draw in (what clips, picking and checks read).
+ *
+ * <pre>
+ * word  PATH                                       COLUMNS
+ *  5-6  stroke colour                              stroke or fill colour
+ *  7    first vertex                               first vertex
+ *  8    vertex count                               vertex count (columns)
+ *  9    miter limit (a multiple of the width)      baseline y (filled)
+ *  10   dash phase (px)                            x of the first column's centre
+ *  11   width (px)                                 stroke width (px; 0 filled)
+ *  12-13 dash pattern (4 half floats: dash, gap,   12: column spacing (px)
+ *       dash, gap; 0: solid)
+ *  14   stroke: join (bits 0-1), cap (bits 2-3)    {@link #COLUMNS_FILL}, {@link #COLUMNS_STEPS}
+ * </pre>
+ *
+ * A PATH vertex is {@code x, y, length} (the path's length up to it, for dashes) and a spare float; NaN
+ * coordinates break the path. A COLUMNS vertex is a pixel column's first, last, lowest and highest y (NaN: no
+ * samples): stroked, each column draws a vertical stroke over its span and a connector from the last column's last
+ * sample to its first where their spans do not touch (the M4 envelope's look); filled, the span from the baseline to
+ * the farthest sample.
  */
 public final class Primitive {
 
@@ -45,8 +94,14 @@ public final class Primitive {
     public static final int NINE_SLICE = 5;
     /** An anti-aliased line segment. */
     public static final int LINE = 6;
+    /** A filled triangle (corners in words 9-14), anti-aliased on the edges its flags name. */
+    public static final int TRIANGLE = 7;
+    /** A stroked polyline through vertices of the vertex table: joins, caps and dashes drawn on the GPU. */
+    public static final int PATH = 8;
+    /** Pixel columns of a min-max envelope (vertices: first, last, lowest, highest y), stroked or filled. */
+    public static final int COLUMNS = 9;
     /** How many kinds exist (kinds are below this). */
-    public static final int KINDS = 7;
+    public static final int KINDS = 10;
 
     /** Flag: a box's fill is a linear gradient from colour A to colour B. */
     public static final int FLAG_GRADIENT = 1;
@@ -59,6 +114,18 @@ public final class Primitive {
      * own colours. Pixel range, outline and weight are 0.
      */
     public static final int FLAG_COLOR = 4;
+    /**
+     * Flag: the primitive is depth tested against the scene drawn under the UI (a solid box, a line or a triangle; its
+     * depth in words {@link #DEPTH} and {@link #DEPTH_B}): where the scene is nearer, it draws at its occluded opacity.
+     */
+    public static final int FLAG_DEPTH = 128;
+
+    /** Flag of a {@link #TRIANGLE}: its edge from a to b is anti-aliased. */
+    public static final int EDGE_AB = 1;
+    /** Flag of a {@link #TRIANGLE}: its edge from b to c is anti-aliased. */
+    public static final int EDGE_BC = 2;
+    /** Flag of a {@link #TRIANGLE}: its edge from c to a is anti-aliased. */
+    public static final int EDGE_CA = 4;
 
     /** Word offsets. */
     public static final int HEADER = 0;
@@ -79,7 +146,47 @@ public final class Primitive {
     public static final int GRADIENT_ANGLE = 14;
     public static final int WEIGHT = 14;
     public static final int SOURCE_INSETS = 14;
-    public static final int RESERVED = 15;
+    public static final int TRANSFORM = 15;
+    /** Primitives over vertices: the first vertex, the vertex count. */
+    public static final int FIRST_VERTEX = 7;
+    public static final int VERTEX_COUNT = 8;
+    /** A {@link #PATH}'s miter limit; a filled {@link #COLUMNS}' baseline. */
+    public static final int MITER_LIMIT = 9;
+    public static final int BASELINE = 9;
+    /** A {@link #PATH}'s dash phase; the x of a {@link #COLUMNS}' first column. */
+    public static final int DASH_PHASE = 10;
+    public static final int COLUMN_X = 10;
+    /** A {@link #PATH}'s dash pattern (words 12-13); a {@link #COLUMNS}' column spacing. */
+    public static final int DASHES = 12;
+    public static final int COLUMN_STEP = 12;
+    /** A {@link #PATH}'s join and cap; a {@link #COLUMNS}' flags. */
+    public static final int STROKE = 14;
+
+    /** {@link #STROKE} of a {@link #PATH}: joins (bits 0-1). */
+    public static final int JOIN_NONE = 0;
+    public static final int JOIN_MITER = 1;
+    public static final int JOIN_BEVEL = 2;
+    public static final int JOIN_ROUND = 3;
+    /** {@link #STROKE} of a {@link #PATH}: caps (bits 2-3). */
+    public static final int CAP_BUTT = 0;
+    public static final int CAP_SQUARE = 4;
+    public static final int CAP_ROUND = 8;
+    /** {@link #STROKE} of a {@link #COLUMNS}: filled from the baseline (else stroked). */
+    public static final int COLUMNS_FILL = 16;
+    /** {@link #STROKE} of a {@link #COLUMNS}: connectors as stairs (level, then up or down). */
+    public static final int COLUMNS_STEPS = 32;
+
+    /** A {@link #TRIANGLE}'s corners. */
+    public static final int XA = 9;
+    public static final int YA = 10;
+    public static final int XB = 11;
+    public static final int YB = 12;
+    public static final int XC = 13;
+    public static final int YC = 14;
+    /** A depth tested primitive's depth at its first corner, with its occluded opacity ({@link #FLAG_DEPTH}). */
+    public static final int DEPTH = 7;
+    /** A depth tested line's depth at its second end, or a triangle's depths at b and c relative to a's. */
+    public static final int DEPTH_B = 8;
 
     private Primitive() {
     }
@@ -112,6 +219,25 @@ public final class Primitive {
     private static int unorm16(float v) {
         float c = v < 0 ? 0 : (v > 1 ? 1 : v);
         return (int) (c * 65535f + 0.5f);
+    }
+
+    /**
+     * A depth tested primitive's word {@link #DEPTH}: {@code depth} (positive) as a float whose lowest 8 mantissa bits
+     * hold {@code occludedOpacity} (0 to 1) as unorm8 instead; the depth keeps 15 bits of mantissa (3e-5 relative).
+     */
+    public static int depthWord(float depth, float occludedOpacity) {
+        float o = occludedOpacity < 0 ? 0 : (occludedOpacity > 1 ? 1 : occludedOpacity);
+        return Float.floatToRawIntBits(depth) & ~0xFF | (int) (o * 255f + 0.5f);
+    }
+
+    /** The depth of a word {@link #DEPTH}. */
+    public static float depthOf(int word) {
+        return Float.intBitsToFloat(word & ~0xFF);
+    }
+
+    /** The occluded opacity of a word {@link #DEPTH}. */
+    public static float occludedOpacityOf(int word) {
+        return (word & 0xFF) / 255f;
     }
 
     /** Two floats as halves, the first in the low bits. */

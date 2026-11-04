@@ -18,6 +18,11 @@ dependencies {
     testImplementation(project(":ui-text-native")) // the real text path in allocation tests and benchmarks
     testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the same layout on every machine
     testImplementation(project(":ui-fonts-emoji")) // colour emoji in text fields
+    // The shipped themes style charts with ChartStyles' keys; GallerySanityTest checks the charts gallery too.
+    testImplementation(testFixtures(project(":ui-charts")))
+    // The props gallery (ui-props builds on these controls): checked by GallerySanityTest and previewed with the others.
+    testImplementation(testFixtures(project(":ui-props")))
+    testImplementation(testFixtures(project(":ui-gizmo"))) // the scene and gizmo gallery, in GallerySanityTest
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.

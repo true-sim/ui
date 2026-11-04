@@ -127,7 +127,7 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
     /** Adds a submenu item opening a new menu named {@code text}; returns the submenu to fill. */
     @AllowAllocation("menus are built once")
     public Menu submenu(CharSequence text) {
-        Menu child = new Menu(controls, text.toString());
+        Menu child = new Menu(controls, Button.plain(text));
         MenuItem item = add(new MenuItem(controls, this, MenuItem.Kind.SUBMENU, text, null, null, null, 0, child));
         child.parent = this;
         child.parentItem = item;
@@ -189,6 +189,7 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
     }
 
     private void opened() {
+        controls.mnemonics().opened(this);
         if (parent == null && restoreFocus == null) {
             restoreFocus = controls.ui().interaction().focused(player);
         }
@@ -222,6 +223,7 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
             return;
         }
         popup.close();
+        controls.mnemonics().closed(this);
         pending = -1;
         if (parent != null) {
             if (parent.openChild == this) {
@@ -263,6 +265,7 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
         child.player = player;
         item.element.state(UiState.EXPANDED, true);
         child.popup.open(item.element, false);
+        controls.mnemonics().opened(child);
         child.scroll.reset();
         child.refreshGlyphs(true);
         child.pending = -1;
@@ -362,6 +365,34 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
         closeAll();
     }
 
+    /**
+     * The mnemonic key {@code key} (lower case) while this menu is the deepest open one: its one item with that letter
+     * is activated (a submenu opens, focused); with several, focus moves to the next of them.
+     */
+    void mnemonic(int key, int fromPlayer) {
+        player = fromPlayer;
+        int first = -1;
+        int matched = 0;
+        int at = focusedIndex();
+        int after = -1;
+        for (int i = 0; i < count; i++) {
+            if (entries[i].key == key && entries[i].focusable()) {
+                matched++;
+                if (first < 0) {
+                    first = i;
+                }
+                if (after < 0 && i > at) {
+                    after = i;
+                }
+            }
+        }
+        if (matched == 1) {
+            activate(entries[first]);
+        } else if (matched > 1) {
+            focus(after >= 0 ? after : first);
+        }
+    }
+
     private void command(UiEvent event) {
         player = event.player();
         UiCommand c = event.command();
@@ -439,6 +470,7 @@ public final class Menu implements UiListener, Popup.Owner, Controls.Polled {
 
     @Override
     public void dismissed() {
+        controls.mnemonics().closed(this);
         if (openChild != null) {
             openChild.close();
         }

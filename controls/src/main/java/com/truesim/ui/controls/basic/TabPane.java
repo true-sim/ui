@@ -29,7 +29,8 @@ import java.util.Arrays;
  * wraps the row) or {@code menu} (one row showing only the tabs that fit whole, the selected one always; the others
  * are hidden, not pickable, and reached through the overflow menu). Arrow keys along the strip select the neighbouring tab, home and end
  * the first and last. Closable tabs ask {@link #onClose} (by default they are removed); with {@link #reorderable}
- * tabs are dragged along the strip to reorder them.
+ * tabs are dragged along the strip to reorder them. {@code NEXT_TAB}, {@code PREVIOUS_TAB} and {@code CLOSE_TAB} work
+ * anywhere in the pane.
  */
 public final class TabPane extends Control {
 
@@ -133,6 +134,7 @@ public final class TabPane extends Control {
         listen(row, EventType.COMMAND.bit() | EventType.DRAG_START.bit() | EventType.DRAG.bit()
             | EventType.DRAG_END.bit());
         listen(strip, EventType.WHEEL.bit());
+        listen(root, EventType.COMMAND.bit());
         facts(BasicStyles.TAB_OVERFLOW.defaultValue());
         controls.poll(this);
         ui.addFrameListener(fit);
@@ -364,6 +366,12 @@ public final class TabPane extends Control {
     @Override
     public void handle(UiEvent event) {
         int slot = event.currentSlot();
+        if (slot == root.slot()) {
+            if (event.type() == EventType.COMMAND && !event.consumed()) {
+                tabCommand(event);
+            }
+            return;
+        }
         if (slot == strip.slot()) {
             if (event.type() == EventType.WHEEL && mode == BasicStyles.TabOverflow.SCROLL) {
                 float d = event.scrollY() != 0 ? event.scrollY() : event.scrollX();
@@ -442,6 +450,35 @@ public final class TabPane extends Control {
             shownContent = model.get();
         }
         show();
+    }
+
+    /**
+     * {@code NEXT_TAB} and {@code PREVIOUS_TAB} (Ctrl+Tab, Ctrl+Shift+Tab, the shoulder buttons) anywhere in the pane
+     * select the neighbouring tab, wrapping, and focus it (the old page leaves the tree with what it focused);
+     * {@code CLOSE_TAB} asks to close the selected tab when it is closable.
+     */
+    private void tabCommand(UiEvent event) {
+        UiCommand c = event.command();
+        int at = model.get();
+        if (c == UiCommand.NEXT_TAB || c == UiCommand.PREVIOUS_TAB) {
+            if (count < 2) {
+                return;
+            }
+            event.consume();
+            int to = Math.floorMod(at + (c == UiCommand.NEXT_TAB ? 1 : -1), count);
+            select(to);
+            // the focus goes to the new tab: on a tab it follows, in the old page it would be lost with the page
+            controls.focusSoon(tabs[to].button.element(), event.player());
+        } else if (c == UiCommand.CLOSE_TAB && at >= 0 && at < count && tabs[at].close != null) {
+            event.consume();
+            Element f = interaction().focused(event.player());
+            boolean onTab = f != null && tabAt(f.slot()) >= 0;
+            askClose(tabs[at]);
+            int now = model.get();
+            if (onTab && now >= 0 && now < count) {
+                interaction().focus(tabs[now].button.element(), event.player());
+            }
+        }
     }
 
     private void command(UiEvent event) {

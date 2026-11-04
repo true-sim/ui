@@ -355,7 +355,8 @@ public abstract class ScrollView {
         float step = ui.styles().styleOf(root.slot()).getFloat(DataStyles.SCROLL_STEP);
         float dx = e.scrollX();
         float dy = e.scrollY();
-        if ((e.modifiers() & Pointer.SHIFT) != 0 && dx == 0) {
+        // Shift turns the wheel sideways; so does a view that only scrolls sideways (a horizontal list)
+        if (dx == 0 && ((e.modifiers() & Pointer.SHIFT) != 0 || !scrollY.overflows() && scrollX.overflows())) {
             dx = -dy;
             dy = 0;
         }
@@ -482,17 +483,31 @@ public abstract class ScrollView {
         }
     }
 
+    /**
+     * Stops the view's frame work (its elements are destroyed or about to be): generated editors drop views. A view
+     * whose root was destroyed stops by itself at its next frame.
+     */
+    public void dispose() {
+        ui.removeFrameListener(updater);
+    }
+
     /** The frame listener. */
     private final class Updater implements Ui.FrameListener {
 
         @Override
         public void frame(long nanos) {
+            if (!root.alive()) {
+                dispose(); // destroyed without dispose: stop by itself
+                return;
+            }
             ScrollView.this.frame(nanos);
         }
 
         @Override
         public void afterLayout() {
-            laidOut();
+            if (root.alive()) {
+                laidOut();
+            }
         }
     }
 

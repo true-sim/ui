@@ -11,6 +11,11 @@
 @import "data";
 @use "basic"; // the basic and container controls of ui-controls
 @use "text-edit"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "charts"; // charts (ui-charts, com.truesim.ui.charts)
+@use "controls"; // group A3: mnemonics, HDR colours and the eyedropper, spelling
+@use "props"; // generated property panels and collection editors (ui-props)
+@use "console"; // the developer console (ui-console)
+@use "tools"; // the immediate-mode façade and the UI debugger (ui-controls)
 
 // ------------------------------------------------------------------ palette: live tokens, dark by default
 
@@ -18,6 +23,8 @@
   --bg: #0d1117;
   --surface: rgba(#161b22, 0.86);
   --surface-raised: lighten(var(--surface), 5%);
+  // overlays (menus, drop-downs, pop-ups, tooltips, dialogs) are opaque: what is under them never shows through
+  --overlay: alpha(var(--surface-raised), 1);
   --edge: rgba(#8b949e, 0.28);
   --fg: #e6edf3;
   --fg-muted: #8b949e;
@@ -205,3 +212,5 @@ image.meter { size: 12px; }
 
 @import "windows";
 @import "oswindows"; // docking's OS windows
+@import "files"; // the file browser and its dialogs
+@import "scene"; // camera views, gizmos and the view cube (ui-scene, ui-gizmo)

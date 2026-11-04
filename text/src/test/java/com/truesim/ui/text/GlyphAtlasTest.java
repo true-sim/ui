@@ -222,7 +222,7 @@ class GlyphAtlasTest {
         assertThat(atlas.page(0)).isNotSameAs(page);
         assertThat(atlas.page(0).width()).isEqualTo(512);
         assertThat(textures.count()).isEqualTo(3);
-        assertThat(settings.all()).hasSize(6);
+        assertThat(settings.all()).hasSize(7);
     }
 
     @Test
@@ -420,5 +420,71 @@ class GlyphAtlasTest {
         good.beginFrame();
         assertThat(good.state(r)).isEqualTo(GlyphAtlas.READY);
         assertThat(cache.size()).as("raster glyphs are not cached").isZero();
+    }
+
+    @Test
+    void pastItsPageBudgetTheLeastRecentlyUsedPageNoTextDrawsIsEvicted() {
+        AtlasSettings settings = new AtlasSettings();
+        settings.pageSize().set(256);
+        settings.maxPages().set(2);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), new JdkSdfGenerator(), null, null, settings);
+        Fakes.Face f = face(1);
+        int a = atlas.entry(f, 400); // 4 em squares: one fills a 256-texel page
+        atlas.beginFrame();
+        int b = atlas.entry(f, 401);
+        atlas.beginFrame();
+        assertThat(atlas.pageCount()).isEqualTo(2);
+        assertThat(atlas.texture(a)).isNotEqualTo(atlas.texture(b));
+        int pageA = atlas.texture(a);
+        int generation = atlas.generation();
+
+        int c = atlas.entry(f, 402); // a third page past the budget: a's (least recently used) is evicted
+        atlas.beginFrame();
+        assertThat(atlas.pageCount()).isEqualTo(2);
+        assertThat(atlas.evictions()).isEqualTo(1);
+        assertThat(atlas.generation()).isGreaterThan(generation);
+        assertThat(atlas.state(a)).isEqualTo(GlyphAtlas.EVICTED);
+        assertThat(atlas.state(b)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.state(c)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.texture(c)).isEqualTo(pageA);
+
+        // the page text draws is never evicted: with no other page to give up, the atlas grows past its budget
+        atlas.pageGuard(id -> id == atlas.texture(b));
+        int d = atlas.entry(f, 403);
+        atlas.beginFrame();
+        assertThat(atlas.state(d)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.pageCount()).isEqualTo(3);
+        assertThat(atlas.state(b)).isEqualTo(GlyphAtlas.READY);
+
+        // an evicted glyph looked up again keeps its entry and is generated again, evicting c's page (not drawn,
+        // used before d's)
+        assertThat(atlas.entry(f, 400)).isEqualTo(a);
+        assertThat(atlas.state(a)).isEqualTo(GlyphAtlas.QUEUED);
+        atlas.beginFrame();
+        assertThat(atlas.state(a)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.state(c)).isEqualTo(GlyphAtlas.EVICTED);
+        assertThat(atlas.state(d)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.evictions()).isEqualTo(2);
+    }
+
+    @Test
+    void iconsAreGlyphsOfTheirFaceAndNeverCached() throws Exception {
+        GlyphCache cache = new GlyphCache(40, 6);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), new JdkSdfGenerator(), null, cache, new AtlasSettings());
+        IconFace icons = new IconFace();
+        int square = icons.add(SvgIcon.parse("<svg viewBox='0 0 10 10'><rect x='2' y='2' width='6' height='6'/></svg>"));
+        int e = atlas.entry(icons, square);
+        atlas.finishAll();
+        assertThat(atlas.state(e)).isEqualTo(GlyphAtlas.READY);
+        assertThat(atlas.plane(e, 0)).isLessThan(0.2f); // the square from 0.2 to 0.8 em, plus the range's padding
+        assertThat(atlas.plane(e, 2)).isGreaterThan(0.8f);
+        assertThat(icons.outline(5, new GlyphOutline())).isFalse();
+        assertThat(icons.count()).isEqualTo(1);
+        assertThat(icons.id()).isEqualTo(IconFace.ID);
+        assertThat(icons.source()).isNull();
+        assertThat(icons.covers('a')).isFalse();
+        assertThat(icons.ascender()).isEqualTo(1);
+        assertThat(icons.descender() + icons.lineGap()).isZero();
+        assertThat(cache.size()).isZero();
     }
 }

@@ -30,6 +30,9 @@ import org.lwjgl.util.yoga.YGMeasureFunc;
  *       mirrors wrap-reverse lines across the border box);</li>
  *   <li>no aspect ratio, baseline or absolute positioning.</li>
  *   <li>items with padding do not shrink (Yoga lets shrinking items under their padding without freezing them);</li>
+ *   <li>every item's minimum is 0 where the generator gives it none: Yoga shrinks items to their padding, as CSS
+ *       does with {@code min-width: 0}, where an auto minimum (this module's default, CSS's) stops them at their
+ *       min-content size ({@code FlexLayoutTest} checks that).</li>
  * </ul>
  * Trees in whose Yoga layout something overflows (a child's margin box out of its parent's border box) are skipped:
  * when content overflows an at-most constraint, Yoga lays an item out again under that constraint where CSS (and this
@@ -375,6 +378,7 @@ class YogaOracleTest {
                 l.basis(s, b, Unit.PX);
                 YGNodeStyleSetFlexBasis(y, b);
             }
+            l.minWidth(s, 0, Unit.PX).minHeight(s, 0, Unit.PX); // Yoga's minimum (see the class comment)
             boolean minMaxW = !(basis && row);
             boolean minMaxH = !(basis && !row);
             boolean[] own = {false, false};

@@ -106,6 +106,7 @@ class FlexLayoutTest {
         ui.layout.kind(ui.root(), LayoutKind.FLEX).direction(ui.root(), Direction.ROW);
         int a = ui.box(ui.root(), 100, 20);
         int b = ui.box(ui.root(), 50, 20);
+        ui.layout.minWidth(a, 0, Unit.PX).minWidth(b, 0, Unit.PX); // below their content (min-width: 0)
         ui.run(100, 50);
         assertRect(ui, a, 0, 0, 66.667f, 50);
         assertRect(ui, b, 66.667f, 0, 33.333f, 50);
@@ -113,6 +114,82 @@ class FlexLayoutTest {
         ui.run(100, 50);
         assertRect(ui, a, 0, 0, 100, 50);
         assertRect(ui, b, 100, 0, 0, 50);
+    }
+
+    @Test
+    void itemsShrinkNoFurtherThanTheirMinContentUnlessTheyClipOrHaveAMinimum() {
+        // CSS min-width: auto. Two boxes of 80 in 100: they keep their content and the row overflows (Yoga: 50 each).
+        TestUi ui = new TestUi();
+        ui.layout.kind(ui.root(), LayoutKind.FLEX).direction(ui.root(), Direction.ROW).alignItems(ui.root(),
+            Align.START);
+        int a = ui.box(ui.root(), 80, 20);
+        int b = ui.box(ui.root(), 80, 20);
+        ui.run(100, 50);
+        assertRect(ui, a, 0, 0, 80, 20);
+        assertRect(ui, b, 80, 0, 80, 20);
+        // one clips its content (overflow: hidden, a scroll pane): its minimum is 0, it takes the whole shortfall
+        ui.layout.clipsContent(b, true);
+        ui.run(100, 50);
+        assertRect(ui, a, 0, 0, 80, 20);
+        assertRect(ui, b, 80, 0, 20, 20);
+        // an explicit minimum wins over the automatic one
+        ui.layout.clipsContent(b, false).minWidth(a, 30, Unit.PX).minWidth(b, 30, Unit.PX);
+        ui.run(100, 50);
+        assertRect(ui, a, 0, 0, 50, 20);
+        assertRect(ui, b, 50, 0, 50, 20);
+        // a specified size smaller than the content is the minimum (CSS's specified size suggestion)
+        ui.layout.minWidth(a, 0, Unit.AUTO).minWidth(b, 0, Unit.AUTO).width(a, 60, Unit.PX).width(b, 60, Unit.PX);
+        ui.run(100, 50);
+        assertRect(ui, a, 0, 0, 60, 20);
+        assertRect(ui, b, 60, 0, 60, 20);
+        // and a maximum caps it
+        ui.layout.width(a, 0, Unit.AUTO).width(b, 0, Unit.AUTO).maxWidth(a, 70, Unit.PX);
+        ui.run(100, 50);
+        assertRect(ui, a, 0, 0, 70, 20);
+        assertRect(ui, b, 70, 0, 80, 20);
+    }
+
+    @Test
+    void textShrinksToItsLongestWordAndARowToItsItemsMinimums() {
+        // TestUi text breaks between any characters: its min-content is one character, 8 wide
+        TestUi ui = new TestUi();
+        ui.layout.kind(ui.root(), LayoutKind.FLEX).direction(ui.root(), Direction.ROW).alignItems(ui.root(),
+            Align.START);
+        int text = ui.text(ui.root(), 20);
+        int inner = ui.node(ui.root());
+        ui.layout.kind(inner, LayoutKind.FLEX).direction(inner, Direction.ROW).padding(inner, 0, 2, 0, 2);
+        int x = ui.box(inner, 30, 10);
+        int y = ui.box(inner, 40, 10);
+        ui.run(60, 300);
+        // the inner row's minimum: its boxes' (70) and padding (4); the text takes the rest down to 8
+        assertRect(ui, inner, 8, 0, 74, 10);
+        assertRect(ui, text, 0, 0, 8, 320);
+        assertRect(ui, x, 10, 0, 30, 10);
+        assertRect(ui, y, 40, 0, 40, 10);
+        // growing from a basis of 0 (flex: 1) still respects the content
+        ui.layout.basis(text, 0, Unit.PX).grow(text, 1).basis(inner, 0, Unit.PX).grow(inner, 1);
+        ui.run(200, 300);
+        assertRect(ui, text, 0, 0, 98, 32); // 196 shared (the inner row's basis is its padding, 4)
+        assertRect(ui, inner, 98, 0, 102, 10);
+        ui.run(70, 300); // 66 shared would be 33 each: the row stops at its minimum, 74, the text at 8
+        assertRect(ui, text, 0, 0, 8, 320);
+        assertRect(ui, inner, 8, 0, 74, 10);
+    }
+
+    @Test
+    void aWrappingContainerIsNeverNarrowerThanItsWidestItem() {
+        TestUi ui = new TestUi();
+        ui.layout.kind(ui.root(), LayoutKind.FLEX).direction(ui.root(), Direction.ROW).alignItems(ui.root(),
+            Align.START);
+        int wrap = ui.node(ui.root());
+        ui.layout.kind(wrap, LayoutKind.FLEX).direction(wrap, Direction.ROW).wrap(wrap, Wrap.WRAP)
+            .alignItems(wrap, Align.START);
+        ui.box(wrap, 30, 10);
+        ui.box(wrap, 50, 10);
+        int side = ui.box(ui.root(), 60, 10);
+        ui.run(80, 100);
+        assertRect(ui, wrap, 0, 0, 50, 20); // its min-content: the widest item; the side box keeps its own
+        assertRect(ui, side, 50, 0, 60, 10);
     }
 
     @Test
@@ -132,7 +209,8 @@ class FlexLayoutTest {
     @Test
     void minimumsFreezeShrinkingItems() {
         TestUi ui = row(3);
-        ui.layout.minWidth(child(ui, 0), 45, Unit.PX);
+        ui.layout.minWidth(child(ui, 0), 45, Unit.PX).minWidth(child(ui, 1), 0, Unit.PX)
+            .minWidth(child(ui, 2), 0, Unit.PX);
         ui.run(120, 50);
         // 30 too much: each would shrink to 40, the first stops at 45 and the others share the rest
         assertRect(ui, child(ui, 0), 0, 0, 45, 50);

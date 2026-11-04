@@ -14,19 +14,22 @@ import java.util.Locale;
 /**
  * Draw-list goldens (design section 12): a list written as text, one primitive a line, empty slots left out, numbers
  * rounded so goldens survive harmless float noise. {@link #assertMatches} compares against a golden file and, with
- * {@code -Dtruesim.updateGoldens=true}, writes it instead. Positions are where primitives draw: their clip's offset
- * added.
+ * {@code -Dtruesim.updateGoldens=true}, writes it instead. Primitives are written as they draw
+ * ({@link DrawList#baked()}): positions with their clip's offset and transform applied, sizes scaled, colours faded by
+ * their transform's opacity, so a golden does not change with how a transform is stored.
  */
 public final class DrawListDump {
 
-    private static final String[] KINDS = {"empty", "box", "shadow", "glyph", "image", "nine-slice", "line"};
+    private static final String[] KINDS = {"empty", "box", "shadow", "glyph", "image", "nine-slice", "line",
+        "triangle", "path", "columns"};
 
     private DrawListDump() {
     }
 
     /** The list as text. */
     @AllowAllocation("test helper")
-    public static String of(DrawList list) {
+    public static String of(DrawList recorded) {
+        DrawList list = recorded.baked(); // where and how it draws: transforms and clip offsets applied
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < list.size(); i++) {
             int header = list.header(i);
@@ -41,12 +44,22 @@ public final class DrawListDump {
             if (Primitive.flags(header) != 0) {
                 out.append(" flags=").append(Primitive.flags(header));
             }
-            // where it draws: plus its clip's offset (a scrolled region's content is recorded unscrolled)
             out.append(' ').append(n(list.drawnX(i, Primitive.X0))).append(',').append(n(list.drawnY(i, Primitive.Y0)))
                 .append(' ').append(n(list.drawnX(i, Primitive.X1))).append(',').append(n(list.drawnY(i, Primitive.Y1)))
                 .append(" a=").append(color(list.colorAt(i, Primitive.COLOR_A)));
-            long b = list.colorAt(i, Primitive.COLOR_B);
-            if (b != 0) {
+            boolean overVertices = kind == Primitive.PATH || kind == Primitive.COLUMNS;
+            long b = overVertices ? 0 : list.colorAt(i, Primitive.COLOR_B);
+            if ((Primitive.flags(header) & Primitive.FLAG_DEPTH) != 0) { // words 7-8 are its depth, not colour B
+                int d = list.intAt(i, Primitive.DEPTH);
+                int e = list.intAt(i, Primitive.DEPTH_B);
+                out.append(" depth=").append(n(Primitive.depthOf(d)));
+                if (kind == Primitive.LINE) {
+                    out.append(',').append(n(Float.intBitsToFloat(e)));
+                } else if (kind == Primitive.TRIANGLE) {
+                    out.append(',').append(halves(e));
+                }
+                out.append(" occluded=").append(n(Primitive.occludedOpacityOf(d)));
+            } else if (b != 0) {
                 out.append(" b=").append(color(b));
             }
             switch (kind) {
@@ -66,7 +79,33 @@ public final class DrawListDump {
                     .append(n(list.floatAt(i, Primitive.PIXEL_RANGE)));
                 case Primitive.IMAGE, Primitive.NINE_SLICE -> out.append(" tex=").append(list.intAt(i, Primitive.TEXTURE));
                 case Primitive.LINE -> out.append(" width=").append(n(list.floatAt(i, Primitive.WIDTH)));
+                case Primitive.TRIANGLE -> out.append(" corners=").append(n(list.drawnX(i, Primitive.XA))).append(',')
+                    .append(n(list.drawnY(i, Primitive.YA))).append(' ').append(n(list.drawnX(i, Primitive.XB)))
+                    .append(',').append(n(list.drawnY(i, Primitive.YB))).append(' ')
+                    .append(n(list.drawnX(i, Primitive.XC))).append(',').append(n(list.drawnY(i, Primitive.YC)));
+                case Primitive.PATH -> out.append(" width=").append(n(list.floatAt(i, Primitive.WIDTH)))
+                    .append(" stroke=").append(list.intAt(i, Primitive.STROKE)).append(" miter=")
+                    .append(n(list.floatAt(i, Primitive.MITER_LIMIT))).append(" dashes=")
+                    .append(halves(list.intAt(i, Primitive.DASHES))).append(' ')
+                    .append(halves(list.intAt(i, Primitive.DASHES + 1))).append(" phase=")
+                    .append(n(list.floatAt(i, Primitive.DASH_PHASE)));
+                case Primitive.COLUMNS -> out.append(" x=").append(n(list.floatAt(i, Primitive.COLUMN_X)))
+                    .append(" step=").append(n(list.floatAt(i, Primitive.COLUMN_STEP))).append(" width=")
+                    .append(n(list.floatAt(i, Primitive.WIDTH))).append(" baseline=")
+                    .append(n(list.floatAt(i, Primitive.BASELINE))).append(" flags=")
+                    .append(list.intAt(i, Primitive.STROKE));
                 default -> {
+                }
+            }
+            if (overVertices) { // the vertices, as the primitive reads them
+                int first = list.intAt(i, Primitive.FIRST_VERTEX);
+                int count = list.intAt(i, Primitive.VERTEX_COUNT);
+                out.append(" vertices=").append(count).append(':');
+                for (int v = first; v < first + count; v++) {
+                    out.append(' ').append(n(list.vertexAt(v, 0))).append(',').append(n(list.vertexAt(v, 1)));
+                    if (kind == Primitive.COLUMNS) {
+                        out.append(',').append(n(list.vertexAt(v, 2))).append(',').append(n(list.vertexAt(v, 3)));
+                    }
                 }
             }
             out.append('\n');

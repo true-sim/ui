@@ -10,7 +10,18 @@ public enum UiCommand {
     UP, DOWN, LEFT, RIGHT, NEXT, PREVIOUS, PAGE_UP, PAGE_DOWN, HOME, END, ACCEPT, CANCEL, CONTEXT_MENU, MENU,
     // ui.text (only while a text field has the text context)
     SELECT_ALL, COPY, CUT, PASTE, UNDO, REDO, DELETE_BACK, DELETE_FORWARD, DELETE_WORD_BACK, DELETE_WORD_FORWARD,
-    WORD_LEFT, WORD_RIGHT, LINE_START, LINE_END, DOC_START, DOC_END, SUBMIT, NEWLINE;
+    WORD_LEFT, WORD_RIGHT, LINE_START, LINE_END, DOC_START, DOC_END, SUBMIT, NEWLINE,
+    // ui.tabs
+    NEXT_TAB, PREVIOUS_TAB, CLOSE_TAB,
+    // ui.charts (zoom and pan come from the pointer's wheel and drags)
+    CHART_RESET,
+    // ui.gizmo (modes, the next mode, spaces and pivots forwards and backwards)
+    GIZMO_TRANSLATE, GIZMO_ROTATE, GIZMO_SCALE, GIZMO_UNIVERSAL, GIZMO_TOGGLE_SPACE, GIZMO_CANCEL, GIZMO_BOUNDS,
+    GIZMO_NEXT_MODE, GIZMO_PREVIOUS_SPACE, GIZMO_NEXT_PIVOT, GIZMO_PREVIOUS_PIVOT,
+    // ui.docking and windows: cycle windows, move or resize the focused one by keys or the d-pad
+    NEXT_WINDOW, WINDOW_MOVE, WINDOW_RESIZE,
+    // ui.console
+    CONSOLE_TOGGLE, COMPLETE, HISTORY_UP, HISTORY_DOWN;
 
     private static final UiCommand[] ALL = values();
 

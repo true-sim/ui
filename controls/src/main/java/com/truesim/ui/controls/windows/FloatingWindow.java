@@ -41,7 +41,8 @@ import com.truesim.ui.style.value.Length;
  * snapping too; a press anywhere raises and activates it. While dragged by its title bar it draws at its
  * {@code drag-opacity} ({@link WindowStyles#DRAG_OPACITY}, times its style's opacity), so what lies under it (a dock
  * space's drop targets, windows to snap to) shows; it is opaque again when let go. Modal windows show over a dimming
- * {@code backdrop} on the modal layer, trap focus and close on {@code CANCEL}. {@link #keyboardMove()} and
+ * {@code backdrop} on the modal layer, trap focus and close on {@code CANCEL}. {@link #keyboardMove()} (the
+ * {@code WINDOW_MOVE} command while the focus is in the window) and {@code WINDOW_RESIZE} for
  * {@link #keyboardResize()} let the arrow keys or the d-pad move or resize it until {@code ACCEPT} (or
  * {@code CANCEL}, which puts it back).
  */
@@ -649,6 +650,12 @@ public final class FloatingWindow {
                 manager.activate(FloatingWindow.this);
             } else if (e.type() == EventType.COMMAND && keyMode != 0) {
                 command(e);
+            } else if (e.type() == EventType.COMMAND && e.command() == UiCommand.WINDOW_MOVE) {
+                e.consume();
+                keyboardMove();
+            } else if (e.type() == EventType.COMMAND && e.command() == UiCommand.WINDOW_RESIZE && resizable) {
+                e.consume();
+                keyboardResize();
             }
         }
     }

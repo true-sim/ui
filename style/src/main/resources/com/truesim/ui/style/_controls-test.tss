@@ -1,0 +1,21 @@
+// Group A3's control additions in the garish test theme: everything _controls.tss styles looks obviously different.
+
+@use "controls";
+
+span.mnemonic { text-decoration: underline; color: #ff00ff; } // always shown, in a colour of its own
+
+color-intensity { background: box(#ffef00); gap: 11px; padding: 3px; }
+slider.intensity { width: 90px; }
+label.color-intensity-value { color: #0000ff; font-size: 17px; }
+color-preview-clipped { background: box(#39ff14); border: 3px #ff00ff; }
+color-preview-hdr { background: box(#00ffff); border: 3px #ff6600; }
+
+image.icon#eyedropper { image: "test/checker" contain; }
+button.eyedropper { padding: 7px; background: box(#ff6600); }
+button.eyedropper:checked { background: box(#0000ff); }
+
+eyedropper { cursor: move; background: box(rgba(#ff00ff, 0.15)); }
+color-loupe { size: 150px; border: 5px #39ff14; radius: 0; loupe-pixels: 7; loupe-gap: 35; }
+color-loupe-center { border: 3px #00ffff; }
+
+span.misspelt { color: #00ffff; squiggle-wavelength: 10; squiggle-amplitude: 5; squiggle-thickness: 3; }

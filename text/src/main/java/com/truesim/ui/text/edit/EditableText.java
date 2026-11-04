@@ -510,6 +510,21 @@ public final class EditableText {
     }
 
     /**
+     * Deletes the selection, or the whole grapheme cluster before the caret (a password's Backspace: a masked cluster is
+     * one mask glyph, so it goes at once, combining marks and all).
+     */
+    public boolean deleteBackCluster() {
+        endComposition(true);
+        if (hasSelection()) {
+            return replace(selectionStart(), selectionEnd(), "", null, OTHER);
+        }
+        if (caret == 0) {
+            return false;
+        }
+        return replace(previousGrapheme(caret), caret, "", null, DELETE_BACK);
+    }
+
+    /**
      * The position Backspace deletes back to: one code point of a cluster of letters and marks (so a mark typed last
      * goes first), a whole emoji or other cluster otherwise.
      */

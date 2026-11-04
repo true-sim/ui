@@ -92,6 +92,7 @@ public final class Interaction {
     private final Layers layers;
     private final PickGeometry geometry;
     private final Picking picking;
+    private WorldPicking world;
 
     // per slot
     private int[] seenGen = new int[0];
@@ -638,8 +639,11 @@ public final class Interaction {
         kinds[p] = pointer.kind();
         lastModifiers[p] = pointer.modifiers();
         int n = picking.pick(x, y, hits[p]);
-        hitCount[p] = n;
         blocked[p] = picking.blockedBy() >= 0;
+        if (world != null && !blocked[p] && n < MAX_HITS) {
+            n = world.pick(pointer, hits[p], n);
+        }
+        hitCount[p] = n;
         int top = n > 0 ? hits[p][0] : UiStore.NONE;
         if (hover(p, top, x, y)) {
             restTime[p] = now;
@@ -1847,6 +1851,39 @@ public final class Interaction {
 
     // ================================================================ commands and text
 
+    /**
+     * Hears the commands no element consumed (nothing focused, or the focused element's ancestors let it pass): what
+     * acts on the whole UI rather than on an element, such as cycling windows ({@code NEXT_WINDOW}).
+     */
+    @FunctionalInterface
+    public interface CommandFallback {
+        /** {@code command} from {@code player} went unconsumed; true to take it (nothing else acts on it then). */
+        boolean command(UiCommand command, int player, int commandFlags);
+    }
+
+    private CommandFallback[] fallbacks = new CommandFallback[0];
+
+    /** Adds {@code fallback}, asked in the order added before the default actions (focus moves, clicks) run. */
+    @AllowAllocation("fallbacks are added when a UI is built")
+    public void addCommandFallback(CommandFallback fallback) {
+        fallbacks = Arrays.copyOf(fallbacks, fallbacks.length + 1);
+        fallbacks[fallbacks.length - 1] = fallback;
+    }
+
+    /** Removes {@code fallback}. */
+    @AllowAllocation("fallbacks are removed when a UI is torn down")
+    public void removeCommandFallback(CommandFallback fallback) {
+        for (int i = 0; i < fallbacks.length; i++) {
+            if (fallbacks[i] == fallback) {
+                CommandFallback[] less = new CommandFallback[fallbacks.length - 1];
+                System.arraycopy(fallbacks, 0, less, 0, i);
+                System.arraycopy(fallbacks, i + 1, less, i, less.length - i);
+                fallbacks = less;
+                return;
+            }
+        }
+    }
+
     private void command(UiCommand command, int player, int commandFlags) {
         if (command == UiCommand.CANCEL && cancelDragOf(player)) {
             return;
@@ -1868,6 +1905,11 @@ public final class Interaction {
                 }
             } finally {
                 end();
+            }
+        }
+        for (CommandFallback fallback : fallbacks) {
+            if (fallback.command(command, player, commandFlags)) {
+                return;
             }
         }
         switch (command) {
@@ -2111,6 +2153,19 @@ public final class Interaction {
     }
 
     // ================================================================ access
+
+    /**
+     * Sets what pointers hit beyond the screen layers (world panels, scene objects: the scene bridge), or null for
+     * nothing. Its hits follow the screen layers' in every pointer's hit list.
+     */
+    public void worldPicking(WorldPicking value) {
+        world = value;
+    }
+
+    /** What pointers hit beyond the screen layers, or null. */
+    public WorldPicking worldPicking() {
+        return world;
+    }
 
     /** The hit test. */
     public Picking picking() {

@@ -1,8 +1,11 @@
 package com.truesim.ui.controls;
 
+import com.truesim.ui.charts.ChartsGallery;
 import com.truesim.ui.controls.basic.Controls;
 import com.truesim.ui.controls.basic.ControlsGallery;
 import com.truesim.ui.controls.data.DataGallery;
+import com.truesim.ui.controls.debug.DebuggerGallery;
+import com.truesim.ui.controls.imm.ImmGallery;
 import com.truesim.ui.controls.text.TextGallery;
 import com.truesim.ui.controls.windows.WindowsScene;
 import com.truesim.ui.core.draw.UiTextures;
@@ -115,6 +118,30 @@ class GallerySanityTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"default", "test"})
+    void filesGallery(String theme) {
+        check("files gallery", theme, ui -> {
+            com.truesim.ui.controls.files.FilesGallery.registerIcons(ui);
+            com.truesim.ui.controls.files.FilesGallery.build(ui);
+            settle(ui, 1280, 720);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void filesGalleryWithItsDialogs(String theme) {
+        check("files gallery with dialogs", theme, ui -> {
+            com.truesim.ui.controls.files.FilesGallery.registerIcons(ui);
+            com.truesim.ui.controls.files.FilesGallery g = com.truesim.ui.controls.files.FilesGallery.build(ui);
+            settle(ui, 1280, 720);
+            g.openDialog();
+            settle(ui, 1280, 720);
+            g.confirmOverwrite();
+            settle(ui, 1280, 720);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
     void windowsScene(String theme) {
         check("windows scene", theme, ui -> WindowsScene.build(ui, 1280, 720).frames(60));
     }
@@ -123,5 +150,42 @@ class GallerySanityTest {
     @ValueSource(strings = {"default", "test"})
     void textGallery(String theme) {
         check("text gallery", theme, ui -> TextGallery.build(ui, 1280, 720));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void chartsGallery(String theme) {
+        check("charts gallery", theme, ui -> {
+            ChartsGallery g = ChartsGallery.build(ui);
+            settle(ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
+            g.pose(ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void immGallery(String theme) {
+        check("immediate-mode tool", theme, ui -> ImmGallery.build(ui, 1280, 720));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void propsGallery(String theme) {
+        check("props gallery", theme, ui -> {
+            com.truesim.ui.props.PropsGallery.build(new Controls(ui), ui.root());
+            settle(ui, 1280, 1700);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void debuggerGallery(String theme) {
+        check("UI debugger", theme, ui -> DebuggerGallery.build(ui, 1280, 800));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void sceneGallery(String theme) {
+        check("scene gallery", theme, ui -> com.truesim.ui.gizmo.SceneGallery.build(ui, 1280, 720));
     }
 }

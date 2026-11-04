@@ -115,8 +115,51 @@ public final class Selection<T> implements Versioned {
         int from = Math.min(anchor, index);
         int to = Math.max(anchor, index);
         for (int i = from; i <= to; i++) {
-            items.add(rows.get(i));
+            if (rows.selectable(i)) {
+                items.add(rows.get(i));
+            }
         }
+    }
+
+    /**
+     * Applies a box selection of rows {@code from..to} of {@code rows} (multiple selection only): {@code mode}
+     * {@link BoxSelect#REPLACE} selects only them, {@link BoxSelect#ADD} adds them, {@link BoxSelect#TOGGLE} flips
+     * each. Rows that are not {@linkplain RowSource#selectable selectable} are skipped; {@code anchorIndex} becomes the
+     * range anchor. An empty range ({@code from > to}) with REPLACE selects nothing.
+     */
+    @AllowAllocation("a user action: the box is released")
+    public void box(RowSource<? extends T> rows, int from, int to, int mode, int anchorIndex) {
+        if (this.mode != Mode.MULTIPLE) {
+            return;
+        }
+        if (mode == BoxSelect.REPLACE && !items.isEmpty()) {
+            items.clear();
+        }
+        for (int i = Math.max(0, from); i <= to && i < rows.size(); i++) {
+            if (!rows.selectable(i)) {
+                continue;
+            }
+            T item = rows.get(i);
+            if (mode == BoxSelect.TOGGLE && items.contains(item)) {
+                items.remove(item);
+            } else {
+                items.add(item);
+            }
+        }
+        anchor = anchorIndex;
+    }
+
+    /**
+     * Whether {@code item} shows as selected while a box of {@code mode} ({@link BoxSelect}) that covers it or not
+     * ({@code inBox}) is dragged: the selection itself changes only when the box is released.
+     */
+    public boolean previewed(T item, boolean inBox, int mode) {
+        boolean now = contains(item);
+        return switch (mode) {
+            case BoxSelect.REPLACE -> inBox;
+            case BoxSelect.ADD -> now || inBox;
+            default -> now ^ inBox;
+        };
     }
 
     /** Selects every row of {@code rows} (multiple selection only). */
@@ -126,7 +169,9 @@ public final class Selection<T> implements Versioned {
             return;
         }
         for (int i = 0; i < rows.size(); i++) {
-            items.add(rows.get(i));
+            if (rows.selectable(i)) {
+                items.add(rows.get(i));
+            }
         }
     }
 

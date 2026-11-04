@@ -13,7 +13,8 @@ import java.util.Arrays;
  * A push button (type {@code button}): text, an icon, or both ({@code button > icon}, {@code button > label}). A click
  * of the primary pointer button or the ACCEPT command (Enter, Space, the gamepad's confirm button) runs its actions;
  * ACCEPT shows {@code :pressed} for {@code press-flash} seconds too, so keys and gamepads see the press a pointer
- * sees. Focusable; announced as a button named by its text (or the name given to an icon button).
+ * sees. Focusable; announced as a button named by its text (or the name given to an icon button). Its text may mark a
+ * mnemonic ({@code "&Save"}: {@link Mnemonics}): Alt and the letter click it.
  */
 public class Button extends Control {
 
@@ -23,18 +24,19 @@ public class Button extends Control {
     private int actionCount;
     private long flashUntil = -1;
     private int clicks;
+    private final Runnable clicker = this::click; // what the mnemonic runs
 
     /** A button of type {@code type} (subclasses: {@code toggle-button}, parts of other controls) and role. */
     @AllowAllocation("controls are built once")
     @SuppressWarnings("this-escape")
     Button(Controls controls, String type, Role role, CharSequence text, String iconName, String name) {
-        super(controls, type, role, name != null ? name : text == null ? null : text.toString());
+        super(controls, type, role, name != null ? name : text == null ? null : plain(text));
         if (iconName != null) {
             icon = controls.icon(iconName);
             root.add(icon);
         }
         if (text != null) {
-            label = label(text);
+            label = controls.mnemonics().label(text, root, clicker);
             root.add(label);
         }
         focusable(root);
@@ -54,6 +56,14 @@ public class Button extends Control {
     @SuppressWarnings("this-escape")
     public Button(Controls controls, String iconName, CharSequence text, String name) {
         this(controls, "button", Role.BUTTON, text, iconName, name);
+    }
+
+    /** {@code text} without its mnemonic marker. */
+    @AllowAllocation("controls are built once")
+    static String plain(CharSequence text) {
+        StringBuilder b = new StringBuilder(text.length());
+        Mnemonics.strip(text, b);
+        return b.toString();
     }
 
     /** Runs {@code action} on every click; returns this. */
@@ -94,8 +104,8 @@ public class Button extends Control {
         if (label == null) {
             throw new IllegalStateException("an icon-only button has no text");
         }
-        ui.text(label, text);
-        root.semantics(ui.store().role(root.slot()), text.toString());
+        CharSequence shown = controls.mnemonics().text(label, text, root, clicker);
+        root.semantics(ui.store().role(root.slot()), shown.toString());
         return this;
     }
 

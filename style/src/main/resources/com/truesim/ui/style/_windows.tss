@@ -17,7 +17,7 @@ tooltip {
   layout: stack;
   padding: tokens.$space-xs tokens.$space-m;
   max-width: 320px;
-  background: box(var(--surface-raised));
+  background: box(var(--overlay));
   border: 1px var(--edge);
   radius: tokens.$radius-s;
   @include raised(2);
@@ -37,7 +37,7 @@ hover-card, popover {
   gap: tokens.$space-s;
   padding: tokens.$space-m;
   max-width: 420px;
-  background: box(var(--surface-raised));
+  background: box(var(--overlay));
   border: 1px var(--edge);
   radius: tokens.$radius-m;
   @include raised(3);

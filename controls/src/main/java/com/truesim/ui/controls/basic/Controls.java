@@ -79,12 +79,67 @@ public final class Controls implements Ui.FrameListener {
     private int pendingPlayer;
     private int pendingFrames;
     private long now;
+    private final Mnemonics mnemonics;
+    private String platform = systemPlatform();
+    private com.truesim.ui.core.input.ScreenSampler sampler;
 
     /** The controls of {@code ui}: registers its frame listener. */
     @AllowAllocation("one per UI")
+    @SuppressWarnings("this-escape")
     public Controls(Ui ui) {
         this.ui = ui;
+        mnemonics = new Mnemonics(this);
         ui.addFrameListener(this);
+    }
+
+    /** The mnemonics of this UI's controls (the underlined letters Alt activates). */
+    public Mnemonics mnemonics() {
+        return mnemonics;
+    }
+
+    /**
+     * Where eyedroppers read the screen (the engine's read-back of the presented image; null: colour pickers show no
+     * eyedropper).
+     */
+    public Controls screenSampler(com.truesim.ui.core.input.ScreenSampler value) {
+        sampler = value;
+        return this;
+    }
+
+    /**
+     * The platform whose conventions styles follow, as the fact {@code platform} on parts that differ by platform
+     * (a dialog's {@code dialog-buttons}: {@code windows}, {@code linux}, {@code macos}); by default the system's.
+     */
+    public Controls platform(String value) {
+        platform = java.util.Objects.requireNonNull(value, "value");
+        return this;
+    }
+
+    /** The platform whose conventions styles follow: {@code windows}, {@code linux} or {@code macos}. */
+    public String platform() {
+        return platform;
+    }
+
+    /** The system's platform name for styles: macos, windows, else linux. */
+    static String systemPlatform() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return os.startsWith("mac") ? "macos" : os.startsWith("windows") ? "windows" : "linux";
+    }
+
+    /** The screen sampler, or null. */
+    public com.truesim.ui.core.input.ScreenSampler screenSampler() {
+        return sampler;
+    }
+
+    /**
+     * A label (type {@code label}) showing {@code text} whose mnemonic ({@code "&Name"}) focuses {@code target}: the
+     * label of a field.
+     */
+    @AllowAllocation("controls are built once")
+    public Element labelFor(CharSequence text, Element target) {
+        Element label = mnemonics.label(text, target, () -> ui.interaction().focus(target));
+        label.semantics(com.truesim.ui.core.Role.TEXT, ui.text(label).toString());
+        return label;
     }
 
     /** The UI. */
@@ -100,7 +155,7 @@ public final class Controls implements Ui.FrameListener {
     /** The tunables of the basic and container controls, for an engine to register as settings. */
     public static List<Tunable> tunables() {
         return List.of(SUBMENU_DELAY, TOAST_DURATION, TOAST_LIMIT, SWIPE_THRESHOLD, SPLIT_STEP,
-            WHEEL_STEP, SLIDER_PAGE);
+            WHEEL_STEP, SLIDER_PAGE, Repeater.DELAY, Repeater.RATE);
     }
 
     /** Where menus get the labels of their shortcuts (the engine: the bound glyph of the last device used). */
@@ -148,6 +203,12 @@ public final class Controls implements Ui.FrameListener {
     @AllowAllocation("controls are built once")
     public Button button(CharSequence text) {
         return new Button(this, text);
+    }
+
+    /** A text button that repeats its actions while held. */
+    @AllowAllocation("controls are built once")
+    public RepeatButton repeatButton(CharSequence text) {
+        return new RepeatButton(this, text);
     }
 
     /** An icon-only button named {@code name}. */
@@ -439,6 +500,7 @@ public final class Controls implements Ui.FrameListener {
         for (int i = 0; i < polledCount; i++) {
             polled[i].poll(nanos);
         }
+        mnemonics.frame(ui.input());
     }
 
     // ---------------------------------------------------------------- layers and placing

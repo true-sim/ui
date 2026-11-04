@@ -28,6 +28,10 @@ public final class DataGallery {
 
     enum Kind { SCOUT, TANK, MEDIC, ENGINEER }
 
+    /** A record shown by its components. */
+    record Waypoint(String name, double x, double y, boolean visited) {
+    }
+
     record Unit(String name, int hp, double speed, boolean alive, Kind kind, int squad) {
         Unit withHp(int value) {
             return new Unit(name, value, speed, alive, kind, squad);
@@ -43,9 +47,25 @@ public final class DataGallery {
     public final ListView<Object> mixed;
     public final TreeView<String> tree;
     public final TableView<Unit> table;
+    /** A table grouped by kind, with a header group and a hidden column. */
+    public final TableView<Unit> grouped;
+    /** A list laid out in a row. */
+    public final ListView<String> row;
+    /** Box selection on a canvas of squares. */
+    public final BoxSelect canvasSelect;
+    /** Whether each canvas square is selected. */
+    public final boolean[] squares;
+    /** A tree node loading its children. */
+    public final VersionedTree.Node<String> loading;
 
     private DataGallery(ScrollPane pane, ListView<String> list, ListView<Object> mixed, TreeView<String> tree,
-        TableView<Unit> table) {
+        TableView<Unit> table, TableView<Unit> grouped, ListView<String> row, BoxSelect canvasSelect, boolean[] squares,
+        VersionedTree.Node<String> loading) {
+        this.grouped = grouped;
+        this.row = row;
+        this.canvasSelect = canvasSelect;
+        this.squares = squares;
+        this.loading = loading;
         this.pane = pane;
         this.list = list;
         this.mixed = mixed;
@@ -99,6 +119,7 @@ public final class DataGallery {
         values.add(Kind.TANK);
         values.add(new com.truesim.common.math.Vec3(1, 2.5, -3));
         values.add(com.truesim.ui.style.value.Color.hex("#3fa7ff"));
+        values.add(new Waypoint("Gate", 12.5, -3, true));
         ListView<Object> mixed = ListView.of(ui, "Values", values);
         root.add(sized(ui, mixed.root(), 240, 300));
 
@@ -113,6 +134,7 @@ public final class DataGallery {
         src.add("Main.java");
         src.add("Game.java");
         model.root().add("README.md");
+        VersionedTree.Node<String> remote = model.root().add(0, "remote");
         TreeView<String> tree = new TreeView<>(ui, "Project", model, Renderers.text());
         tree.draggable(true);
         tree.lazy(models, node -> {
@@ -122,6 +144,11 @@ public final class DataGallery {
         tree.expand(assets, true);
         tree.expand(textures, true);
         tree.expand(models, true);
+        tree.lazy(remote, node -> {
+            tree.treeRows().loading(node); // asynchronous: the rest comes later
+            node.add("cache.bin");
+        });
+        tree.expand(remote, true);
         root.add(sized(ui, tree.root(), 260, 300));
 
         VersionedList<Unit> units = clock.list();
@@ -152,7 +179,86 @@ public final class DataGallery {
         mixed.selection().select(1, values.get(1));
         tree.selection().select(2, textures);
         table.sort(table.column(1), false);
-        return new DataGallery(pane, list, mixed, tree, table);
+        // grouped by kind, a sum of HP, a header group over HP and Speed, Squad hidden
+        TableView<Unit> grouped = new TableView<>(ui, "Units by kind", new DataView<>(clock, units),
+            TableView.SelectionMode.MULTI_ROW);
+        grouped.add(Column.<Unit>ofText("Name", Unit::name).width(110));
+        Column<Unit> hp = Column.<Unit>ofInt("HP", Unit::hp).width(70);
+        Column<Unit> speed = Column.<Unit>ofDouble("Speed", Unit::speed, 2).width(80);
+        Column<Unit> kind = Column.of("Kind", Unit::kind, Renderers.enumeration(), Enum::compareTo).width(100);
+        Column<Unit> squad = Column.<Unit>ofInt("Squad", Unit::squad).width(70);
+        grouped.add(hp).add(speed).add(kind).add(squad);
+        grouped.headerGroup("Stats", java.util.List.of(hp, speed));
+        grouped.hide(squad, true);
+        grouped.groupBy(java.util.List.of(kind));
+        grouped.groupSum(Unit::hp, "HP", 0);
+        root.add(sized(ui, grouped.root(), 420, 300));
+
+        VersionedList<String> cards = clock.list();
+        for (int i = 0; i < 40; i++) {
+            cards.add("Card " + i);
+        }
+        ListView<String> row = ListView.of(ui, "Cards", cards).horizontal(true);
+        row.selection().mode(Selection.Mode.MULTIPLE);
+        root.add(sized(ui, row.root(), 520, 90));
+
+        Element canvas = ui.panel("box-canvas");
+        canvas.semantics(com.truesim.ui.core.Role.GROUP, "Canvas");
+        ui.styles().inline(canvas.slot(), InlineStyle.builder()
+            .set(Styles.LAYOUT, com.truesim.ui.style.value.LayoutKind.NONE).set(Styles.WIDTH, Length.px(260))
+            .set(Styles.HEIGHT, Length.px(100)).build());
+        boolean[] squares = new boolean[12];
+        Element[] squareElements = new Element[squares.length];
+        for (int i = 0; i < squares.length; i++) {
+            Element sq = ui.element("canvas-item", null);
+            float x = 12 + (i % 6) * 40;
+            float y = 12 + (i / 6) * 40;
+            ui.styles().inline(sq.slot(), InlineStyle.builder()
+                .set(Styles.OFFSETS, new com.truesim.ui.style.value.Insets(y, 0, 0, x))
+                .set(Styles.WIDTH, Length.px(28)).set(Styles.HEIGHT, Length.px(28)).build());
+            canvas.add(sq);
+            squareElements[i] = sq;
+        }
+        BoxSelect canvasSelect = new BoxSelect(ui, canvas, new BoxSelect.Items() {
+            public int count() {
+                return squares.length;
+            }
+
+            public float x(int i) {
+                return 12 + (i % 6) * 40;
+            }
+
+            public float y(int i) {
+                return 12 + (i / 6) * 40;
+            }
+
+            public float width(int i) {
+                return 28;
+            }
+
+            public float height(int i) {
+                return 28;
+            }
+
+            public boolean selected(int i) {
+                return squares[i];
+            }
+
+            public void selected(int i, boolean on) {
+                squares[i] = on;
+                squareElements[i].state(com.truesim.ui.core.UiState.SELECTED, on);
+            }
+        });
+        canvasSelect.box(); // the box shows while a drag selects
+        for (int i : new int[] {1, 2, 7, 8}) {
+            squares[i] = true;
+            squareElements[i].state(com.truesim.ui.core.UiState.SELECTED, true);
+        }
+        root.add(canvas);
+
+        row.selection().select(1, cards.get(1));
+        row.selection().toggle(2, cards.get(2));
+        return new DataGallery(pane, list, mixed, tree, table, grouped, row, canvasSelect, squares, remote);
     }
 
     /** Updates {@code ui} until the gallery settled (rows bound and measured), then scrolls to the shown places. */
@@ -169,6 +275,14 @@ public final class DataGallery {
         table.scrollTo(40, 0);
         settle(ui, width, height);
         table.edit(1, table.column(1));
+        // the second group closed
+        int header = -1;
+        for (int i = 1; i < grouped.rows().size() && header < 0; i++) {
+            header = grouped.groupHeader(i) ? i : -1;
+        }
+        if (header > 0) {
+            grouped.collapseGroup(header, true);
+        }
         settle(ui, width, height);
     }
 }

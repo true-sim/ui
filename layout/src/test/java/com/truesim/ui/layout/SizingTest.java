@@ -65,6 +65,10 @@ class SizingTest {
         assertRect(ui, t, 0, 0, 48, 64);
         ui.layout.kind(c, LayoutKind.FLEX);
         ui.run();
+        // a flex item does not shrink below its content either (CSS min-height: auto)...
+        assertRect(ui, t, 0, 0, 48, 64);
+        ui.layout.minHeight(t, 0, Unit.PX); // ...unless its minimum is 0
+        ui.run();
         assertRect(ui, t, 0, 0, 48, 30);
     }
 

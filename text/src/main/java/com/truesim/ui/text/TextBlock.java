@@ -1416,7 +1416,7 @@ public final class TextBlock {
         entriesRaster = raster;
         entriesWorld = worldSpace;
         entriesTechnique = atlas.settings().techniqueVersion();
-        atlasEpoch = atlas.epoch();
+        atlasEpoch = atlas.generation();
         versionEpoch = atlasEpoch;
         pending = glyphCount; // until recorded: the glyphs may still be generating
     }
@@ -1765,7 +1765,7 @@ public final class TextBlock {
         boolean raster = rasterMode(outlineWidth, weight);
         lastOutline = outlineWidth;
         lastWeight = weight;
-        if (atlasEpoch != atlas.epoch() || raster != entriesRaster || entriesWorld != worldSpace
+        if (atlasEpoch != atlas.generation() || raster != entriesRaster || entriesWorld != worldSpace
             || entriesTechnique != atlas.settings().techniqueVersion()) {
             lookUpGlyphs(raster);
         }
@@ -1849,9 +1849,9 @@ public final class TextBlock {
                 version++; // raster or MTSDF may have changed: record again
             }
             long completions = atlas.completions();
-            if (atlas.epoch() != versionEpoch || pending > 0 && completions != seenCompletions) {
+            if (atlas.generation() != versionEpoch || pending > 0 && completions != seenCompletions) {
                 version++;
-                versionEpoch = atlas.epoch();
+                versionEpoch = atlas.generation();
                 seenCompletions = completions;
             }
         }

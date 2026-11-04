@@ -3,6 +3,8 @@ package com.truesim.ui.controls.text;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.controls.Painter;
 import com.truesim.ui.controls.Ui;
+import com.truesim.ui.controls.basic.Controls;
+import com.truesim.ui.controls.basic.Menu;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.Tunable;
@@ -35,6 +37,7 @@ import com.truesim.ui.text.TextSystem;
 import com.truesim.ui.text.edit.EditableText;
 import com.truesim.ui.text.edit.Emoticons;
 import com.truesim.ui.text.edit.Spans;
+import com.truesim.ui.text.spell.SpellChecker;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -91,10 +94,20 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         "emoticons", "shortcodes", "both"), "off", "Replace typed emoticons such as :) and shortcodes such as "
             + ":smile: with emoji.");
 
+    /**
+     * Milliseconds a frame spends spell checking paragraphs out of view (the visible ones are checked as they are drawn,
+     * whatever the budget): a large text is checked over several frames.
+     */
+    public static final Tunable SPELL_BUDGET = Tunable.of("ui.text.spellBudget", 0.25f, 0.01f, 10,
+        "Milliseconds a frame spends spell checking text out of view (visible text is checked at once)");
+
     /** Every tunable the text editors read. */
     @AllowAllocation("asked once")
     public static List<Tunable> tunables() {
-        return List.of(CARET_BLINK, CARET_MOVEMENT, AREA_TAB, EMOJI_REPLACEMENT);
+        List<Tunable> all = new java.util.ArrayList<>(List.of(CARET_BLINK, CARET_MOVEMENT, AREA_TAB,
+            EMOJI_REPLACEMENT, SPELL_BUDGET));
+        all.addAll(SpellChecker.tunables());
+        return all;
     }
 
     /** What an editor tells its owner. */
@@ -186,6 +199,25 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private long placeholderDrawn;
     private long useClock;
     private final Slice slice = new Slice();
+
+    // spell checking: per paragraph its misspelt words (paragraph-local start, end pairs), dirty until checked
+    private SpellChecker speller;
+    private Controls spellControls;
+    private Menu spellMenu;
+    private Element misspeltPart;
+    private long spellVersionSeen = -1;
+    private int[][] spellErrors = new int[16][];
+    private int[] spellCount = new int[16];
+    private boolean[] spellDirty = new boolean[16];
+    private boolean spellPending;
+    private int spellCursor;
+    private int spellPara;
+    private int spellChecks; // paragraphs checked so far (for tests)
+    private final SpellChecker.Misspelt collector = this::misspelt;
+    private String spellAdd = "Add to dictionary";
+    private String spellIgnore = "Ignore";
+    private String spellNone = "No suggestions";
+    private boolean[] maskStarts = new boolean[0];
     private final StringBuilder placeholder = new StringBuilder();
     private TextBlock placeholderBlock;
 
@@ -234,6 +266,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private final Spans copiedSpans = new Spans();
     private final Spans fragment = new Spans();
 
+    @AllowAllocation("editors are made when a UI is built")
     private TextEditor(Ui ui, String type, String style, String label, boolean multiLine) {
         if (ui.textSystem() == null) {
             throw new IllegalStateException("a text editor needs a UI with a text system");
@@ -256,7 +289,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         int mask = EventType.COMMAND.bit() | EventType.TEXT.bit() | EventType.COMPOSITION.bit()
             | EventType.PRESS.bit() | EventType.MOVE.bit() | EventType.RELEASE.bit() | EventType.WHEEL.bit()
             | EventType.FOCUS_IN.bit() | EventType.FOCUS_OUT.bit() | EventType.EXIT.bit()
-            | EventType.LONG_PRESS.bit() | EventType.DRAG_START.bit();
+            | EventType.LONG_PRESS.bit() | EventType.DRAG_START.bit() | EventType.CONTEXT.bit();
         interaction.on(element, mask, this);
         ui.addFrameListener(this);
         Arrays.fill(poolPara, NONE);
@@ -441,6 +474,66 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         return mask != 0;
     }
 
+    /**
+     * Checks the spelling with {@code checker} (null: no more): misspelt words are underlined with a squiggle (the part
+     * {@code span.misspelt}: its {@code color}, and {@code squiggle-wavelength}, {@code squiggle-amplitude},
+     * {@code squiggle-thickness}), and the context menu on one (a {@link Menu} of {@code controls}) offers its
+     * corrections, "Add to dictionary" and "Ignore". Only changed paragraphs are checked again; the visible ones as they
+     * are drawn, the rest within {@code ui.text.spellBudget} a frame. Passwords are never checked; returns this.
+     */
+    @AllowAllocation("set up when a UI is built")
+    public TextEditor spelling(SpellChecker checker, Controls controls) {
+        speller = checker;
+        spellControls = controls;
+        if (checker != null && misspeltPart == null) {
+            misspeltPart = ui.part(element, "span", "misspelt");
+        }
+        spellVersionSeen = -1;
+        ui.repaint(element);
+        return this;
+    }
+
+    /** The spell checker, or null. */
+    public SpellChecker spelling() {
+        return speller;
+    }
+
+    /** The spelling menu's texts (localised): add to the dictionary, ignore, and what shows without suggestions. */
+    public TextEditor spellMenuText(String add, String ignore, String none) {
+        spellAdd = add;
+        spellIgnore = ignore;
+        spellNone = none;
+        return this;
+    }
+
+    /** The spelling menu (null until first opened). */
+    public Menu spellMenu() {
+        return spellMenu;
+    }
+
+    /** Whether paragraphs wait to be spell checked. */
+    public boolean spellPending() {
+        return speller != null && spellPending;
+    }
+
+    /** Paragraphs spell checked so far. */
+    public int spellChecks() {
+        return spellChecks;
+    }
+
+    /** The misspelt words found, as {@code [start, end)} text ranges (a test helper). */
+    @AllowAllocation("a test helper")
+    public List<int[]> misspelt() {
+        List<int[]> out = new java.util.ArrayList<>();
+        for (int p = 0; p < Math.min(heights.count(), text.lineCount()); p++) {
+            int s = text.lineStart(p);
+            for (int k = 0; k < spellCount[p]; k++) {
+                out.add(new int[] {s + spellErrors[p][k * 2], s + spellErrors[p][k * 2 + 1]});
+            }
+        }
+        return out;
+    }
+
     /** The listener for changes, submits and links (null for none). */
     public TextEditor listener(Listener value) {
         listener = value;
@@ -529,6 +622,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             System.arraycopy(block, old - tail, block, n - tail, tail);
             System.arraycopy(h, old - tail, h, n - tail, tail);
         }
+        spellDamaged(from, tail, shift, old, n);
         heights.resize(n);
         for (int p = from; p < n - tail; p++) {
             stamp[p] = nextStamp++;
@@ -542,6 +636,29 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         }
     }
 
+    /**
+     * Paragraphs {@code [from, n - tail)} changed ({@code shift}: lines added or removed; their old results go, the
+     * tail's moved with the other arrays): they are checked again.
+     */
+    private void spellDamaged(int from, int tail, int shift, int old, int n) {
+        if (shift != 0) {
+            System.arraycopy(spellErrors, old - tail, spellErrors, n - tail, tail);
+            System.arraycopy(spellCount, old - tail, spellCount, n - tail, tail);
+            System.arraycopy(spellDirty, old - tail, spellDirty, n - tail, tail);
+        }
+        for (int p = from; p < n - tail; p++) {
+            if (shift != 0) {
+                spellErrors[p] = null; // shared with a moved paragraph's: a new one when needed
+            }
+            spellCount[p] = 0;
+            spellDirty[p] = true;
+        }
+        if (from < n - tail) {
+            spellPending = true;
+            spellCursor = Math.min(spellCursor, from);
+        }
+    }
+
     @AllowAllocation("growing with the text, rarely")
     private void grow(int n) {
         int c = Math.max(n, stamp.length * 2);
@@ -549,6 +666,9 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         int o = block.length;
         block = Arrays.copyOf(block, c);
         Arrays.fill(block, o, c, NONE);
+        spellErrors = Arrays.copyOf(spellErrors, c);
+        spellCount = Arrays.copyOf(spellCount, c);
+        spellDirty = Arrays.copyOf(spellDirty, c);
     }
 
     /** A paragraph's height before it is shaped: its characters over the wrap width, at least one line. */
@@ -582,6 +702,9 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         int s = text.lineStart(p);
         int e = text.lineEnd(p);
         slice.set(text.text(), s, e, masked() ? mask : 0);
+        if (masked()) {
+            slice.clusters(clusterStarts(s, e));
+        }
         float max = multiLine && wrap ? wrapWidth : INF;
         if (rich && text.spans().count() > 0) {
             TextRuns runs = poolRuns[b];
@@ -599,6 +722,23 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             charWidth = charWidth == 0 ? tb.width() / (e - s) : charWidth * 0.9f + tb.width() / (e - s) * 0.1f;
         }
         return tb;
+    }
+
+    /** Which characters of {@code [s, e)} start a grapheme cluster (one mask glyph each). */
+    private boolean[] clusterStarts(int s, int e) {
+        if (maskStarts.length < e - s) {
+            maskStarts = growStarts(e - s);
+        }
+        java.util.Arrays.fill(maskStarts, 0, e - s, false);
+        for (int i = s; i < e; i = text.nextGrapheme(i)) {
+            maskStarts[i - s] = true;
+        }
+        return maskStarts;
+    }
+
+    @AllowAllocation("growing with the password's length, rarely")
+    private static boolean[] growStarts(int n) {
+        return new boolean[Math.max(64, n * 2)];
     }
 
     @AllowAllocation("the pool fills once")
@@ -895,7 +1035,19 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             wrapWidth = w;
             Arrays.fill(poolPara, NONE);
             int n = text.lineCount();
+            int damage = text.damageFrom();
+            int damageTail = text.damageTail();
+            int old = heights.count();
             text.clearDamage();
+            if (n != old) {
+                if (stamp.length < n) {
+                    grow(n);
+                }
+                spellDamaged(0, 0, 1, old, n); // the lines changed: all checked again
+            } else if (damage != Integer.MAX_VALUE) {
+                spellDamaged(Math.min(damage, n), Math.max(0, Math.min(damageTail, n - Math.min(damage, n))), 0, old,
+                    n);
+            }
             if (stamp.length < n) {
                 grow(n);
             }
@@ -932,6 +1084,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             revealCaretNow();
             layoutVisible();
         }
+        spellVisible();
         float lh = lineHeightPx();
         textY0 = multiLine ? y0 : y0 + Math.max(0, (viewH - lh) * 0.5f);
         float ox = textX0 - scrollX + alignShift();
@@ -960,6 +1113,9 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             if (rich) {
                 paintDecorations(list, b, ox, y, opacity, first, last);
                 paintImages(list, b, p, ox, y, opacity);
+            }
+            if (speller != null && spellCount[p] > 0) {
+                paintSquiggles(list, b, p, ox, y, opacity, first, last);
             }
             y += heights.get(p);
         }
@@ -1445,12 +1601,27 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
 
     // ---------------------------------------------------------------- frame
 
+    /**
+     * Stops the editor's frame work (its element is destroyed or about to be): generated editors drop fields. A field
+     * whose element was destroyed stops by itself at its next frame.
+     */
+    public void dispose() {
+        ui.removeFrameListener(this);
+    }
+
     /** The caret's blink, from the frame's clock. */
     @Override
     public void frame(long nanos) {
+        if (!element.alive()) {
+            dispose();
+            return;
+        }
         now = nanos;
         if (glyphsArrived()) {
             ui.repaint(element);
+        }
+        if (speller != null && !password() && wrapWidth >= 0) {
+            spellStep();
         }
         if (text.selectionVersion() != selectionSeen) {
             changed(false); // the text or selection was changed through editable() by code
@@ -1464,6 +1635,219 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             blinkOn = on;
             ui.repaint(element);
         }
+    }
+
+    // ---------------------------------------------------------------- spelling
+
+    /** Everything is checked again (the dictionary, the ignored words or the settings changed). */
+    private void spellAll() {
+        spellVersionSeen = speller.version();
+        int n = Math.min(heights.count(), spellDirty.length);
+        for (int p = 0; p < n; p++) {
+            spellDirty[p] = true;
+            spellCount[p] = 0;
+        }
+        spellPending = true;
+        spellCursor = 0;
+    }
+
+    /** Checks paragraph {@code p} now. */
+    private void checkParagraph(int p) {
+        spellPara = p;
+        spellCount[p] = 0;
+        speller.check(text.text(), text.lineStart(p), text.lineEnd(p), collector);
+        spellDirty[p] = false;
+        spellChecks++;
+    }
+
+    private void misspelt(int start, int end) {
+        int p = spellPara;
+        int s = text.lineStart(p);
+        int c = spellCount[p];
+        int[] a = spellErrors[p];
+        if (a == null || a.length < c * 2 + 2) {
+            a = growErrors(a, c * 2 + 2);
+            spellErrors[p] = a;
+        }
+        a[c * 2] = start - s;
+        a[c * 2 + 1] = end - s;
+        spellCount[p] = c + 1;
+    }
+
+    @AllowAllocation("a paragraph's misspelt words outgrow their array, rarely")
+    private static int[] growErrors(int[] a, int n) {
+        return a == null ? new int[Math.max(8, n)] : Arrays.copyOf(a, Math.max(n, a.length * 2));
+    }
+
+    /** The visible paragraphs not checked yet are checked as they are drawn (no frame waits for them). */
+    private void spellVisible() {
+        if (speller == null || password()) {
+            return;
+        }
+        if (speller.version() != spellVersionSeen) {
+            spellAll();
+        }
+        for (int p = visibleFrom; p < visibleTo && p < text.lineCount(); p++) {
+            if (spellDirty[p]) {
+                checkParagraph(p);
+            }
+        }
+    }
+
+    /** Checks paragraphs out of view within the frame's budget. */
+    private void spellStep() {
+        if (speller.version() != spellVersionSeen) {
+            spellAll();
+            ui.repaint(element);
+        }
+        int n = heights.count();
+        if (!spellPending || text.damageFrom() != Integer.MAX_VALUE || text.lineCount() != n) {
+            return; // edits not laid out yet: the visible ones are checked when drawn, the rest next frame
+        }
+        long deadline = System.nanoTime() + (long) (SPELL_BUDGET.get() * 1e6f);
+        for (int scanned = 0; scanned < n; scanned++) {
+            if (spellCursor >= n) {
+                spellCursor = 0;
+            }
+            int p = spellCursor;
+            if (spellDirty[p]) {
+                checkParagraph(p);
+                if (p >= visibleFrom && p < visibleTo) {
+                    ui.repaint(element);
+                }
+                if (System.nanoTime() >= deadline) {
+                    return;
+                }
+            } else if ((scanned & 4095) == 4095 && System.nanoTime() >= deadline) {
+                return;
+            }
+            spellCursor++;
+        }
+        spellPending = false;
+    }
+
+    /** The squiggles under paragraph {@code p}'s misspelt words, on its lines {@code [first, last)}. */
+    private void paintSquiggles(DrawList list, TextBlock b, int p, float ox, float top, float opacity, int first,
+        int last) {
+        ResolvedStyle ms = partStyle(misspeltPart);
+        long col = Rgba.fade(ms.isSet(Styles.COLOR) ? ms.rgba(Styles.COLOR) : color, opacity);
+        float sc = scale();
+        float wave = ms.getFloat(TextStyles.SQUIGGLE_WAVELENGTH) * sc;
+        float amp = ms.getFloat(TextStyles.SQUIGGLE_AMPLITUDE) * sc;
+        float thick = Math.max(0.5f, ms.getFloat(TextStyles.SQUIGGLE_THICKNESS) * sc);
+        int caretLocal = -1;
+        if (focused() && !text.hasSelection() && text.lineOf(text.caret()) == p) {
+            caretLocal = text.caret() - text.lineStart(p); // the word being typed is not marked yet
+        }
+        int[] errs = spellErrors[p];
+        for (int k = 0; k < spellCount[p]; k++) {
+            int a = errs[k * 2];
+            int z = errs[k * 2 + 1];
+            if (z == caretLocal || z > b.length()) {
+                continue;
+            }
+            int n = Math.min(b.rangeBoxes(a, z, 0, boxes), boxes.length / 4);
+            for (int i = 0; i < n; i++) {
+                int line = b.lineAt(boxes[i * 4 + 1] + 0.5f);
+                if (line < first || line >= last) {
+                    continue;
+                }
+                float base = top + b.lineBaseline(line) + Math.max(1, size * 0.12f);
+                float x0 = ox + boxes[i * 4];
+                float x1 = ox + boxes[i * 4 + 2];
+                if (wave <= 0 || amp <= 0) {
+                    list.box(x0, base, x1, base + thick, col, 0, 0, 0, 0, 0, 0);
+                    continue;
+                }
+                float half = wave * 0.5f;
+                boolean up = true;
+                for (float x = x0; x < x1; x += half) {
+                    float nx = Math.min(x1, x + half);
+                    float t = (nx - x) / half;
+                    list.line(x, base + (up ? amp : 0), nx, base + (up ? amp - amp * t : amp * t), thick, col);
+                    up = !up;
+                }
+            }
+        }
+    }
+
+    /** The misspelt word at text index {@code index} as {@code start << 32 | end}, or -1. */
+    private long misspeltAt(int index) {
+        int p = text.lineOf(index);
+        if (spellDirty[p]) {
+            checkParagraph(p);
+        }
+        int local = index - text.lineStart(p);
+        int[] errs = spellErrors[p];
+        for (int k = 0; k < spellCount[p]; k++) {
+            if (local >= errs[k * 2] && local <= errs[k * 2 + 1]) {
+                int s = text.lineStart(p);
+                return (long) (s + errs[k * 2]) << 32 | (s + errs[k * 2 + 1]);
+            }
+        }
+        return -1;
+    }
+
+    /** The context menu on a misspelt word: its corrections, add to the dictionary, ignore. */
+    @AllowAllocation("the spelling menu is filled when it opens")
+    private void spellContext(UiEvent e) {
+        if (speller == null || spellControls == null || password() || readOnly() || !editable) {
+            return;
+        }
+        boolean pointer = e.pointerId() >= 0;
+        int index = pointer ? hit(e.x(), e.y()) : text.caret();
+        long word = misspeltAt(index);
+        if (word < 0) {
+            return;
+        }
+        e.consume();
+        int start = (int) (word >>> 32);
+        int end = (int) word;
+        String w = text.text().subSequence(start, end).toString();
+        if (pointer && (!text.hasSelection() || index < text.selectionStart() || index > text.selectionEnd())) {
+            text.moveTo(index, false);
+            changed(false);
+        }
+        if (spellMenu == null) {
+            spellMenu = spellControls.menu("Spelling");
+        }
+        spellMenu.clear();
+        List<String> suggestions = speller.suggest(w);
+        for (String s : suggestions) {
+            spellMenu.item(s.replace("&", "&&"), () -> replaceWord(start, end, w, s));
+        }
+        if (suggestions.isEmpty()) {
+            spellMenu.item(spellNone, () -> { }).enabled(false);
+        }
+        spellMenu.separator();
+        spellMenu.item(spellAdd, () -> speller.addToDictionary(w));
+        spellMenu.item(spellIgnore, () -> speller.ignore(w));
+        if (pointer) {
+            spellMenu.openAt(e.x(), e.y());
+            return;
+        }
+        int p = text.lineOf(start); // from the keyboard: below the word
+        if (p >= visibleFrom && p < visibleTo) {
+            TextBlock b = shaped(p);
+            int local = start - text.lineStart(p);
+            int line = b.caretLine(local);
+            spellMenu.openAt(textX0 - scrollX + alignShift() + b.caretX(local),
+                paraTop(p) + b.lineTop(line) + b.lineHeight(line));
+        } else {
+            spellMenu.open(element, true);
+        }
+    }
+
+    /** Replaces the misspelt {@code word} at {@code [start, end)} by {@code with} (if the text there is unchanged). */
+    @AllowAllocation("a user action")
+    private void replaceWord(int start, int end, String word, String with) {
+        if (end > text.length() || !text.text().subSequence(start, end).toString().equals(word)) {
+            return;
+        }
+        text.replace(start, end, with);
+        text.moveTo(start + with.length(), false);
+        changed(true);
+        interaction.focus(element);
     }
 
     /** Whether glyphs drawn as placeholders became ready since the last record (a block's version moved). */
@@ -1520,6 +1904,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
                 }
             }
             case EXIT -> hoverLink(NONE);
+            case CONTEXT -> spellContext(e);
             default -> {
             }
         }
@@ -1550,7 +1935,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
                 boolean right = c == UiCommand.RIGHT;
                 if (text.hasSelection() && !extend) {
                     text.moveTo(right == visualRightIsForward() ? text.selectionEnd() : text.selectionStart(), false);
-                } else if (CARET_MOVEMENT.index() == 0) {
+                } else if (CARET_MOVEMENT.index() == 0 && !masked()) {
                     text.moveTo(visualMove(right), extend);
                 } else {
                     text.moveLogically(right, false, extend);
@@ -1592,7 +1977,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             }
             case UNDO -> edit = !readOnly() && text.undo();
             case REDO -> edit = !readOnly() && text.redo();
-            case DELETE_BACK -> edit = !readOnly() && text.deleteBack(false);
+            case DELETE_BACK -> edit = !readOnly() && (password() ? text.deleteBackCluster() : text.deleteBack(false));
             case DELETE_FORWARD -> edit = !readOnly() && text.deleteForward(false);
             case DELETE_WORD_BACK -> edit = !readOnly() && text.deleteBack(!password());
             case DELETE_WORD_FORWARD -> edit = !readOnly() && text.deleteForward(!password());
@@ -1742,12 +2127,24 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private int hit(float x, float y) {
         float ox = textX0 - scrollX + alignShift();
         if (!multiLine) {
-            return shaped(0).hitTest(x - ox, 0);
+            return onCluster(shaped(0).hitTest(x - ox, 0));
         }
         float contentY = y - textY0 + heights.top(anchor) + anchorOffset;
         int p = heights.at(Math.max(0, contentY));
         TextBlock b = shaped(p);
         return text.lineStart(p) + b.hitTest(x - ox, contentY - heights.top(p));
+    }
+
+    /**
+     * {@code index}, or the start of the grapheme cluster it falls in while the text is masked: a masked cluster is one
+     * mask glyph, so the caret never stops inside it.
+     */
+    private int onCluster(int index) {
+        if (!masked() || index <= 0 || index >= text.length()) {
+            return index;
+        }
+        int start = text.previousGrapheme(index);
+        return text.nextGrapheme(start) == index ? index : start;
     }
 
     private void press(UiEvent e) {
@@ -1794,7 +2191,8 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
 
     /** Selects the word ({@code unit} 2) or line (3) at {@code at}, which a drag then extends by. */
     private void selectUnit(int at, int unit) {
-        long range = unit == 2 ? text.wordAt(at) : text.lineAt(at);
+        // a masked password shows no words: a double click selects it all
+        long range = masked() ? text.length() : unit == 2 ? text.wordAt(at) : text.lineAt(at);
         unitStart = (int) (range >>> 32);
         unitEnd = (int) range;
         text.select(unitStart, unitEnd);
@@ -1805,6 +2203,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private void move(UiEvent e) {
         if (draggedHandle != 0) {
             if ((e.buttons() & Pointer.PRIMARY) != 0) {
+                handleEdgeScroll(e.x() - grabX, e.y() - grabY);
                 int at = hit(e.x() - grabX, e.y() - grabY);
                 int other = draggedHandle == 1 ? text.selectionEnd() : text.selectionStart();
                 if (at != other) {
@@ -1857,6 +2256,24 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             return;
         }
         hoverLink(linkAt(e.x(), e.y()));
+    }
+
+    /**
+     * A selection handle dragged past the text's edge scrolls the text that far (as a mouse selection does), so the
+     * selection reaches what was out of view: an area up and down, a field sideways.
+     */
+    private void handleEdgeScroll(float x, float y) {
+        if (multiLine) {
+            if (y < textY0 || y > textY0 + viewH) {
+                scrollBy(y < textY0 ? y - textY0 : y - textY0 - viewH);
+            }
+            return;
+        }
+        if (x < textX0 || x > textX0 + viewW) {
+            float most = Math.max(0, shaped(0).width() + caretWidth() - viewW);
+            scrollX = Math.max(0, Math.min(most, scrollX + (x < textX0 ? x - textX0 : x - textX0 - viewW)));
+            ui.repaint(element);
+        }
     }
 
     private void release(UiEvent e) {

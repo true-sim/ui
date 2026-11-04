@@ -31,7 +31,8 @@ class UiTunablesTest {
         }
         List<String> declared = new ArrayList<>();
         for (Class<?> anchor : new Class<?>[] {Ui.class, Tunable.class, com.truesim.ui.layout.Layout.class,
-            com.truesim.ui.style.StyleResolver.class, com.truesim.ui.text.TextSystem.class}) {
+            com.truesim.ui.style.StyleResolver.class, com.truesim.ui.text.TextSystem.class,
+            com.truesim.ui.charts.ChartTunables.class}) {
             for (Tunable t : staticTunables(anchor)) {
                 declared.add(t.name());
                 assertThat(listed).as("Ui.tunables() lists %s", t.name()).contains(t);
@@ -39,7 +40,7 @@ class UiTunablesTest {
         }
         assertThat(declared).contains("ui.animation.speed", "ui.menu.submenuDelay", "ui.scroll.friction",
             "ui.list.typeAheadTimeout", "ui.text.caretBlink", "ui.input.numberDragPixels", "ui.window.snapDistance",
-            "ui.tooltip.warmTime", "ui.hover.openDelay", "ui.input.tooltipDelay", "ui.scale");
+            "ui.tooltip.warmTime", "ui.hover.openDelay", "ui.input.tooltipDelay", "ui.scale", "ui.chart.pyramidBlock");
     }
 
     /** The static {@link Tunable} fields of every class in the module (class directory) of {@code anchor}. */

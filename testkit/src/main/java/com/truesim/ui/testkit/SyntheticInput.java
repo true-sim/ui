@@ -29,6 +29,8 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
     private final StringBuilder composition = new StringBuilder();
     private int compositionCursor;
     private boolean composing;
+    private int mnemonic;
+    private boolean mnemonicsShown;
 
     private final int[] ids = new int[MAX];
     private final Pointer.Kind[] kinds = new Pointer.Kind[MAX];
@@ -45,6 +47,18 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
     /** Nothing queued. */
     @AllowAllocation("test helper")
     public SyntheticInput() {
+    }
+
+    /** Queues a mnemonic key (a letter pressed with Alt) for the next frame; returns this. */
+    public SyntheticInput mnemonic(int codePoint) {
+        mnemonic = codePoint;
+        return this;
+    }
+
+    /** Holds ({@code true}) or lets go of the mnemonic modifier (Alt): underlined letters show while held. */
+    public SyntheticInput mnemonicsShown(boolean shown) {
+        mnemonicsShown = shown;
+        return this;
     }
 
     /** Queues commands of player 0 for the next frame; returns this. */
@@ -153,6 +167,11 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
         while (!commands.isEmpty()) {
             input.command(commands.poll(), commandPlayers.poll(), commandFlags.poll());
         }
+        if (mnemonic != 0) {
+            input.mnemonic(mnemonic);
+            mnemonic = 0;
+        }
+        input.mnemonicsShown(mnemonicsShown);
         if (!text.isEmpty()) {
             input.text(text);
             text.setLength(0);

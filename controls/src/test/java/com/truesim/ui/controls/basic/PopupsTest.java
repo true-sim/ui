@@ -368,6 +368,29 @@ class PopupsTest {
     }
 
     @Test
+    void aDialogsButtonsFollowThePlatformsOrderRightAligned() {
+        float[] rightEdge = new float[3];
+        String[] platforms = {"windows", "linux", "macos"};
+        for (int k = 0; k < platforms.length; k++) {
+            Fixture f = new Fixture();
+            f.c.platform(platforms[k]);
+            assertThat(f.c.platform()).isEqualTo(platforms[k]);
+            Dialog d = f.c.confirm("Quit?", "Unsaved changes.", "Quit", "Stay");
+            d.show();
+            f.settle();
+            var layout = f.ui.layout();
+            int stay = d.button(0).element().slot();
+            int quit = d.button(1).element().slot();
+            boolean acceptFirst = !platforms[k].equals("macos");
+            assertThat(layout.x(quit) < layout.x(stay)).as(platforms[k] + ": accepting first").isEqualTo(acceptFirst);
+            rightEdge[k] = Math.max(layout.x(quit) + layout.width(quit), layout.x(stay) + layout.width(stay));
+        }
+        assertThat(rightEdge[0]).as("right aligned on every platform").isEqualTo(rightEdge[2]);
+        assertThat(rightEdge[1]).isEqualTo(rightEdge[2]);
+        assertThat(Controls.systemPlatform()).isIn("windows", "linux", "macos");
+    }
+
+    @Test
     void notificationsTimeOutPauseOnHoverAndStack() {
         Fixture f = new Fixture();
         Toasts toasts = f.c.toasts();

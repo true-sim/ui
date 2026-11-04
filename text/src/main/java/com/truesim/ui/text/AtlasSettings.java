@@ -30,6 +30,8 @@ public final class AtlasSettings {
         "Width and height of an atlas page in texels");
     private final Tunable glyphsPerFrame = Tunable.of("ui.text.atlas.glyphsPerFrame", 32, 1, 4096,
         "New glyphs the atlas starts generating per frame; the rest wait (drawn as nothing) for later frames");
+    private final Tunable maxPages = Tunable.of("ui.text.atlas.maxPages", 8, 1, 256,
+        "Glyph atlas pages kept: past it the least recently used page no text draws is cleared for new glyphs");
     private final Tunable smallText = Tunable.choice("ui.text.smallText", List.of("HINTED", "MTSDF"), "HINTED",
         "Small screen text: HINTED draws FreeType's hinted raster below ui.text.hintedBelow (crisper), MTSDF draws "
             + "distance fields at every size (softer when small); the layout is the same in both");
@@ -61,6 +63,11 @@ public final class AtlasSettings {
         return glyphsPerFrame;
     }
 
+    /** Pages kept before the least recently used one not drawn is evicted. */
+    public Tunable maxPages() {
+        return maxPages;
+    }
+
     /** How small text is drawn: {@link #HINTED} or {@link #MTSDF}, as the choice's index. */
     public Tunable smallText() {
         return smallText;
@@ -84,7 +91,7 @@ public final class AtlasSettings {
     /** Every tunable, for registering them as engine settings. */
     @AllowAllocation("called once, when settings are registered")
     public List<Tunable> all() {
-        return List.of(emSize, pixelRange, pageSize, glyphsPerFrame, smallText, hintedBelow);
+        return List.of(emSize, pixelRange, pageSize, glyphsPerFrame, maxPages, smallText, hintedBelow);
     }
 
     /** Grows when a value that changes the atlas's content changes. */
