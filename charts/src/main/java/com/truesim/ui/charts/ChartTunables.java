@@ -53,6 +53,9 @@ public final class ChartTunables implements TunableSource {
     /** The most texels a heatmap cell takes in its texture (cells stay sharp under filtering). */
     public static final Tunable HEATMAP_TEXELS = Tunable.of("ui.chart.heatmapTexels", 8, 1, 64,
         "Texels per heatmap cell side");
+    /** The spacing (in pixels) of the points a legend placed at its best position tests for data under it. */
+    public static final Tunable LEGEND_PROBE = Tunable.of("ui.chart.legendProbe", 6, 1, 256,
+        "Pixels between the points a chart tests for data under a legend placed at its best position");
 
     /** Made by {@link java.util.ServiceLoader}. */
     public ChartTunables() {
@@ -63,7 +66,7 @@ public final class ChartTunables implements TunableSource {
     public static List<Tunable> all() {
         return List.of(ZOOM_STEP, DECIMATE_ABOVE, PYRAMID_BLOCK, LTTB_PER_PIXEL, LTTB_MAX_INPUT, MAX_POINTS,
             GRID_PER_CELL, HOVER_DISTANCE, MAX_TICKS, FOLLOW_LEAD, DRAG_PIXELS, GRAB_PIXELS, ARC_PIXELS,
-            HEATMAP_TEXELS);
+            HEATMAP_TEXELS, LEGEND_PROBE);
     }
 
     @Override

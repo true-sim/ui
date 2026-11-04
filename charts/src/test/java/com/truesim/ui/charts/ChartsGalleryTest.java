@@ -13,9 +13,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The demo page in both themes: laid out sanely (nothing escaping its clip, no text leaving its box or over other
- * text), every chart drawing its series, axes and legend, the test theme changing how it looks; and, with
- * {@code TRUESIM_SCREENSHOTS=true}, CPU previews of it (plain and posed: hovered, a legend entry hidden, an axis
- * selected) in {@code TRUESIM_SCREENSHOT_DIR} (default {@code build/screenshots}).
+ * text), every chart drawing its series, axes and legend (never over its data), the test theme changing how it looks;
+ * and, with {@code TRUESIM_SCREENSHOTS=true}, CPU previews of it (plain and posed: hovered, a legend entry hidden, an
+ * axis selected) in {@code TRUESIM_SCREENSHOT_DIR} (default {@code build/screenshots}).
  */
 class ChartsGalleryTest {
 
@@ -42,6 +42,7 @@ class ChartsGalleryTest {
         assertThat(kinds(r.ui)).contains(Primitive.LINE, Primitive.TRIANGLE, Primitive.BOX, Primitive.IMAGE,
             Primitive.GLYPH);
         assertThat(g.grouped.legendCount()).isEqualTo(3);
+        noLegendOverData(g, theme);
         assertThat(Semantics.unnamed(Semantics.of(r.ui.store(), r.ui.interaction()))).isEmpty();
         g.pose(r.ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
         previewPosed(r, theme);
@@ -50,6 +51,17 @@ class ChartsGalleryTest {
         assertThat(g.linkedA.highlights()).isGreaterThan(0);
         assertThat(g.bars.itemEnabled(2)).isFalse();
         LayoutSanity.assertSane(r.ui, "charts gallery posed (" + theme + ")");
+        noLegendOverData(g, theme);
+    }
+
+    /** No chart's legend box covers a sample or shape of its series inside the plot. */
+    private static void noLegendOverData(ChartsGallery g, String theme) {
+        for (Chart c : g.charts()) {
+            if (c.legendCount() > 0) {
+                assertThat(LegendTest.dataUnderLegend(c)).as(c.title() + " (" + theme + "): data under the legend")
+                    .isFalse();
+            }
+        }
     }
 
     private static java.util.Set<Integer> kinds(Ui ui) {

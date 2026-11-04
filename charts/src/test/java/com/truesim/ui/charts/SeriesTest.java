@@ -52,9 +52,9 @@ class SeriesTest {
         return -1;
     }
 
-    /** The plot's primitives of {@code kind}, its own background box left out. */
+    /** The plot's primitives of {@code kind} (its background is the chart's, under the grid). */
     private int plotCount(int kind, Chart chart) {
-        int n = kind == Primitive.BOX ? -1 : 0;
+        int n = 0;
         DrawList list = rig.ui.layers()[0];
         int start = rig.ui.store().rangeStart(chart.plotElement().slot());
         int end = start + rig.ui.store().rangeCapacity(chart.plotElement().slot());
