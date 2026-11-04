@@ -19,9 +19,11 @@ import java.util.Objects;
  * shaper each time.
  *
  * <p><b>Memory.</b> At most {@link #ENTRIES} runs ({@code ui.text.shapeCache}; 0 turns the cache off), in tables made
- * when that changes; when they are full the cache starts over (a generation, nothing cleared), so a stream of new text
- * costs a shaping per run as without the cache, plus a hash. Allocation-free otherwise. Use from the text system's
- * thread.
+ * when that changes. Runs are kept in two generations: when the current one is full it becomes the previous one
+ * and a new one starts (nothing cleared), and a run found in the previous generation moves into the current one. So a
+ * stream of new text (a log flood) never empties the cache at once: what was shown recently stays (a cache emptied at
+ * once made every visible row shape again in one frame, a spike), and new text costs a shaping per run as without the
+ * cache, plus a hash. Allocation-free otherwise. Use from the text system's thread.
  */
 public final class ShapeCache implements TextShaper {
 
@@ -38,8 +40,8 @@ public final class ShapeCache implements TextShaper {
     private final TextShaper shaper;
     private int entries = -1; // the tunable's value the tables were made for
     private int mask;
-    private int generation = 1;
-    private int count;
+    private int generation = 2; // generations below generation - 1 are dead; slots start at 0
+    private int count; // runs of the current generation
     // open addressing: per slot its generation (another: empty), hash, key and where its characters and glyphs are
     private int[] slotGeneration = new int[0];
     private int[] hashes = new int[0];
@@ -51,9 +53,11 @@ public final class ShapeCache implements TextShaper {
     private int[] charCount = new int[0];
     private int[] glyphAt = new int[0];
     private int[] glyphCount = new int[0];
-    // pools, filled from the start of each generation
+    // pools in two halves, one per generation (by its parity), each filled from its start
     private char[] chars = new char[0];
-    private int charsUsed;
+    private int charsHalf; // each half's length
+    private int charsUsed; // within the current generation's half
+    private int glyphsHalf;
     private int[] glyphs = new int[0];
     private int[] clusters = new int[0];
     private float[] advances = new float[0];
@@ -119,10 +123,13 @@ public final class ShapeCache implements TextShaper {
         int key = (rightToLeft ? 1 : 0) | (letter(text, runStart, runEnd) ? 2 : 0);
         int hash = hash(text, start, end, face, sizePx, key);
         int slot = hash & mask;
-        while (slotGeneration[slot] == generation) {
+        while (slotGeneration[slot] >= generation - 1) {
             if (hashes[slot] == hash && faces[slot] == face && sizes[slot] == sizePx && bits[slot] == key
                 && charCount[slot] == n && Objects.equals(languages[slot], language) && same(text, start, slot)) {
                 hits++;
+                if (slotGeneration[slot] != generation) {
+                    promote(slot); // shown again: into the current generation
+                }
                 int g = glyphAt[slot];
                 for (int i = 0; i < glyphCount[slot]; i++) {
                     out.add(glyphs[g + i], start + clusters[g + i], advances[g + i], offsetsX[g + i],
@@ -136,15 +143,15 @@ public final class ShapeCache implements TextShaper {
         int first = out.size();
         shaper.shape(text, length, runStart, runEnd, start, end, face, sizePx, rightToLeft, language, out);
         int made = out.size() - first;
-        if (count + 1 > entries || charsUsed + n > chars.length || glyphsUsed + made > glyphs.length) {
-            if (made > glyphs.length || n > chars.length) {
-                return; // larger than the pools: not kept
-            }
-            generation++; // full: start over
-            count = 0;
-            charsUsed = 0;
-            glyphsUsed = 0;
+        if (made > glyphsHalf || n > charsHalf) {
+            return; // larger than a pool: not kept
+        }
+        if (count + 1 > entries || charsUsed + n > charsHalf || glyphsUsed + made > glyphsHalf) {
+            nextGeneration();
             slot = hash & mask;
+            while (slotGeneration[slot] >= generation - 1) {
+                slot = slot + 1 & mask;
+            }
         }
         slotGeneration[slot] = generation;
         hashes[slot] = hash;
@@ -152,14 +159,16 @@ public final class ShapeCache implements TextShaper {
         sizes[slot] = sizePx;
         bits[slot] = (byte) key;
         languages[slot] = language;
-        charAt[slot] = charsUsed;
+        int charBase = (generation & 1) * charsHalf;
+        int glyphBase = (generation & 1) * glyphsHalf;
+        charAt[slot] = charBase + charsUsed;
         charCount[slot] = n;
-        System.arraycopy(text, start, chars, charsUsed, n);
+        System.arraycopy(text, start, chars, charBase + charsUsed, n);
         charsUsed += n;
-        glyphAt[slot] = glyphsUsed;
+        glyphAt[slot] = glyphBase + glyphsUsed;
         glyphCount[slot] = made;
         for (int i = 0; i < made; i++) {
-            int g = glyphsUsed + i;
+            int g = glyphBase + glyphsUsed + i;
             glyphs[g] = out.glyph(first + i);
             clusters[g] = out.cluster(first + i) - start;
             advances[g] = out.advance(first + i);
@@ -168,6 +177,40 @@ public final class ShapeCache implements TextShaper {
             flags[g] = (byte) out.flags(first + i);
         }
         glyphsUsed += made;
+        count++;
+    }
+
+    /** The current generation becomes the previous one; the one before it dies (its pool half is reused). */
+    private void nextGeneration() {
+        generation++;
+        count = 0;
+        charsUsed = 0;
+        glyphsUsed = 0;
+    }
+
+    /** Moves a run of the previous generation into the current one (its characters and glyphs into its pool half). */
+    private void promote(int slot) {
+        int n = charCount[slot];
+        int made = glyphCount[slot];
+        if (count + 1 > entries || charsUsed + n > charsHalf || glyphsUsed + made > glyphsHalf) {
+            nextGeneration(); // the slot's generation is now the one before the previous: copy before it is reused
+        }
+        int charBase = (generation & 1) * charsHalf;
+        int glyphBase = (generation & 1) * glyphsHalf;
+        System.arraycopy(chars, charAt[slot], chars, charBase + charsUsed, n);
+        int from = glyphAt[slot];
+        int to = glyphBase + glyphsUsed;
+        System.arraycopy(glyphs, from, glyphs, to, made);
+        System.arraycopy(clusters, from, clusters, to, made);
+        System.arraycopy(advances, from, advances, to, made);
+        System.arraycopy(offsetsX, from, offsetsX, to, made);
+        System.arraycopy(offsetsY, from, offsetsY, to, made);
+        System.arraycopy(flags, from, flags, to, made);
+        charAt[slot] = charBase + charsUsed;
+        glyphAt[slot] = to;
+        charsUsed += n;
+        glyphsUsed += made;
+        slotGeneration[slot] = generation;
         count++;
     }
 
@@ -217,7 +260,7 @@ public final class ShapeCache implements TextShaper {
     @AllowAllocation("the tunable changed")
     private void resize(int size) {
         entries = size;
-        int slots = Integer.highestOneBit(Math.max(1, size) * 2) * 2; // a power of two, at most half full
+        int slots = Integer.highestOneBit(Math.max(1, size) * 4) * 2; // a power of two, two generations at most half
         mask = slots - 1;
         slotGeneration = new int[slots];
         hashes = new int[slots];
@@ -229,15 +272,17 @@ public final class ShapeCache implements TextShaper {
         charCount = new int[slots];
         glyphAt = new int[slots];
         glyphCount = new int[slots];
-        chars = new char[size * CHARS_PER_ENTRY];
-        int g = size * GLYPHS_PER_ENTRY;
+        charsHalf = size * CHARS_PER_ENTRY;
+        glyphsHalf = size * GLYPHS_PER_ENTRY;
+        chars = new char[2 * charsHalf];
+        int g = 2 * glyphsHalf;
         glyphs = new int[g];
         clusters = new int[g];
         advances = new float[g];
         offsetsX = new float[g];
         offsetsY = new float[g];
         flags = new byte[g];
-        generation = 1;
+        generation = 2;
         count = 0;
         charsUsed = 0;
         glyphsUsed = 0;

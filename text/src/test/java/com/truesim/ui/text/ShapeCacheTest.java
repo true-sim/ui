@@ -119,22 +119,37 @@ class ShapeCacheTest {
     }
 
     @Test
-    void whenFullItStartsOverAndOffItShapesEverything() {
+    void whenFullTheCurrentGenerationAgesAndWhatIsShownAgainStaysAndOffItShapesEverything() {
         ShapeCache.ENTRIES.set(4);
         for (int i = 0; i < 4; i++) {
             shape("w" + i, 0, 2, face, 14, false);
         }
         shape("w0", 0, 2, face, 14, false);
         assertThat(shaper.calls).isEqualTo(4);
-        shape("w4", 0, 2, face, 14, false); // the fifth: started over, it alone kept
+        shape("w4", 0, 2, face, 14, false); // the fifth: a new generation, w0 to w3 the previous one
         shape("w4", 0, 2, face, 14, false);
         assertThat(shaper.calls).isEqualTo(5);
         shape("w0", 0, 2, face, 14, false);
-        assertThat(shaper.calls).as("forgotten").isEqualTo(6);
+        assertThat(shaper.calls).as("the previous generation is still kept: w0 moves into the current one").isEqualTo(5);
+        for (int i = 5; i < 7; i++) { // fills the current generation (w4, w0, w5, w6): w1 to w3 die with the next
+            shape("w" + i, 0, 2, face, 14, false);
+        }
+        shape("w7", 0, 2, face, 14, false);
+        assertThat(shaper.calls).isEqualTo(8);
+        shape("w0", 0, 2, face, 14, false);
+        shape("w6", 0, 2, face, 14, false);
+        assertThat(shaper.calls).as("shown recently: kept").isEqualTo(8);
+        shape("w1", 0, 2, face, 14, false);
+        assertThat(shaper.calls).as("two generations old: forgotten").isEqualTo(9);
+        for (int i = 0; i < 40; i++) { // a stream of new text never shapes what is shown every time again
+            shape("n" + (10 + i), 0, 3, face, 14, false);
+            shape("w0", 0, 2, face, 14, false);
+        }
+        assertThat(shaper.calls).isEqualTo(49);
         ShapeCache.ENTRIES.set(0);
         shape("w0", 0, 2, face, 14, false);
         shape("w0", 0, 2, face, 14, false);
-        assertThat(shaper.calls).isEqualTo(8);
+        assertThat(shaper.calls).isEqualTo(51);
         assertThat(cache.shaper()).isSameAs(shaper);
         assertThat(cache.marksUnsafeBreaks()).isTrue();
     }
