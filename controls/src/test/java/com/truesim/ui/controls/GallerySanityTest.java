@@ -159,4 +159,13 @@ class GallerySanityTest {
             g.pose(ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
         });
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void propsGallery(String theme) {
+        check("props gallery", theme, ui -> {
+            com.truesim.ui.props.PropsGallery.build(new Controls(ui), ui.root());
+            settle(ui, 1280, 1700);
+        });
+    }
 }

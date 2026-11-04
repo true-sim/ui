@@ -35,6 +35,9 @@ include("ui-fonts-emoji") // colour emoji, optional for its size
 project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
 include("ui-charts") // charts over ui-controls
 project(":ui-charts").projectDir = file("charts")
+include("ui-props", "ui-props-processor") // property panels from metadata (design 5.11)
+project(":ui-props").projectDir = file("props")
+project(":ui-props-processor").projectDir = file("props-processor")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {

@@ -20,6 +20,8 @@ dependencies {
     testImplementation(project(":ui-fonts-emoji")) // colour emoji in text fields
     // The shipped themes style charts with ChartStyles' keys; GallerySanityTest checks the charts gallery too.
     testImplementation(testFixtures(project(":ui-charts")))
+    // The props gallery (ui-props builds on these controls): checked by GallerySanityTest and previewed with the others.
+    testImplementation(testFixtures(project(":ui-props")))
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.
