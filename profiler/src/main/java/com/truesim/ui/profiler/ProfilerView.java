@@ -186,7 +186,7 @@ public final class ProfilerView implements Ui.FrameListener {
 
     @Override
     public void frame(long nanos) {
-        long sel = timeline.selectionVersion();
+        long sel = timeline.selectionVersion() + frozen.version() + (timeline.live() ? 1 : 0);
         long rec = recording.version();
         boolean selected = sel != seenSelection;
         long every = (long) (ProfilerTunables.STATS_INTERVAL.get() * 1e9);

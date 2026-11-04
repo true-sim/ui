@@ -38,7 +38,8 @@ profiler {
   border: 4px $hot;
 }
 
-profiler > split-pane, profiler tab-pane { grow: 1; }
+profiler > split-pane { grow: 1; }
+profiler split-second > tab-pane { width: 100%; height: 100%; }
 profiler split-first > profiler-timeline, profiler tab-content > profiler-flame, profiler tab-content > profiler-table,
 profiler tab-content > scroll-pane.profiler-counters { width: 100%; height: 100%; }
 
