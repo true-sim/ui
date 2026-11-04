@@ -355,7 +355,8 @@ public abstract class ScrollView {
         float step = ui.styles().styleOf(root.slot()).getFloat(DataStyles.SCROLL_STEP);
         float dx = e.scrollX();
         float dy = e.scrollY();
-        if ((e.modifiers() & Pointer.SHIFT) != 0 && dx == 0) {
+        // Shift turns the wheel sideways; so does a view that only scrolls sideways (a horizontal list)
+        if (dx == 0 && ((e.modifiers() & Pointer.SHIFT) != 0 || !scrollY.overflows() && scrollX.overflows())) {
             dx = -dy;
             dy = 0;
         }
