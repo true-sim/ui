@@ -18,6 +18,8 @@ dependencies {
     testImplementation(project(":ui-text-native")) // the real text path in allocation tests and benchmarks
     testImplementation(project(":ui-fonts-cjk")) // bundled fonts: the same layout on every machine
     testImplementation(project(":ui-fonts-emoji")) // colour emoji in text fields
+    // The props gallery (ui-props builds on these controls): checked by GallerySanityTest and previewed with the others.
+    testImplementation(testFixtures(project(":ui-props")))
 }
 
 // Benchmarks (TRUESIM_BENCHMARK=true) measure the code, not its coverage probes.

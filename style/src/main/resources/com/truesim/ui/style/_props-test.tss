@@ -1,0 +1,39 @@
+// Generated property panels and collection editors in the garish test theme (see _props.tss for the element types):
+// the default rules first (their layout keeps the panels usable), then every part looks obviously different, and
+// the test theme makes its own choices: inspector panels, labels above fields, operations at each row's end.
+
+@use "props";
+
+$props-hot: #ff00ff;
+$props-lime: #39ff14;
+$props-sun: #ffef00;
+$props-cyan: #00ffff;
+
+props.panel { props-layout: inspector; gap: 7px; }
+props.panel[layout=row] { props-layout: row; gap: 5px; }
+props.panel[layout=compact] { props-layout: compact; }
+props.row { background: box(rgba($props-cyan, 0.18)); padding: 3px; radius: 0px 9px 0px 9px; }
+props.panel[layout=row] props.row { background: none; padding: 0px; }
+label.prop-label { color: $props-sun; font-style: italic; }
+label.prop-group-title { color: $props-hot; font-weight: 900; }
+label.prop-unit, label.prop-value { color: $props-lime; }
+props.group { border: 3px $props-hot; radius: 0px; background: box(rgba($props-hot, 0.12)); }
+props.section-body { background: box(rgba($props-lime, 0.12)); }
+
+collection { border: 3px $props-lime; radius: 0px 14px 0px 14px; ops-placement: row-end; confirm: clear remove; }
+collection-header { background: box(rgba($props-sun, 0.3)); padding: 2px; }
+label.collection-count { color: $props-hot; font-weight: 800; }
+button.props-op { background: box($props-hot); border: 2px $props-sun; radius: 0px; }
+image.icon#op-add { image: "icons/plus" $props-lime contain; }
+image.icon#op-remove { image: "icons/close" $props-sun contain; }
+image.icon#op-up { image: "icons/chevron-up" $props-cyan contain; }
+image.icon#op-down { image: "icons/chevron-down" $props-cyan contain; }
+button.props-op#duplicate { op-label: "DUP"; }
+button.props-op#clear { op-label: "WIPE"; }
+label.collection-column { color: $props-lime; font-weight: 800; }
+collection-item { background: box(rgba($props-sun, 0.15)); }
+collection-item:hover { background: box(rgba($props-hot, 0.3)); }
+collection-master-detail list-view { border: 3px $props-cyan; }
+chip { background: box($props-lime); border: 2px $props-hot; radius: 0px; }
+label.chip-label { color: #400040; }
+label.collection-summary { color: $props-sun; }

@@ -1,0 +1,130 @@
+// Generated property panels and collection editors (ui-props, design 5.11): their default look, and the choices
+// styles make for them (layouts, editors, collection kinds and operations, with the keys of PropsStyles).
+// Element types: props.panel ([model=<Type>][layout=form|grid|inspector|compact|row]), props.row ([type=...]
+// [annotation=...][property=...][group=...][model=...][label=start|top|none]), label.prop-label, props.group,
+// label.prop-group-title, props.grid, props.section-body, props.editor, label.prop-unit, label.prop-value;
+// collection ([property][element][type][kind]), collection-header, label.collection-count, props.ops ([hover]),
+// button.props-op#<op> (image#op-<op>), collection-body, props.collection-view, collection-table,
+// collection-header-row, label.collection-column, collection-item, collection-foldouts, collection-master-detail,
+// collection-detail, collection-chips, props.chips, chip, label.chip-label, textfield.chip-input,
+// collection-compact, label.collection-summary.
+
+@use "tokens";
+@use "mixins" as *;
+
+$prop-label-width: 112px;
+$prop-cell-width: 112px;
+
+// ------------------------------------------------------------------ panels and rows
+
+props.panel { layout: flex; direction: column; gap: tokens.$space-s; }
+props.panel[layout=row] { direction: row; align-items: center; gap: tokens.$space-s; }
+props.panel[layout=compact] { gap: tokens.$space-xs; }
+
+props.row {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-m;
+  min-height: 26px;
+  &:read-only { opacity: 0.7; }
+}
+props.row[label=top] { direction: column; align-items: start; gap: tokens.$space-xs; }
+props.panel[layout=row] props.row { label-placement: none; width: $prop-cell-width; shrink: 0; min-height: 0px; }
+props.row[kind=record] { label-placement: none; }
+props.panel[layout=grid] props.row { label-placement: top; }
+
+label.prop-label { @include text(caption, 600); color: var(--fg-muted); width: $prop-label-width; shrink: 0; }
+props.row[label=top] label.prop-label { width: auto; }
+label.prop-group-title { @include text(caption, 700); color: var(--accent); }
+label.prop-unit, label.prop-value { @include text(caption); color: var(--fg-muted); }
+label.prop-value { min-width: 36px; }
+
+props.group {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-m;
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+}
+props.grid {
+  layout: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: tokens.$space-m;
+}
+props.section-body { layout: flex; direction: column; gap: tokens.$space-s; padding: tokens.$space-s tokens.$space-m; }
+props.editor { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; }
+
+// editors inside rows: narrower than their defaults, narrowest in a table's cells
+props.row textfield { width: 180px; }
+props.row numberfield > textfield { width: 72px; }
+props.row color-picker { width: 180px; }
+props.row textarea { width: 180px; height: 56px; }
+props.panel[layout=row] textfield { width: 96px; }
+props.panel[layout=row] numberfield > textfield { width: 48px; }
+props.panel[layout=row] slider[orientation=horizontal] { width: 72px; }
+props.panel[layout=row] label.prop-value { min-width: 28px; }
+
+// ------------------------------------------------------------------ collections
+
+collection {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s;
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  confirm: clear;
+  virtualize-above: 50;
+  &:invalid { border: 1px var(--danger); }
+}
+collection-header { layout: flex; direction: row; align-items: center; gap: tokens.$space-m; }
+label.collection-count { @include text(caption); color: var(--fg-muted); grow: 1; }
+collection-body { layout: flex; direction: column; }
+props.collection-view { layout: flex; direction: column; }
+
+props.ops { layout: flex; direction: row; gap: tokens.$space-xs; align-items: center; }
+props.ops[hover=true] { opacity: 0; }
+collection-item:hover props.ops[hover=true] { opacity: 1; }
+button.props-op { padding: 2px tokens.$space-s; min-height: 22px; shrink: 0; }
+image.icon#op-add { image: "icons/plus" var(--fg) contain; }
+image.icon#op-remove { image: "icons/close" var(--fg) contain; }
+image.icon#op-up { image: "icons/chevron-up" var(--fg) contain; }
+image.icon#op-down { image: "icons/chevron-down" var(--fg) contain; }
+image.icon#op-duplicate, image.icon#op-clear { size: 0px; }
+button.props-op#duplicate { op-label: "Duplicate"; }
+button.props-op#clear { op-label: "Clear"; }
+
+collection-table { layout: flex; direction: column; gap: tokens.$space-xs; }
+collection-header-row { layout: flex; direction: row; gap: tokens.$space-s; }
+label.collection-column { @include text(caption, 600); color: var(--fg-muted); width: $prop-cell-width; shrink: 0; }
+collection-item { layout: flex; direction: row; align-items: center; gap: tokens.$space-s; radius: tokens.$radius-s; }
+collection-item:hover { background: box(rgba(#8b949e, 0.08)); }
+collection-foldouts { layout: flex; direction: column; gap: tokens.$space-xs; }
+collection-foldouts collection-item { align-items: start; }
+collection-foldouts collection-item > collapsible { grow: 1; }
+
+collection-master-detail { layout: flex; direction: row; gap: tokens.$space-m; align-items: start; }
+collection-master-detail list-view { width: 150px; height: 140px; }
+collection-detail { layout: flex; direction: column; grow: 1; }
+
+collection-chips { layout: flex; direction: row; wrap: wrap; gap: tokens.$space-s; align-items: center; }
+props.chips { layout: flex; direction: row; wrap: wrap; gap: tokens.$space-xs; }
+chip {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-xs;
+  padding: 0 0 0 tokens.$space-m;
+  radius: 999px;
+  background: box(rgba(#3fa7ff, 0.18));
+  border: 1px rgba(#3fa7ff, 0.45);
+}
+label.chip-label { @include text(caption, 600); }
+chip button.props-op { padding: 0 tokens.$space-xs; min-height: 18px; background: box(rgba(white, 0)); border: 0 transparent; }
+textfield.chip-input { width: 96px; }
+
+collection-compact { layout: flex; direction: row; align-items: center; gap: tokens.$space-m; }
+label.collection-summary { @include text(caption); color: var(--fg-muted); }
+dialog collection-master-detail { padding: tokens.$space-s 0; }
