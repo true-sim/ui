@@ -29,13 +29,14 @@ public final class TextSystem {
     private BreakIterator characterBreaks;
 
     /**
-     * Text over {@code fonts}, shaped by {@code shaper}, drawn from {@code atlas} (null to lay out and measure only:
-     * tools, servers).
+     * Text over {@code fonts}, shaped by {@code shaper} through a {@link ShapeCache} (runs shown before are not shaped
+     * again), drawn from {@code atlas} (null to lay out and measure only: tools, servers).
      */
     @AllowAllocation("made once per UI")
     public TextSystem(FontRegistry fonts, TextShaper shaper, GlyphAtlas atlas) {
         this.fonts = Objects.requireNonNull(fonts, "fonts");
-        this.shaper = Objects.requireNonNull(shaper, "shaper");
+        Objects.requireNonNull(shaper, "shaper");
+        this.shaper = shaper instanceof ShapeCache cache ? cache : new ShapeCache(shaper);
         this.atlas = atlas;
     }
 
@@ -44,7 +45,7 @@ public final class TextSystem {
         return fonts;
     }
 
-    /** The shaper. */
+    /** The shaper: a {@link ShapeCache} over the one it was made with. */
     public TextShaper shaper() {
         return shaper;
     }
