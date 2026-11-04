@@ -7,6 +7,11 @@ import com.truesim.annotations.AllowAllocation;
  * names it by {@link #id()}; the engine's renderer uploads it to a bindless slot and again, only the changed region,
  * whenever {@link #version()} grows. Written from one thread at a time, the UI's or a job's handing it over at frame
  * start.
+ *
+ * <p>Several renderers may upload one texture: UIs sharing a text system share its atlas pages (a world panel's UI and
+ * the screen's). Each keeps the version it uploaded and asks {@link #regionSince} what changed after it; the region
+ * since {@link #clean()} ({@link #dirty()}) is one consumer's, and a second one clearing it would take the other's
+ * changes.
  */
 public final class UiTexture {
 
@@ -17,6 +22,8 @@ public final class UiTexture {
         /** Four 8-bit channels, colours sRGB-encoded, sampled as linear: images. */
         RGBA8_SRGB
     }
+
+    private static final int HISTORY = 256;
 
     private final int id;
     private final String name;
@@ -29,6 +36,8 @@ public final class UiTexture {
     private int dirtyY0;
     private int dirtyX1;
     private int dirtyY1;
+    // the last HISTORY regions written, by version: the write making version v + 1 at v % HISTORY
+    private final int[] history = new int[HISTORY * 4];
 
     @AllowAllocation("textures are made when loaded")
     UiTexture(int id, String name, int width, int height, Format format) {
@@ -94,7 +103,42 @@ public final class UiTexture {
             dirtyX1 = Math.max(dirtyX1, x1);
             dirtyY1 = Math.max(dirtyY1, y1);
         }
+        int at = (int) (version % HISTORY) * 4;
+        history[at] = x0;
+        history[at + 1] = y0;
+        history[at + 2] = x1;
+        history[at + 3] = y1;
         version++;
+    }
+
+    /**
+     * The region written after version {@code since} (one a renderer uploaded), as x, y, width, height into {@code out}:
+     * 1; 0 when nothing was; -1 when it is too long ago to know (more than the last 256 writes, or a version it never
+     * had): the whole texture. Allocates nothing.
+     */
+    public int regionSince(long since, int[] out) {
+        if (since == version) {
+            return 0;
+        }
+        if (since < 0 || since > version || version - since > HISTORY) {
+            return -1;
+        }
+        int x0 = Integer.MAX_VALUE;
+        int y0 = Integer.MAX_VALUE;
+        int x1 = 0;
+        int y1 = 0;
+        for (long v = since; v < version; v++) {
+            int h = (int) (v % HISTORY) * 4;
+            x0 = Math.min(x0, history[h]);
+            y0 = Math.min(y0, history[h + 1]);
+            x1 = Math.max(x1, history[h + 2]);
+            y1 = Math.max(y1, history[h + 3]);
+        }
+        out[0] = x0;
+        out[1] = y0;
+        out[2] = x1 - x0;
+        out[3] = y1 - y0;
+        return 1;
     }
 
     /** Grows with every change. */

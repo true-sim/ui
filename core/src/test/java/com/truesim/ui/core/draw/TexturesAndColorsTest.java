@@ -34,6 +34,33 @@ class TexturesAndColorsTest {
     }
 
     @Test
+    void eachUploaderAsksWhatChangedSinceItsOwnVersion() {
+        // two renderers of one atlas page (UIs sharing a text system): one cleaning the dirty region must not take the
+        // other's changes
+        UiTexture page = new UiTextures().create("atlas 0", 64, 32, UiTexture.Format.RGBA8_UNORM);
+        int[] r = new int[4];
+        long first = page.version();
+        assertThat(page.regionSince(first, r)).as("nothing new").isZero();
+        assertThat(page.regionSince(0, r)).isOne();
+        assertThat(r).containsExactly(0, 0, 64, 32);
+        page.markDirty(10, 4, 5, 5);
+        page.clean(); // the first renderer uploaded it
+        page.markDirty(2, 8, 4, 2);
+        assertThat(page.regionSince(first, r)).as("the second renderer still sees both").isOne();
+        assertThat(r).containsExactly(2, 4, 13, 6);
+        assertThat(page.regionSince(first + 1, r)).isOne();
+        assertThat(r).containsExactly(2, 8, 4, 2);
+        assertThat(page.regionSince(-1, r)).as("never uploaded").isEqualTo(-1);
+        assertThat(page.regionSince(page.version() + 1, r)).isEqualTo(-1);
+        long old = page.version();
+        for (int i = 0; i < 300; i++) {
+            page.markDirty(i % 60, 0, 1, 1);
+        }
+        assertThat(page.regionSince(old, r)).as("beyond the history: the whole texture").isEqualTo(-1);
+        assertThat(page.regionSince(page.version() - 256, r)).isOne();
+    }
+
+    @Test
     void texturesTrackTheirDirtyRegion() {
         UiTextures textures = new UiTextures();
         UiTexture page = textures.create("atlas 0", 64, 32, UiTexture.Format.RGBA8_UNORM);
