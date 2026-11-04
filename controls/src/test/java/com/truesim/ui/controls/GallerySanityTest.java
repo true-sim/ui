@@ -124,4 +124,10 @@ class GallerySanityTest {
     void textGallery(String theme) {
         check("text gallery", theme, ui -> TextGallery.build(ui, 1280, 720));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void sceneGallery(String theme) {
+        check("scene gallery", theme, ui -> com.truesim.ui.gizmo.SceneGallery.build(ui, 1280, 720));
+    }
 }

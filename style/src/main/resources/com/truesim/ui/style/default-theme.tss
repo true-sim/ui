@@ -205,3 +205,4 @@ image.meter { size: 12px; }
 
 @import "windows";
 @import "oswindows"; // docking's OS windows
+@import "scene"; // camera views, gizmos and the view cube (ui-scene, ui-gizmo)

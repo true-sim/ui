@@ -893,7 +893,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         int part = 0;
         for (int i = 0; i < pointerIds.length && h == GizmoHandle.NONE; i++) {
             if (pointerIds[i] != -1 && pointerHandles[i] != GizmoHandle.NONE
-                && picking.worldHitCount(pointerIds[i]) > 0) {
+                && picking.worldHitCount(pointerIds[i]) > 0 && picking.worldHit(pointerIds[i], 0) == element) {
                 h = pointerHandles[i];
                 part = pointerParts[i];
             }
@@ -975,6 +975,8 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         if (!view.project(ox, oy, oz, sa)) {
             return;
         }
+        float cx = sa[0];
+        float cy = sa[1];
         float fade = style(occludedPart).getFloat(Styles.OPACITY);
         float upp = (float) view.unitsPerPixel(view.depth(ox, oy, oz));
         if (mode == GizmoMode.BOUNDS) {
@@ -984,7 +986,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         if (shapes.shows(GizmoHandle.ROTATE_TRACKBALL)) {
             float r = (float) (shapes.ringRadius() * shapes.size / upp);
             long c = color(trackballPart, opacity);
-            list.box(sa[0] - r, sa[1] - r, sa[0] + r, sa[1] + r, c, r, r, r, r, 0, 0);
+            list.box(cx - r, cy - r, cx + r, cy + r, c, r, r, r, r, 0, 0);
         }
         for (int a = 0; a < 3; a++) {
             GizmoHandle ring = GizmoShapes.ringHandle(a);
@@ -1010,17 +1012,19 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
                 shapes.segment(a, shapes.arrowStart(), shapes.tipStart(), p, q);
                 segment(list, p, q, w, part, opacity, fade);
                 shapes.segment(a, shapes.tipStart(), shapes.arrowEnd(), p, q);
-                // the tip: a tapering line
-                for (int k = 0; k < 3; k++) {
-                    double f0 = k / 3.0;
-                    double f1 = (k + 1) / 3.0;
-                    n[0] = p[0] + (q[0] - p[0]) * f0;
-                    n[1] = p[1] + (q[1] - p[1]) * f0;
-                    n[2] = p[2] + (q[2] - p[2]) * f0;
-                    double ex = p[0] + (q[0] - p[0]) * f1;
-                    double ey = p[1] + (q[1] - p[1]) * f1;
-                    double ez = p[2] + (q[2] - p[2]) * f1;
-                    lineTo(list, n, ex, ey, ez, tip * (3 - k) / 3f, part, opacity, fade);
+                // the tip: a triangle from the tip's base, across the axis on the screen, to its point
+                if (view.project(p[0], p[1], p[2], sa) && view.project(q[0], q[1], q[2], sb)) {
+                    float dx = sb[0] - sa[0];
+                    float dy = sb[1] - sa[1];
+                    float l = (float) Math.hypot(dx, dy);
+                    if (l > 0.5f) {
+                        float nx = -dy / l * tip / 2;
+                        float ny = dx / l * tip / 2;
+                        boolean hidden = occlusion != null && occlusion.occluded(view, (p[0] + q[0]) / 2,
+                            (p[1] + q[1]) / 2, (p[2] + q[2]) / 2);
+                        triangle(list, sb[0], sb[1], sa[0] + nx, sa[1] + ny, sa[0] - nx, sa[1] - ny,
+                            color(part, hidden ? opacity * fade : opacity));
+                    }
                 }
             }
             if (shapes.shows(GizmoShapes.scaleHandle(a))) {
@@ -1037,7 +1041,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
             float d = length(style(centerPart).get(Styles.WIDTH), 14);
             long c = color(centerPart, opacity);
             float r = d / 2;
-            list.box(sa[0] - r, sa[1] - r, sa[0] + r, sa[1] + r, c, r, r, r, r, 0, 0);
+            list.box(cx - r, cy - r, cx + r, cy + r, c, r, r, r, r, 0, 0);
         }
     }
 
@@ -1094,7 +1098,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
                     double ey = p[1] + av[1] * (hi - lo) / lines * s;
                     double ez = p[2] + av[2] * (hi - lo) / lines * s;
                     if (view.project(ex, ey, ez, sb)) {
-                        w = (float) Math.hypot(sb[0] - sa[0], sb[1] - sa[1]) + 1;
+                        w = (float) Math.hypot(sb[0] - sa[0], sb[1] - sa[1]); // abutting: translucent overlaps show
                     }
                 }
             }
@@ -1165,7 +1169,28 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
         return Rgba.fade(s.get(Styles.COLOR).rgba(), opacity * s.getFloat(Styles.OPACITY));
     }
 
+    /**
+     * A filled triangle with its point at {@code a} and base {@code b..c}: lines across it from the base to the point,
+     * each as wide as the step between them (the draw list has no polygons).
+     */
+    static void triangle(DrawList list, float ax, float ay, float bx, float by, float cx, float cy, long color) {
+        float mx = (bx + cx) / 2;
+        float my = (by + cy) / 2;
+        float height = (float) Math.hypot(ax - mx, ay - my);
+        int steps = Math.max(2, Math.min(32, (int) Math.ceil(height / 1.5f)));
+        float width = height / steps; // abutting: a translucent (faded) tip shows no overlaps
+        for (int k = 0; k < steps; k++) {
+            float t = (k + 0.5f) / steps;
+            float px = bx + (ax - bx) * t;
+            float py = by + (ay - by) * t;
+            float qx = cx + (ax - cx) * t;
+            float qy = cy + (ay - cy) * t;
+            list.line(px, py, qx, qy, width, color);
+        }
+    }
+
     /** Takes the gizmo off its UI and picking; the element is destroyed. */
+
     public void dispose() {
         cancel();
         ui.removeFrameListener(this);

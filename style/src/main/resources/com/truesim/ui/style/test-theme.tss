@@ -91,3 +91,4 @@ panel.meter {
 
 @import "windows-test";
 @import "oswindows-test"; // docking's OS windows
+@import "scene-test"; // camera views, gizmos and the view cube (ui-scene, ui-gizmo)

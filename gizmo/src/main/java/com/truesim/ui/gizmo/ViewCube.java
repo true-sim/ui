@@ -308,7 +308,7 @@ public final class ViewCube implements Painter, Ui.FrameListener {
                     float ax = pa[0];
                     float ay = pa[1];
                     corner(a, sign, u, -1, v, -1 + 2.0 / lines, pa);
-                    width = (float) Math.hypot(pa[0] - ax, pa[1] - ay) + 1;
+                    width = (float) Math.hypot(pa[0] - ax, pa[1] - ay); // abutting: no overlaps to show
                     corner(a, sign, u, -1, v, t, pa);
                 }
                 list.line(pa[0], pa[1], pb[0], pb[1], width, fill);
