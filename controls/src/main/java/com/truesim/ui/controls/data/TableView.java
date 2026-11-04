@@ -15,6 +15,7 @@ import com.truesim.ui.core.event.EventType;
 import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.event.UiListener;
 import com.truesim.ui.core.input.Pointer;
+import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.layout.Direction;
 import com.truesim.ui.layout.LayoutKind;
 import com.truesim.ui.layout.Unit;
@@ -25,30 +26,42 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 /**
  * A virtualized table, a data grid (design 5.6): {@link Column}s defined in code over a sorted and filtered
  * {@link DataView}, rows and columns virtualized (only the visible rows have elements, and in them only the visible
  * columns' cells, recycled per renderer and kind), a header that sorts (click; Shift adds a column to the sort),
- * resizes (drag a header's edge) and moves columns (drag a header), frozen columns on the left, a filter row or
- * per-column filters, inline editing with a {@link ValueEditor} per column, keyboard cell navigation and row, multi-row
- * or cell selection.
+ * resizes (drag a header's edge) and moves columns (drag a header), frozen columns on the left, hidden columns, a
+ * filter row or per-column filters, inline editing with a {@link ValueEditor} per column, keyboard cell navigation
+ * and row, multi-row or cell selection (multi-row: box selection too, see {@link VirtualView}), rows grouped by
+ * columns' values under collapsible group headers ({@link #groupBy}, incremental: {@link GroupedRows}), header groups
+ * spanning several columns ({@link #headerGroup}), and a layout description of all that for saving
+ * ({@link #layoutDescription()}).
  *
  * <p><b>Elements and styles.</b> The root is a {@code table-view} (role TABLE); above the viewport a
- * {@code table-header} holds the {@code table-header-row} of {@code table-header-cell}s (role COLUMN_HEADER: a label,
- * a {@code table-sort-indicator}, a {@code table-column-grip}; facts {@code [sort=ascending]} or
- * {@code [sort=descending]} when sorted) and, when a column has a filter view, the {@code table-filter-row} of
- * {@code table-filter-cell}s. Rows are {@code table-row}s (role ROW) of {@code table-cell}s (role CELL,
- * {@code :selected} and {@code :focused} in cell selection, {@code :editing} while edited); frozen cells sit in the
- * row's {@code table-frozen} part, drawn over the scrolling {@code table-cells}. A {@code table-column-drop-indicator}
- * shows where a dragged column would go. A fixed row height comes from {@code table-row}'s {@code height}.
+ * {@code table-header} holds, when header groups exist, the {@code table-header-group-row} of
+ * {@code table-header-group-cell}s (a label each, spanning their columns), the {@code table-header-row} of
+ * {@code table-header-cell}s (role COLUMN_HEADER: a label, a {@code table-sort-indicator}, a
+ * {@code table-column-grip}; facts {@code [sort=ascending]} or {@code [sort=descending]} when sorted; style key
+ * {@code renderer} chooses the column's renderer by name) and, when a column has a filter view, the
+ * {@code table-filter-row} of {@code table-filter-cell}s. Rows are {@code table-row}s (role ROW) of
+ * {@code table-cell}s (role CELL, {@code :selected} and {@code :focused} in cell selection, {@code :editing} while
+ * edited); frozen cells sit in the row's {@code table-frozen} part, drawn over the scrolling {@code table-cells}. Group
+ * headers are {@code table-group-row}s ({@code :expanded} when open; {@code [level=0]}, {@code [level=1]}, ...): a
+ * {@code table-group-indent} ({@code group-indent} times the level wide), a {@code table-group-expander}, labels
+ * {@code table-group-column} (the column's header), the column's cell view of the group's value,
+ * {@code table-group-count} and {@code table-group-sum}. A {@code table-column-drop-indicator} shows where a dragged
+ * column would go. A fixed row height comes from {@code table-row}'s {@code height}.
  *
  * <pre>{@code
  * TableView<Unit> table = TableView.of(ui, "Units", clock, units);
  * table.add(Column.ofText("Name", Unit::name).width(160));
  * table.add(Column.ofInt("HP", Unit::hp).editor(Editors.integer(0, 999, 1), Unit::hp, Unit::withHp));
  * table.freeze(1);
+ * table.groupBy(List.of(table.column(2)));
  * }</pre>
  *
  * @param <R> the row type
@@ -59,7 +72,7 @@ public final class TableView<R> extends VirtualView<R> {
     public enum SelectionMode {
         /** One row. */
         ROW,
-        /** Any rows (Shift ranges, shortcut toggles). */
+        /** Any rows (Shift ranges, shortcut toggles, box selection). */
         MULTI_ROW,
         /** One cell: arrows move between cells. */
         CELL
@@ -72,13 +85,19 @@ public final class TableView<R> extends VirtualView<R> {
     /** Drag and drop format of a dragged column header. */
     public static final DataFormat<ColumnDrag> COLUMN = DataFormat.of("ui.table.column", ColumnDrag.class);
 
+    /** Row kinds of group headers are below this: {@code GROUP - (level * 1024 + the value view's kind)}. */
+    static final int GROUP = -2;
+
     private static final Facts ASCENDING = Facts.of("sort", "ascending");
     private static final Facts DESCENDING = Facts.of("sort", "descending");
+    private static final Facts[] LEVELS = {Facts.of("level", "0"), Facts.of("level", "1"), Facts.of("level", "2"),
+        Facts.of("level", "3")};
 
     private final DataView<R> view;
     private final ViewContext context;
     private final List<Column<R>> columns = new ArrayList<>(); // by id
-    private final List<Column<R>> shown = new ArrayList<>(); // display order: frozen first
+    private final List<Column<R>> order = new ArrayList<>(); // display order of all columns, hidden ones too
+    private final List<Column<R>> shown = new ArrayList<>(); // display order of the shown: frozen first
     private final Map<Object, Integer> rendererIds = new HashMap<>(); // by view type
     private int[] rendererOf = new int[8]; // column id -> renderer id
     private float[] columnX = new float[8]; // display index -> x in panel units
@@ -88,6 +107,7 @@ public final class TableView<R> extends VirtualView<R> {
     private final Element header;
     private final Element headerRow;
     private final Element filterRow;
+    private Element groupRow;
     private Element[] headerCells = new Element[8]; // by column id
     private Element[] filterCells = new Element[8];
     private final Element columnIndicator;
@@ -105,6 +125,25 @@ public final class TableView<R> extends VirtualView<R> {
     private final List<Boolean> sortAscending = new ArrayList<>();
     private final Predicate<R> columnFilters = this::passes;
     private Predicate<? super R> tableFilter;
+
+    // header groups
+    private final List<CharSequence> bandTitles = new ArrayList<>();
+    private int[] bandOf = new int[8]; // column id -> header group, or -1
+    private Element[] bandCells = new Element[0];
+    private int[] bandCellBand = new int[0];
+    private int bandCellCount;
+
+    // row groups
+    private GroupedRows<R> grouped;
+    private final List<Column<R>> groupBy = new ArrayList<>();
+    private ToDoubleFunction<? super R> groupSum;
+    private CharSequence groupSumLabel = "";
+    private int groupSumDecimals;
+    private final StringBuilder scratch = new StringBuilder();
+
+    private ValueRenderers renderers;
+    private Function<? super R, ? extends CharSequence> typeAheadText;
+    private Runnable layoutChanged;
 
     private Column<R> resizing;
     private int resizePointer = -1;
@@ -168,6 +207,11 @@ public final class TableView<R> extends VirtualView<R> {
         return e;
     }
 
+    /** The header element (above the rows): attach a column menu to it. */
+    public Element header() {
+        return header;
+    }
+
     // ---------------------------------------------------------------- columns
 
     /** Adds {@code column} at the end (after the frozen ones); returns this. */
@@ -179,20 +223,19 @@ public final class TableView<R> extends VirtualView<R> {
         column.table = this;
         column.id = columns.size();
         columns.add(column);
-        shown.add(column);
+        order.add(column);
         int id = column.id;
         if (id >= headerCells.length) {
             headerCells = Arrays.copyOf(headerCells, id * 2);
             filterCells = Arrays.copyOf(filterCells, id * 2);
             editorViews = Arrays.copyOf(editorViews, id * 2);
             rendererOf = Arrays.copyOf(rendererOf, id * 2);
+            int old = bandOf.length;
+            bandOf = Arrays.copyOf(bandOf, id * 2);
+            Arrays.fill(bandOf, old, bandOf.length, -1);
         }
-        Integer rid = rendererIds.get(column.renderer().viewType());
-        if (rid == null) {
-            rid = rendererIds.size();
-            rendererIds.put(column.renderer().viewType(), rid);
-        }
-        rendererOf[id] = rid;
+        bandOf[id] = -1;
+        rendererOf[id] = rendererId(column);
         Element cell = ui.element("table-header-cell", null);
         cell.semantics(Role.COLUMN_HEADER, column.header());
         Element label = ui.label(null, column.header());
@@ -213,18 +256,43 @@ public final class TableView<R> extends VirtualView<R> {
         filterCells[id] = filterCell;
         // the drop indicator draws over the headers
         headerRow.add(columnIndicator);
-        columnsChanged();
+        reshow();
         return this;
     }
 
-    /** The columns in display order (frozen first). */
+    @AllowAllocation("a renderer of a new view type: once")
+    private int rendererId(Column<R> column) {
+        Integer rid = rendererIds.get(column.renderer().viewType());
+        if (rid == null) {
+            rid = rendererIds.size();
+            rendererIds.put(column.renderer().viewType(), rid);
+        }
+        return rid;
+    }
+
+    /** The shown columns in display order (frozen first). */
     public List<Column<R>> columns() {
         return List.copyOf(shown);
+    }
+
+    /** Every column in display order, hidden ones in their places. */
+    public List<Column<R>> allColumns() {
+        return List.copyOf(order);
     }
 
     /** The column shown at display position {@code index}. */
     public Column<R> column(int index) {
         return shown.get(index);
+    }
+
+    /** The column whose {@link Column#key()} is {@code key}, or null. */
+    public Column<R> column(String key) {
+        for (Column<R> c : columns) {
+            if (c.key().equals(key)) {
+                return c;
+            }
+        }
+        return null;
     }
 
     /** Freezes the first {@code count} displayed columns: they stay on the left while the rest scroll sideways. */
@@ -243,11 +311,66 @@ public final class TableView<R> extends VirtualView<R> {
     }
 
     /**
-     * Moves {@code column} to display position {@code before} (counted before the move; the end: the column count),
-     * within its group (frozen or not).
+     * Hides {@code column} or shows it again in its place; a hidden frozen column leaves the frozen ones, one shown
+     * again among them joins them. Returns this.
      */
+    public TableView<R> hide(Column<R> column, boolean on) {
+        if (column.hidden == on || column.table != this) {
+            return this;
+        }
+        if (on && shown.size() == 1) {
+            return this; // the last shown column stays
+        }
+        int before = shown.indexOf(column);
+        column.hidden = on;
+        reshow();
+        int after = shown.indexOf(column);
+        if (on && before >= 0 && before < frozen) {
+            frozen--;
+        } else if (!on && after >= 0 && after < frozen) {
+            frozen++;
+        }
+        if (editColumn == column) {
+            cancel();
+        }
+        dropRows();
+        columnsChanged();
+        changed();
+        return this;
+    }
+
+    /** Whether {@code column} is hidden. */
+    public boolean hidden(Column<R> column) {
+        return column.hidden;
+    }
+
+    /** The shown columns again from the display order. */
+    @AllowAllocation("a user action: columns shown or moved")
+    private void reshow() {
+        shown.clear();
+        for (Column<R> c : order) {
+            if (!c.hidden) {
+                shown.add(c);
+            }
+        }
+        frozen = Math.min(frozen, shown.size());
+        for (Column<R> c : columns) {
+            layout.visible(headerCells[c.id].slot(), !c.hidden);
+            layout.visible(filterCells[c.id].slot(), !c.hidden);
+        }
+        columnsChanged();
+    }
+
+    /**
+     * Moves {@code column} to display position {@code before} (counted among the shown columns before the move; the
+     * end: the column count), within its group (frozen or not).
+     */
+    @AllowAllocation("a user action")
     public void moveColumn(Column<R> column, int before) {
         int from = shown.indexOf(column);
+        if (from < 0) {
+            return;
+        }
         boolean isFrozen = from < frozen;
         int low = isFrozen ? 0 : frozen;
         int high = isFrozen ? frozen : shown.size();
@@ -255,9 +378,15 @@ public final class TableView<R> extends VirtualView<R> {
         if (target == from || target == from + 1) {
             return;
         }
-        shown.remove(from);
-        shown.add(target > from ? target - 1 : target, column);
-        columnsChanged();
+        Column<R> next = target < shown.size() ? shown.get(target) : null;
+        order.remove(column);
+        if (next == null) {
+            order.add(column);
+        } else {
+            order.add(order.indexOf(next), column);
+        }
+        reshow();
+        changed();
     }
 
     /** The view's rows, sorted and filtered. */
@@ -278,6 +407,44 @@ public final class TableView<R> extends VirtualView<R> {
     /** Where a dragged column would be dropped (display position), or -1. */
     public int dropBefore() {
         return dropBefore;
+    }
+
+    /**
+     * Resolves the style key {@code renderer} on header cells in {@code registry} (a column of a named renderer shows
+     * its values through it); returns this.
+     */
+    public TableView<R> renderers(ValueRenderers registry) {
+        renderers = registry;
+        for (Column<R> c : columns) {
+            c.styled(null == registry ? "" : "\u0000", null); // looked up again after the next layout
+        }
+        return this;
+    }
+
+    /** Type-ahead over the rows by {@code text} (null: none): typing moves to the next row starting so. Returns this. */
+    public TableView<R> typeAhead(Function<? super R, ? extends CharSequence> text) {
+        typeAheadText = text;
+        interaction.textInput(root, text != null);
+        return this;
+    }
+
+    @Override
+    protected void typed(CharSequence text) {
+        if (typeAheadText != null) {
+            typeAhead(text, typeAheadText);
+        }
+    }
+
+    /** Runs {@code listener} when users change the layout (widths, order, hidden columns, sort, groups). */
+    public TableView<R> onLayoutChanged(Runnable listener) {
+        layoutChanged = listener;
+        return this;
+    }
+
+    private void changed() {
+        if (layoutChanged != null) {
+            layoutChanged.run();
+        }
     }
 
     /** Lays the columns out again (widths, order, filter views changed). */
@@ -332,6 +499,7 @@ public final class TableView<R> extends VirtualView<R> {
             layout.offsets(f, at, 0, at, 0).width(f, w, Unit.PX);
             headerCells[c.id].state(UiState.SELECTED, mode == SelectionMode.CELL && d == currentColumn);
         }
+        placeBands(x);
         // the visible scrolling columns
         double left = x + frozenWidth;
         double right = x + Math.max(horizontal().viewport(), 1);
@@ -357,6 +525,105 @@ public final class TableView<R> extends VirtualView<R> {
     /** The last scrolling column with cells (display position). */
     public int lastShownColumn() {
         return cLast;
+    }
+
+    // ---------------------------------------------------------------- header groups
+
+    /**
+     * A header spanning {@code members} (shown above their headers, one cell per run of them standing side by side);
+     * a column is in one header group at most. Returns this.
+     */
+    @AllowAllocation("header groups are made when a UI is built")
+    public TableView<R> headerGroup(CharSequence title, List<Column<R>> members) {
+        if (groupRow == null) {
+            groupRow = ui.element("table-header-group-row", null);
+            ui.codeLayout(groupRow, Ui.CODE_KIND);
+            layout.kind(groupRow.slot(), LayoutKind.ANCHORS);
+            header.add(groupRow).add(headerRow).add(filterRow); // the group row first
+        }
+        int band = bandTitles.size();
+        bandTitles.add(title);
+        for (Column<R> c : members) {
+            if (c.table == this) {
+                bandOf[c.id] = band;
+            }
+        }
+        shownX = Double.NaN;
+        placeHeader(horizontal().position());
+        return this;
+    }
+
+    /** The title of the header group of {@code column}, or null. */
+    public CharSequence headerGroupOf(Column<R> column) {
+        int b = bandOf[column.id];
+        return b < 0 ? null : bandTitles.get(b);
+    }
+
+    /** How many header group cells show (runs of adjacent columns of one group). */
+    public int headerGroupCells() {
+        return bandShown;
+    }
+
+    /** Header group cell {@code index} (in display order). */
+    public Element headerGroupCell(int index) {
+        return bandCells[index];
+    }
+
+    /** Places one header group cell per run of adjacent shown columns of a group, not across the frozen edge. */
+    private void placeBands(double x) {
+        if (groupRow == null) {
+            return;
+        }
+        int used = 0;
+        int d = 0;
+        while (d < shown.size()) {
+            int band = bandOf[shown.get(d).id];
+            int end = d + 1;
+            while (end < shown.size() && bandOf[shown.get(end).id] == band && (end != frozen)) {
+                end++;
+            }
+            if (band >= 0) {
+                int ci = used++;
+                Element cell = bandCell(ci);
+                float at = cellX(d, x);
+                float w = columnX[end] - columnX[d];
+                int s = cell.slot();
+                layout.offsets(s, at, 0, at, 0).width(s, w, Unit.PX).visible(s, true);
+                if (bandCellBand[ci] != band) {
+                    bandCellBand[ci] = band;
+                    Element label = ui.store().element(ui.store().firstChild(s));
+                    ui.text(label, bandTitles.get(band));
+                    cell.semantics(Role.COLUMN_HEADER, bandTitles.get(band).toString());
+                }
+            }
+            d = end;
+        }
+        for (int i = used; i < bandCellCount; i++) {
+            layout.visible(bandCells[i].slot(), false);
+        }
+        bandShown = used;
+    }
+
+    private int bandShown;
+
+    @AllowAllocation("header group cells are made as columns are grouped, then reused")
+    private Element bandCell(int index) {
+        if (index >= bandCells.length) {
+            bandCells = Arrays.copyOf(bandCells, Math.max(4, bandCells.length * 2));
+            bandCellBand = Arrays.copyOf(bandCellBand, bandCells.length);
+        }
+        if (bandCells[index] == null) {
+            Element cell = ui.element("table-header-group-cell", null);
+            cell.semantics(Role.COLUMN_HEADER, "");
+            cell.add(ui.label(null, ""));
+            groupRow.add(cell);
+            ui.codeLayout(cell, Ui.CODE_PLACEMENT | Ui.CODE_WIDTH);
+            layout.anchors(cell.slot(), 0, 0, 0, 1);
+            bandCells[index] = cell;
+            bandCellBand[index] = -1;
+            bandCellCount = index + 1;
+        }
+        return bandCells[index];
     }
 
     // ---------------------------------------------------------------- sorting and filtering
@@ -386,6 +653,24 @@ public final class TableView<R> extends VirtualView<R> {
             sortAscending.add(ascending);
         }
         applySort();
+        changed();
+    }
+
+    /** Sorts by {@code column}, {@code ascending} or not, alone (or added: {@code add}). */
+    @AllowAllocation("a user action: the comparator is composed anew")
+    public void sort(Column<R> column, boolean ascending, boolean add) {
+        if (!add) {
+            sortBy.clear();
+            sortAscending.clear();
+        }
+        int at = sortBy.indexOf(column);
+        if (at >= 0) {
+            sortAscending.set(at, ascending);
+        } else if (column.sortable()) {
+            sortBy.add(column);
+            sortAscending.add(ascending);
+        }
+        applySort();
     }
 
     /** Sorts by nothing: rows in the list's order. */
@@ -394,6 +679,7 @@ public final class TableView<R> extends VirtualView<R> {
         sortBy.clear();
         sortAscending.clear();
         applySort();
+        changed();
     }
 
     /** Whether rows are sorted by {@code column}: 1 ascending, -1 descending, 0 not. */
@@ -405,15 +691,15 @@ public final class TableView<R> extends VirtualView<R> {
     @AllowAllocation("a user action: the comparator is composed anew")
     @SuppressWarnings("unchecked")
     private void applySort() {
-        Comparator<R> order = null;
+        Comparator<R> by = null;
         for (int i = 0; i < sortBy.size(); i++) {
             Comparator<R> c = (Comparator<R>) sortBy.get(i).comparator();
             if (!sortAscending.get(i)) {
                 c = c.reversed();
             }
-            order = order == null ? c : order.thenComparing(c);
+            by = by == null ? c : by.thenComparing(c);
         }
-        view.sort(order);
+        view.sort(grouped != null && !groupBy.isEmpty() ? grouped.order(by) : by);
         for (Column<R> c : columns) {
             int s = sortedBy(c);
             ui.styles().facts(headerCells[c.id].slot(), s > 0 ? ASCENDING : s < 0 ? DESCENDING : Facts.NONE);
@@ -448,11 +734,252 @@ public final class TableView<R> extends VirtualView<R> {
         return true;
     }
 
+    // ---------------------------------------------------------------- grouping
+
+    /**
+     * Groups the rows by the values of {@code by} (outermost first; empty: no grouping), each column sorting its
+     * groups by its comparator: a group header row (collapsible: a click, ACCEPT, LEFT and RIGHT) before each
+     * group's rows. Incremental: see {@link GroupedRows}. The selection stays.
+     */
+    @AllowAllocation("a user action: grouping changes")
+    @SuppressWarnings("unchecked")
+    public TableView<R> groupBy(List<Column<R>> by) {
+        groupBy.clear();
+        List<Comparator<? super R>> keys = new ArrayList<>();
+        for (Column<R> c : by) {
+            if (c.table == this && c.comparator() != null && groupBy.size() < LEVELS.length) {
+                groupBy.add(c);
+                keys.add(c.comparator());
+            }
+        }
+        if (editCell != null) {
+            cancel();
+        }
+        if (groupBy.isEmpty()) {
+            if (grouped != null) {
+                replaceRows(view);
+            }
+        } else {
+            if (grouped == null) {
+                grouped = new GroupedRows<>(ui.store().clock(), view);
+            }
+            grouped.levels(keys).sum(groupSum);
+            replaceRows(grouped);
+        }
+        applySort();
+        changed();
+        return this;
+    }
+
+    /** The columns rows are grouped by, outermost first. */
+    public List<Column<R>> groupedBy() {
+        return List.copyOf(groupBy);
+    }
+
+    /** The grouped rows while grouping, else null. */
+    public GroupedRows<R> grouped() {
+        return groupBy.isEmpty() ? null : grouped;
+    }
+
+    /**
+     * Shows a sum of {@code value} in each group header, after {@code label}, with at most {@code decimals} decimals
+     * (null: none). Returns this.
+     */
+    public TableView<R> groupSum(ToDoubleFunction<? super R> value, CharSequence label, int decimals) {
+        groupSum = value;
+        groupSumLabel = label == null ? "" : label;
+        groupSumDecimals = Math.max(0, Math.min(9, decimals));
+        if (grouped != null) {
+            grouped.sum(value);
+        }
+        rebindAll();
+        return this;
+    }
+
+    /** Whether row {@code index} is a group header. */
+    public boolean groupHeader(int index) {
+        return !groupBy.isEmpty() && grouped.header(index);
+    }
+
+    /** Collapses or opens the group of header row {@code index}. */
+    public void collapseGroup(int index, boolean on) {
+        if (groupHeader(index)) {
+            grouped.collapse(index, on);
+        }
+    }
+
+    /** The view position (in {@link #view()}) of row {@code index}, or -1 for a group header. */
+    public int viewPosition(int index) {
+        if (groupBy.isEmpty()) {
+            return index;
+        }
+        return grouped.header(index) ? -1 : grouped.position(index);
+    }
+
+    // ---------------------------------------------------------------- layout description
+
+    /**
+     * The table's layout as text, one entry per line, for saving: {@code column "<key>" <width> [hidden]} for every
+     * column in display order, {@code frozen <n>}, {@code sort "<key>" ascending|descending} in sort order,
+     * {@code group "<key>"} outermost first. Keys are {@link Column#key()}s.
+     */
+    @AllowAllocation("a description is asked for when saving")
+    public String layoutDescription() {
+        StringBuilder out = new StringBuilder();
+        for (Column<R> c : order) {
+            out.append("column ");
+            quote(out, c.key());
+            out.append(' ');
+            Format.append(out, c.width(), 2);
+            if (c.hidden) {
+                out.append(" hidden");
+            }
+            out.append('\n');
+        }
+        out.append("frozen ").append(frozen).append('\n');
+        for (int i = 0; i < sortBy.size(); i++) {
+            out.append("sort ");
+            quote(out, sortBy.get(i).key());
+            out.append(sortAscending.get(i) ? " ascending\n" : " descending\n");
+        }
+        for (Column<R> c : groupBy) {
+            out.append("group ");
+            quote(out, c.key());
+            out.append('\n');
+        }
+        return out.toString();
+    }
+
+    private static void quote(StringBuilder out, String key) {
+        out.append('"');
+        for (int i = 0; i < key.length(); i++) {
+            char ch = key.charAt(i);
+            if (ch == '"' || ch == '\\') {
+                out.append('\\');
+            }
+            out.append(ch);
+        }
+        out.append('"');
+    }
+
+    /**
+     * Restores a layout {@link #layoutDescription()} gave: widths, order and hidden columns of the columns it names
+     * (others keep their order after them), frozen columns, sort and grouping. Unknown keys and lines are skipped.
+     */
+    @AllowAllocation("a layout is restored")
+    public void layoutDescription(String description) {
+        List<Column<R>> newOrder = new ArrayList<>();
+        List<Column<R>> sorts = new ArrayList<>();
+        List<Boolean> ascending = new ArrayList<>();
+        List<Column<R>> groups = new ArrayList<>();
+        int newFrozen = frozen;
+        for (String line : description.split("\n")) {
+            String t = line.strip();
+            int q0 = t.indexOf('"');
+            String word = q0 < 0 ? t.split(" ")[0] : t.substring(0, q0).strip();
+            if (word.equals("frozen")) {
+                try {
+                    newFrozen = Integer.parseInt(t.substring(6).strip());
+                } catch (NumberFormatException e) {
+                    // skipped
+                }
+                continue;
+            }
+            if (q0 < 0) {
+                continue;
+            }
+            StringBuilder key = new StringBuilder();
+            int i = q0 + 1;
+            for (; i < t.length() && t.charAt(i) != '"'; i++) {
+                char ch = t.charAt(i);
+                if (ch == '\\' && i + 1 < t.length()) {
+                    ch = t.charAt(++i);
+                }
+                key.append(ch);
+            }
+            String rest = i + 1 < t.length() ? t.substring(i + 1).strip() : "";
+            Column<R> c = column(key.toString());
+            if (c == null) {
+                continue;
+            }
+            switch (word) {
+                case "column" -> {
+                    if (!newOrder.contains(c)) {
+                        newOrder.add(c);
+                    }
+                    String[] parts = rest.isEmpty() ? new String[0] : rest.split("\\s+");
+                    if (parts.length > 0) {
+                        try {
+                            c.width(Float.parseFloat(parts[0]));
+                        } catch (NumberFormatException e) {
+                            // skipped
+                        }
+                    }
+                    c.hidden = parts.length > 1 && parts[1].equals("hidden");
+                }
+                case "sort" -> {
+                    sorts.add(c);
+                    ascending.add(!rest.startsWith("desc"));
+                }
+                case "group" -> groups.add(c);
+                default -> {
+                }
+            }
+        }
+        for (Column<R> c : order) {
+            if (!newOrder.contains(c)) {
+                newOrder.add(c);
+            }
+        }
+        if (shownCount(newOrder) == 0) {
+            newOrder.get(0).hidden = false;
+        }
+        order.clear();
+        order.addAll(newOrder);
+        if (editCell != null) {
+            cancel();
+        }
+        reshow();
+        frozen = Math.max(0, Math.min(shown.size(), newFrozen));
+        sortBy.clear();
+        sortAscending.clear();
+        sortBy.addAll(sorts);
+        sortAscending.addAll(ascending);
+        dropRows();
+        columnsChanged();
+        groupBy(groups); // sorts too
+    }
+
+    private static <R> int shownCount(List<Column<R>> columns) {
+        int n = 0;
+        for (Column<R> c : columns) {
+            if (!c.hidden) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     // ---------------------------------------------------------------- rows and cells
 
     @Override
     protected boolean afterLayout() {
-        boolean changed = super.afterLayout();
+        boolean restyled = false;
+        for (int i = 0; i < columns.size(); i++) {
+            Column<R> c = columns.get(i);
+            String name = ui.styles().styleOf(headerCells[c.id].slot()).get(DataStyles.RENDERER);
+            if (c.styled(name, registry(name))) {
+                rendererOf[c.id] = rendererId(c);
+                restyled = true;
+            }
+        }
+        if (restyled) {
+            if (editCell != null) {
+                cancel();
+            }
+            dropRows();
+        }
+        boolean changed = super.afterLayout() | restyled;
         if (focusAfterLayout != null) {
             Element target = focusAfterLayout;
             focusAfterLayout = null;
@@ -461,6 +988,20 @@ public final class TableView<R> extends VirtualView<R> {
             }
         }
         return changed;
+    }
+
+    /** The registry named renderers come from (made when a style first names one). */
+    @AllowAllocation("once: a style names a renderer")
+    private ValueRenderers registry(String name) {
+        if (renderers == null && !name.isEmpty()) {
+            renderers = new ValueRenderers();
+        }
+        return renderers;
+    }
+
+    @Override
+    protected boolean wideRows() {
+        return false; // the table places its cells and knows its width
     }
 
     @Override
@@ -484,6 +1025,11 @@ public final class TableView<R> extends VirtualView<R> {
 
     @Override
     protected int kindOf(int index, R row) {
+        if (groupHeader(index)) {
+            int level = grouped.level(index);
+            Column<R> c = groupBy.get(level);
+            return GROUP - (level * 1024 + Math.min(1023, Math.max(0, c.renderer().kind(row))));
+        }
         return 0;
     }
 
@@ -495,6 +1041,21 @@ public final class TableView<R> extends VirtualView<R> {
     @Override
     @AllowAllocation("rows are created while the visible window fills, then recycled")
     protected Element createRow(int kind) {
+        if (kind <= GROUP) {
+            int level = (GROUP - kind) / 1024;
+            int valueKind = (GROUP - kind) % 1024;
+            Element row = ui.element("table-group-row", null);
+            Element indent = ui.element("table-group-indent", null);
+            ui.codeLayout(indent, Ui.CODE_WIDTH);
+            Element expander = ui.element("table-group-expander", null);
+            Element columnLabel = ui.label("table-group-column", "");
+            Element value = groupBy.get(level).renderer().create(valueKind, context);
+            Element count = ui.label("table-group-count", "");
+            Element sum = ui.label("table-group-sum", "");
+            row.add(indent).add(expander).add(columnLabel).add(value).add(count).add(sum);
+            ui.styles().facts(row.slot(), LEVELS[level]);
+            return row;
+        }
         Element row = ui.element("table-row", null);
         ui.codeLayout(row, Ui.CODE_KIND);
         layout.kind(row.slot(), LayoutKind.ANCHORS);
@@ -518,6 +1079,10 @@ public final class TableView<R> extends VirtualView<R> {
 
     @Override
     protected void bindRow(Element row, int kind, int index, R value, CellState state) {
+        if (kind <= GROUP) {
+            bindGroup(row, index, value, state);
+            return;
+        }
         if (editCell != null && editIndex != index && rowOfCell(editCell) == row.slot()) {
             commit(); // the edited row scrolled away
         }
@@ -560,8 +1125,47 @@ public final class TableView<R> extends VirtualView<R> {
         state.name(rowName);
     }
 
+    /** A group header: its level's column and value, the count and the sum. */
+    private void bindGroup(Element row, int index, R value, CellState state) {
+        UiStore store = ui.store();
+        int level = grouped.level(index);
+        Column<R> c = groupBy.get(level);
+        int indent = store.firstChild(row.slot());
+        int expander = store.nextSibling(indent);
+        int columnLabel = store.nextSibling(expander);
+        int view = store.nextSibling(columnLabel);
+        int count = store.nextSibling(view);
+        int sum = store.nextSibling(count);
+        boolean open = !grouped.collapsed(index);
+        float step = ui.styles().styleOf(row.slot()).getFloat(DataStyles.GROUP_INDENT);
+        layout.width(indent, level * step, Unit.PX);
+        store.state(row.slot(), UiState.EXPANDED, open);
+        store.state(expander, UiState.EXPANDED, open);
+        ui.text(store.element(columnLabel), c.header());
+        state.reset(row, index, -1);
+        c.renderer().bind(store.element(view), value, state);
+        CharSequence name = state.name();
+        scratch.setLength(0);
+        scratch.append('(').append(grouped.count(index)).append(')');
+        ui.text(store.element(count), scratch);
+        scratch.setLength(0);
+        if (groupSum != null) {
+            scratch.append(groupSumLabel);
+            if (groupSumLabel.length() > 0) {
+                scratch.append(' ');
+            }
+            Format.append(scratch, grouped.sum(index), groupSumDecimals);
+        }
+        ui.text(store.element(sum), scratch);
+        state.reset(row, index, -1);
+        state.name(name);
+    }
+
     @Override
     protected void unbindRow(Element row, int kind) {
+        if (kind <= GROUP) {
+            return;
+        }
         if (editCell != null && rowOfCell(editCell) == row.slot()) {
             commit();
         }
@@ -575,7 +1179,11 @@ public final class TableView<R> extends VirtualView<R> {
     /** The cell element showing {@code column} in row {@code index}, or null. */
     public Element cell(int index, Column<R> column) {
         Element row = rowElement(index);
-        return row == null ? null : cellsBySlot[row.slot()].cellOf(column.id);
+        if (row == null || row.slot() >= cellsBySlot.length || cellsBySlot[row.slot()] == null
+            || groupHeader(index)) {
+            return null;
+        }
+        return cellsBySlot[row.slot()].cellOf(column.id);
     }
 
     @AllowAllocation("cells are created while the visible window fills, then recycled")
@@ -754,8 +1362,8 @@ public final class TableView<R> extends VirtualView<R> {
             }
             return;
         }
-        if (mode == SelectionMode.CELL && e.command() == com.truesim.ui.core.input.UiCommand.ACCEPT
-            && current() >= 0 && currentColumn < shown.size() && shown.get(currentColumn).editable()) {
+        if (mode == SelectionMode.CELL && e.command() == UiCommand.ACCEPT && current() >= 0
+            && !groupHeader(current()) && currentColumn < shown.size() && shown.get(currentColumn).editable()) {
             edit(current(), shown.get(currentColumn));
             e.consume();
             return;
@@ -765,9 +1373,23 @@ public final class TableView<R> extends VirtualView<R> {
 
     @Override
     protected void rowCommand(UiEvent e) {
+        int i = current();
+        if (i >= 0 && i < rows().size() && groupHeader(i)) {
+            switch (e.command()) {
+                case LEFT, RIGHT, ACCEPT -> {
+                    boolean collapse = e.command() == UiCommand.LEFT
+                        || e.command() == UiCommand.ACCEPT && !grouped.collapsed(i);
+                    grouped.collapse(i, collapse);
+                    e.consume();
+                    return;
+                }
+                default -> {
+                }
+            }
+        }
         switch (e.command()) {
             case LEFT, RIGHT -> {
-                int by = e.command() == com.truesim.ui.core.input.UiCommand.LEFT ? -1 : 1;
+                int by = e.command() == UiCommand.LEFT ? -1 : 1;
                 if (mode == SelectionMode.CELL) {
                     currentColumn(currentColumn + by);
                 } else {
@@ -810,6 +1432,10 @@ public final class TableView<R> extends VirtualView<R> {
 
     @Override
     protected void pressRow(int index, UiEvent e) {
+        if (groupHeader(index)) {
+            current(index);
+            return; // the click opens or closes it
+        }
         if (mode == SelectionMode.CELL) {
             int d = columnAt(e.x());
             if (d >= 0 && d != currentColumn) {
@@ -832,7 +1458,7 @@ public final class TableView<R> extends VirtualView<R> {
     @AllowAllocation("editing starts: the edited value's holder is made")
     @SuppressWarnings("unchecked")
     public boolean edit(int index, Column<R> column) {
-        if (!column.editable() || index < 0 || index >= rows().size()) {
+        if (!column.editable() || column.hidden || index < 0 || index >= rows().size() || groupHeader(index)) {
             return false;
         }
         if (editCell != null) {
@@ -852,7 +1478,7 @@ public final class TableView<R> extends VirtualView<R> {
         R item = rows().get(index);
         editColumn = column;
         editIndex = index;
-        editSource = view.sourceIndex(index);
+        editSource = view.sourceIndex(viewPosition(index));
         editCell = cell;
         editorView = ev;
         editValue = ui.store().clock().value(ed.get().apply(item));
@@ -957,10 +1583,11 @@ public final class TableView<R> extends VirtualView<R> {
                     if (e.pointerId() == resizePointer) {
                         resizing = null;
                         resizePointer = -1;
+                        changed();
                     }
                 }
                 case CLICK -> {
-                    if (store.type(e.targetSlot()).equals("table-column-grip")) {
+                    if (store.type(e.targetSlot()).equals("table-column-grip") || e.button() != Pointer.PRIMARY) {
                         return;
                     }
                     Column<R> c = columnOfHeader(e.currentSlot());
@@ -1039,17 +1666,26 @@ public final class TableView<R> extends VirtualView<R> {
         return null;
     }
 
-    /** Double clicks on cells (edit) and focus leaving an editor (commit). */
+    /** Double clicks on cells (edit), clicks on group headers (open, close) and focus leaving an editor (commit). */
     private final class TableEvents implements UiListener {
 
         @Override
         public void handle(UiEvent e) {
-            if (e.type() == EventType.CLICK && e.clickCount() == 2) {
+            if (e.type() == EventType.CLICK) {
                 int index = indexOf(ui.store().element(e.targetSlot()));
-                int d = columnAt(e.x());
-                if (index >= 0 && d >= 0 && shown.get(d).editable()) {
-                    edit(index, shown.get(d));
+                if (index >= 0 && groupHeader(index)) {
+                    if (e.clickCount() == 1) {
+                        grouped.collapse(index, !grouped.collapsed(index));
+                    }
                     e.consume();
+                    return;
+                }
+                if (e.clickCount() == 2) {
+                    int d = columnAt(e.x());
+                    if (index >= 0 && d >= 0 && shown.get(d).editable()) {
+                        edit(index, shown.get(d));
+                        e.consume();
+                    }
                 }
             } else if (e.type() == EventType.FOCUS_OUT && editCell != null && !ending) {
                 int to = e.related() == null ? UiStore.NONE : e.related().slot();

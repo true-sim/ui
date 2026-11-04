@@ -136,6 +136,8 @@ public abstract class VirtualView<R> extends ScrollView {
     private final Element box;
     private int pressPointer = -1;
     private boolean pressEmpty;
+    private int rowPressPointer = -1;
+    private long rowPressTime;
     private double pressContentX;
     private double pressContentY;
     private int boxPointer = -1;
@@ -204,7 +206,10 @@ public abstract class VirtualView<R> extends ScrollView {
 
     /** Whether row {@code index} shows as selected (tables selecting cells say no). */
     protected boolean rowSelected(int index, R value) {
-        if (boxPointer >= 0 && rows.selectable(index)) {
+        if (!rows.selectable(index)) {
+            return false; // a group header, a placeholder
+        }
+        if (boxPointer >= 0) {
             return selection.previewed(value, index >= boxFrom && index <= boxTo, boxMode);
         }
         return selection.contains(value);
@@ -1119,6 +1124,10 @@ public abstract class VirtualView<R> extends ScrollView {
                         return; // touches select on click (a drag scrolls)
                     }
                     int r = rowOf(e.targetSlot());
+                    if (r >= 0) {
+                        rowPressPointer = e.pointerId();
+                        rowPressTime = e.time();
+                    }
                     if (r >= 0 && rowIndex[r] >= 0) {
                         byKeys = false;
                         statesDirty = true;
@@ -1161,7 +1170,9 @@ public abstract class VirtualView<R> extends ScrollView {
                     pressContentX = (e.x() - layout.x(v)) / s + scrollX.position();
                     pressContentY = (e.y() - layout.y(v)) / s + scrollY.position();
                     int target = e.targetSlot();
-                    pressEmpty = rowOf(target) < 0 && (target == root.slot() || inside(target));
+                    // a press passed on to the root after a row had it (pass-through) is the row's
+                    boolean rowHad = rowPressPointer == e.pointerId() && rowPressTime == e.time();
+                    pressEmpty = !rowHad && rowOf(target) < 0 && (target == root.slot() || inside(target));
                     if (pressEmpty) {
                         interaction.focus(root, e.player());
                     }
