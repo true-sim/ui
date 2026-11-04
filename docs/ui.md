@@ -362,6 +362,7 @@ engine  (engine-input, engine-ui, …)  depends on ui and scene
 | `ui-props` | ui-controls | Property metadata model and annotations, the builder pipeline, collection editors, lenses for records. |
 | `ui-props-processor` | (build time) | The annotation processor that generates metadata and lenses. |
 | `ui-console` | ui-controls | Console model and widget: commands, typed arguments, completion, history, log ring (fed through an interface). |
+| `ui-profiler` | ui-charts | The profiler's views over a recording the engine fills: the frame graph overlay, the timeline, flame graph, zone table and counters; exports to its own format and Chrome trace JSON. |
 | `ui-scene` | ui-core, scene-core | The bridge to scene graphs: the `Interactive` component (a scene-core component store, D46), scene picking through `SpatialIndex`, the mesh triangle BVH for the narrow phase, world-panel nodes. |
 | `ui-testkit` | ui-core | Synthetic pointers and commands, draw-list golden helpers, a headless frame loop, allocation checks (test scope). |
 
@@ -1758,6 +1759,44 @@ one PR per repository per group, CI and release once per group.
   tunables are settings; only correct techniques are kept; never add latency; nothing allocated per frame.
 
 ## Build status
+
+### Profiler (2026-11-04): local branches `profiler` (ui and engine), not yet in CI
+
+The in-game profiler's views as the new module `ui-profiler` (directory `profiler`, package `com.truesim.ui.profiler`,
+over `ui-charts`); the engine feeds them (engine `README.md`, "Profiler"). The engine's branch needs this release
+(its `ui` dependencies ask for 0.5.0).
+
+| Part | Built | Where |
+|---|---|---|
+| Data | `Recording`: lanes (`LaneKind.THREAD`, `GPU`, `MARKERS`) of zones in start order (`open`/`close`, `zone`, nesting by depth; `seek` finds what shows from a time), numbered frames (CPU start, submit, wait, the GPU's span added when it arrives, hitches), counters (time, value); rings that grow to a capacity and then keep the newest, `retain(nanos)`, a version per `commit()`; allocation-free once grown | `Recording`, `LaneKind` |
+| Frame graph | `FrameTimes` (fixed rings: CPU, wait, interval, GPU under its own frame's number, hitches; min / mean / p99 by quickselect) and `FrameGraphView` (a `chart.frame-graph`: lines `cpu`, `gpu`, `wait`, `frame`, `budget` and `hitch` lines, a statistics label every `ui.profiler.statsInterval`, the Y range from the p99s and budgets) | `FrameTimes`, `FrameGraphView` |
+| Detailed view | `ProfilerView`: toolbar (Freeze, Step, Freeze on hitch, Live, Export, status), `TimelineView` (lanes under a ruler, zoom to `ui.profiler.minSpan`, pan, span selection, frame selection on the ruler, zone selection, runs narrower than a pixel merged, at most `ui.profiler.maxZones` boxes, names shaped once per name), in tabs `FlameGraphView` (`FlameTree`: paths merged over the span, click to zoom) and `ZoneTableView` (`ZoneStats`: calls, total, self, mean, p99, max; heap sort, no allocation), `CounterView` (a chart per counter group) | `ProfilerView`, `TimelineView`, `FlameGraphView`, `ZoneTableView`, `CounterView`, `FlameTree`, `ZoneStats` |
+| Files | `ProfileFile` (`.tsprof`, the recording as it is), `ChromeTrace` (trace event JSON: threads named and sorted, complete events, frame instants, counters; opens in Perfetto) | `ProfileFile`, `ChromeTrace` |
+| Styles | `ProfilerStyles` in ui-controls (`row-height`, `lane-gap`, `gutter-width`, `label-min-width`), `_profiler.tss`, `_profiler-test.tss` | ui-controls, ui-style |
+| Tunables | `ProfilerTunables` (`ui.profiler.statsInterval`, `liveSpan`, `zoomStep`, `minSpan`, `maxZones`, `maxNodes`, `graphHeadroom`) | `ProfilerTunables` |
+| Gallery | `ProfilerGallery` (test fixture): 240 engine-like frames (main thread phases, three job threads, audio, streaming, GPU graphics and compute, GC and JIT markers, a hitch at frame 200, counters), the frame graph over the profiler; `pose` selects a zone and a frame | `profiler/src/testFixtures` |
+
+**Decisions** (taste where marked)
+
+- *Zones are kept in start order*, opened when they begin and closed when they end, so a time is found by a binary
+  search plus a walk back to its top-level zone; children never need sorting.
+- *The view owns no engine types*: `Recording` is the model the engine writes; the views poll its version.
+- *GPU times are drawn under their own frame's number* when they arrive (a second X column), never waited for.
+- *Interval* is the time since the previous frame's start (what a player feels); CPU is start to submit.
+- *Taste*: palettes and colours, F-key bindings (engine), the 2 x mean + 4 ms hitch rule (engine settings), tabs for
+  flame graph / zones / counters under the timeline.
+
+**Tests**: `RecordingTest` (rings, seek, retain, frames, zone statistics against brute force, the flame tree, the
+own format round trip, Chrome JSON parsed strictly, frame statistics against sorting, units),
+`ProfilerViewTest` (the gallery in both themes: `LayoutSanity`, named, every part drawn, the test theme restyling;
+zoom, pan, selection, ruler, reset; sorting, flame focus; streaming 3,000 frames into the views: at most 10 of 3,000
+frames allocate, the frame graph alone allocation-free), `ProfilerInteractionTest` (toolbar actions, scrolling lanes,
+the zoom limit, span selection and double click, zones past the cap merged, the table's columns and rows, hovering,
+counters per group, an empty recording, edges). Branch coverage 0.8.
+
+**Left**: the frame graph's chart costs 25 to 45 us of CPU a frame (its plot recorded again each frame; the data
+path itself 0.14 us): above the 10 us aimed at for the drawing (engine `docs/benchmarks-profiler.md`). Zone labels
+are names only (durations show in the status line).
 
 ### Group A3 (2026-11-04): merged, local branches `a3-remaining` (ui) and `ui-rest` (engine), not yet in CI
 
