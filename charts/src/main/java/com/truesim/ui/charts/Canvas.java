@@ -38,6 +38,11 @@ public final class Canvas {
         private int first;
         private int capacity;
         private int used;
+
+        /** How many vertices the block holds. */
+        int capacity() {
+            return capacity;
+        }
     }
 
     private DrawList list;
@@ -323,6 +328,39 @@ public final class Canvas {
         int at = v.first + v.used;
         v.used += n;
         return at;
+    }
+
+    // ---------------------------------------------------------------- streams
+
+    /**
+     * A block of at least {@code capacity} vertices kept by a streamed series ({@code v}, its own, across recordings):
+     * its first index, or -1 when the block was (re)made just now (the list was rebuilt, or it is larger), so the
+     * caller writes every vertex again.
+     */
+    int streamBlock(Vertices v, int capacity) {
+        flushPath();
+        if (v.list == list && v.generation == list.generation() && v.capacity >= capacity) {
+            return v.first;
+        }
+        v.list = list;
+        v.generation = list.generation();
+        v.capacity = Math.max(256, Math.max(capacity, v.capacity * 2));
+        v.first = list.allocateVertices(v.capacity);
+        v.used = 0;
+        return -1;
+    }
+
+    /** Writes vertex {@code index} of a streamed path at {@code x, y} (content-box pixels), {@code length} along it. */
+    void streamVertex(int index, float x, float y, float length) {
+        list.pathVertex(index, x + ox, y + oy, length);
+    }
+
+    /** Strokes {@code count} vertices from {@code first} as a path with the current (solid) stroke. */
+    void streamPath(int first, int count) {
+        if (count >= 2 && stroking() && dashCount == 0) {
+            list.path(first, count, width, color, join, miterLimit, 0, 0, 0, 0, 0);
+            primitives++;
+        }
     }
 
     // ---------------------------------------------------------------- envelope columns

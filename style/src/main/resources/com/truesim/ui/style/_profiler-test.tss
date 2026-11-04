@@ -1,0 +1,143 @@
+// The garish test look of the profiler's views (see _profiler.tss for the element types and keys): every part looks
+// obviously different from the default theme, so a view still looking default holds a presentational value in code.
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+
+frame-graph {
+  layout: flex;
+  direction: column;
+  gap: 5px;
+  width: 520px;
+  padding: 9px;
+  radius: 0 14px 0 14px;
+  background: box(#400040);
+  border: 3px $sun;
+}
+
+label.frame-graph-stats { font: italic 700 12px "Comic Sans MS", "Comic Neue", cursive; color: $lime; }
+
+chart.frame-graph { height: 170px; min-height: 100px; padding: 3px; plot-background: #002b40; }
+chart.frame-graph chart-legend { legend-position: outside-top; }
+
+chart-line.cpu { color: $hot; line-width: 3px; }
+chart-line.gpu { color: $lime; line-width: 3px; }
+chart-line.wait { color: $cyan; line-width: 2px; }
+chart-line.frame { color: $sun; line-width: 2px; }
+chart-inf-lines.budget { color: white; line-width: 2px; line-dash: 8px 2px; }
+chart-inf-lines.hitch { color: #ff6600; line-width: 4px; line-dash: none; }
+
+profiler {
+  layout: flex;
+  direction: column;
+  gap: 7px;
+  padding: 7px;
+  background: box(#2b0040);
+  border: 4px $hot;
+}
+
+profiler > split-pane { grow: 1; }
+profiler split-second > tab-pane { width: 100%; height: 100%; }
+profiler split-first > profiler-timeline, profiler tab-content > profiler-flame, profiler tab-content > profiler-table,
+profiler tab-content > scroll-pane.profiler-counters { width: 100%; height: 100%; }
+
+profiler-toolbar > button, profiler-toolbar > toggle-button { shrink: 0; }
+
+profiler-toolbar { layout: flex; direction: row; align-items: center; gap: 9px; }
+
+label.profiler-status {
+  font: italic 700 12px "Comic Sans MS", "Comic Neue", cursive;
+  color: $sun;
+  text-wrap: false;
+  grow: 1;
+  clip: true;
+  scale: 1; // the theme's labels grow from their centre: this one is as wide as the toolbar's rest
+}
+
+profiler-timeline, profiler-flame, profiler-table {
+  grow: 1;
+  min-height: 90px;
+  clip: true;
+  background: box(#002b40);
+  palette: $lime, $hot, $cyan, $sun, #ff6600, #0000ff, #ff1493, #8a2be2, white, #00ff99;
+  &:focus-visible { focus-ring: 4px $lime; }
+}
+
+profiler-ruler {
+  row-height: 26px;
+  font: italic 700 12px "Comic Sans MS", "Comic Neue", cursive;
+  color: $cyan;
+  stroke: $hot;
+  line-width: 3px;
+  background: box(#400040);
+}
+
+profiler-lane {
+  gutter-width: 170px;
+  lane-gap: 12px;
+  padding: 0 0 0 9px;
+  font: 900 12px "Comic Sans MS", cursive;
+  color: $sun;
+  background: box(#200020);
+}
+
+profiler-zone {
+  row-height: 24px;
+  label-min-width: 40px;
+  padding: 0 0 0 6px;
+  radius: 8px;
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: black;
+  stroke: $cyan;
+  &:selected { border: 4px $sun; }
+}
+
+profiler-frame { stroke: $sun; line-width: 2px; }
+profiler-hitch { background: box(rgba(#ff6600, 0.4)); }
+profiler-selection { background: box(rgba($lime, 0.3)); border: 3px $lime; }
+
+profiler-flame-node {
+  row-height: 24px;
+  label-min-width: 40px;
+  padding: 0 0 0 6px;
+  radius: 8px;
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: black;
+  background: box($cyan);
+  &:selected { border: 4px $hot; }
+}
+
+profiler-table-header {
+  row-height: 28px;
+  gutter-width: 240px;
+  padding: 0 0 0 9px;
+  font: 900 13px "Comic Sans MS", cursive;
+  color: $lime;
+  background: box(#400040);
+}
+
+profiler-table-row {
+  row-height: 24px;
+  padding: 0 0 0 9px;
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: $cyan;
+  &.stripe { background: box(rgba($hot, 0.2)); }
+  &:selected { background: box(rgba($sun, 0.5)); color: black; }
+}
+
+scroll-pane.profiler-counters { grow: 1; min-height: 90px; }
+scroll-pane.profiler-counters scroll-content { layout: flex; direction: row; wrap: wrap; gap: 9px; }
+chart.profiler-counter { width: 380px; height: 190px; }
+
+panel.profiler-host {
+  layout: flex;
+  direction: column;
+  align-items: start;
+  gap: 11px;
+  padding: 13px;
+  width: 100%;
+  height: 100%;
+}
+panel.profiler-host > profiler { align-self: stretch; grow: 1; }

@@ -66,6 +66,29 @@ public final class InfiniteLines extends Series {
     }
 
     @Override
+    protected boolean streams() {
+        return vertical && style().get(ChartStyles.LINE_DASH).isEmpty();
+    }
+
+    @Override
+    protected void paintStream(Canvas c) {
+        if (!itemEnabled(0)) {
+            return;
+        }
+        c.stroke(style(), color(0));
+        if (!c.stroking()) {
+            return;
+        }
+        for (long i = values.first(), end = values.end(); i < end; i++) {
+            double v = values.get(i);
+            if (finite(v)) {
+                float p = chart.streamX(v);
+                c.line(p, c.top(), p, c.bottom());
+            }
+        }
+    }
+
+    @Override
     protected boolean nearest(float px, float py, float maxPixels, boolean byX, Hit hit) {
         if (!vertical || !byX) {
             return false;

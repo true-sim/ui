@@ -163,6 +163,22 @@ public abstract class Series {
 
     // ---------------------------------------------------------------- what a kind provides
 
+    /** Whether the chart draws it in its stream this frame (set by the chart). */
+    boolean streamed;
+
+    /**
+     * Whether it can be drawn in the chart's stream (scrolled by an offset, new samples appended) as it is now; false
+     * by default.
+     */
+    protected boolean streams() {
+        return false;
+    }
+
+    /** Records it into the stream at the anchor's mapping ({@link Chart#streamX}); only when {@link #streams}. */
+    protected void paintStream(Canvas canvas) {
+        // nothing by default
+    }
+
     /** Polls the data once a frame; true when it changed since the last poll (the chart records it again). */
     protected abstract boolean poll();
 

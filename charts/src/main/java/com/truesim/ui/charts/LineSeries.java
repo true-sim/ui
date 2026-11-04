@@ -1,5 +1,9 @@
 package com.truesim.ui.charts;
 
+import com.truesim.ui.controls.charts.ChartStyles;
+
+import com.truesim.ui.controls.charts.Marker;
+
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.draw.Primitive;
 import com.truesim.ui.style.ResolvedStyle;
@@ -27,6 +31,19 @@ public class LineSeries extends XYSeries {
 
     private Step step = Step.NONE;
     private double baseline = Double.NaN;
+    // the stream (Chart's streaming): vertex i - from of the block holds sample i at the anchor's mapping
+    private final Canvas.Vertices streamBlock = new Canvas.Vertices();
+    private long from = -1;
+    private long to = -1;
+    private float lastX;
+    private float lastY;
+    private float length;
+    private float yMap0 = Float.NaN; // the Y mapping the vertices were written with
+    private float yMap1 = Float.NaN;
+    private long structure = -1;
+    private final long[] breaks = new long[MAX_BREAKS]; // samples that are not numbers: the path breaks there
+    private int breakCount;
+    private static final int MAX_BREAKS = 32;
 
     @AllowAllocation("series are made when a chart is built")
     LineSeries(Chart chart, String type, String name, String style, Axis xAxis, Axis yAxis, Column x, Column y) {
@@ -63,6 +80,100 @@ public class LineSeries extends XYSeries {
         if (baseline == baseline) {
             bounds.y(baseline);
         }
+    }
+
+    @Override
+    protected boolean streams() {
+        if (step != Step.NONE || baseline == baseline || !sorted() || breakCount >= MAX_BREAKS
+            || decimation == Decimation.LTTB || decimation == Decimation.MIN_MAX) {
+            return false;
+        }
+        ResolvedStyle s = style();
+        if (s.get(ChartStyles.MARKER) != Marker.NONE || !s.get(ChartStyles.LINE_DASH).isEmpty()) {
+            return false;
+        }
+        long a = visibleFrom();
+        long b = visibleTo();
+        float pixels = Math.abs(xAxis.endPixel() - xAxis.startPixel());
+        return !envelope(b - a, pixels) && b - a <= (long) ChartTunables.MAX_POINTS.get();
+    }
+
+    /**
+     * The line in the chart's stream: its samples' vertices are written once, at the anchor's mapping, and kept in a
+     * block of its own; each recording appends the new samples and records one path per unbroken run, from the
+     * sample before the visible ones to the newest. Everything is written again when the chart takes a new anchor,
+     * the Y mapping changed, the data changed other than by appending, or the block is full.
+     */
+    @Override
+    protected void paintStream(Canvas c) {
+        if (!itemEnabled(0)) {
+            return;
+        }
+        long a = Math.max(first(), visibleFrom() - 1);
+        long b = end();
+        if (b - a < 2) {
+            return;
+        }
+        float y0 = yAxis.toPixel(0);
+        float y1 = yAxis.toPixel(1);
+        long capacity = Math.max(2 * (b - a), x.capacity() * 2 + 2);
+        int first = c.streamBlock(streamBlock, (int) Math.min(Integer.MAX_VALUE / 8, capacity));
+        boolean rewrite = first < 0 || chart.streamRebuild() || y0 != yMap0 || y1 != yMap1
+            || x.structureVersion() + y.structureVersion() != structure || a < from || b < to
+            || b - from > streamBlockCapacity();
+        if (first < 0) {
+            first = c.streamBlock(streamBlock, 0);
+        }
+        if (rewrite) {
+            from = a;
+            to = a;
+            yMap0 = y0;
+            yMap1 = y1;
+            structure = x.structureVersion() + y.structureVersion();
+            breakCount = 0;
+            length = 0;
+        }
+        for (long i = to; i < b; i++) {
+            double xv = x.get(i);
+            double yv = y.get(i);
+            float sx = chart.streamX(xv);
+            float sy = yAxis.toPixel(yv);
+            if (!finite(xv) || !finite(yv)) {
+                if (breakCount < MAX_BREAKS) {
+                    breaks[breakCount] = i;
+                }
+                breakCount++;
+                sx = lastX;
+                sy = lastY;
+            } else if (i > from) {
+                float dx = sx - lastX;
+                float dy = sy - lastY;
+                length += (float) Math.sqrt(dx * dx + dy * dy);
+            }
+            c.streamVertex(first + (int) (i - from), sx, sy, length);
+            lastX = sx;
+            lastY = sy;
+        }
+        to = b;
+        // breaks before what shows are dropped
+        int kept = 0;
+        for (int k = 0; k < Math.min(breakCount, MAX_BREAKS); k++) {
+            if (breaks[k] >= a) {
+                breaks[kept++] = breaks[k];
+            }
+        }
+        breakCount = kept;
+        c.stroke(style(), color(0));
+        long run = a;
+        for (int k = 0; k <= breakCount; k++) {
+            long stop = k < breakCount ? breaks[k] : b;
+            c.streamPath(first + (int) (run - from), (int) (stop - run));
+            run = stop + 1;
+        }
+    }
+
+    private long streamBlockCapacity() {
+        return streamBlock.capacity();
     }
 
     @Override
