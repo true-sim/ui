@@ -33,6 +33,8 @@ project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
 include("ui-fonts-emoji") // colour emoji, optional for its size
 project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
+include("ui-console") // the developer console: commands, completion, settings as variables, the log ring
+project(":ui-console").projectDir = file("console")
 
 val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "scene")
 for (repo in truesimRepos) {
