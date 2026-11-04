@@ -18,9 +18,9 @@ import java.util.List;
  *
  * <p>Its look is the theme's: the style part {@code chart-axis} (with the element id the axis's id and the fact
  * {@code side}) gives the tick label font and colour, {@code stroke} and {@code line-width} for the axis line and
- * ticks, {@code tick-length}, {@code minor-tick-length}, {@code tick-spacing}, {@code minor-ticks}, {@code gap} (between
- * ticks and labels, and between stacked axes), {@code fit-padding}, and {@code background} under the axis when it is
- * {@code :hover}ed or {@code :selected}; {@code chart-axis-title} the title's font and colour.
+ * ticks, {@code tick-length}, {@code minor-tick-length}, {@code tick-spacing}, {@code minor-ticks}, {@code gap}
+ * (between ticks and labels, and between stacked axes), {@code fit-padding}, and {@code background} under the axis
+ * when it is {@code :hover}ed or {@code :selected}; {@code chart-axis-title} the title's font and colour.
  */
 public final class Axis {
 

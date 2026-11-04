@@ -12,8 +12,8 @@ import java.util.List;
  * What series draw with: the draw list's primitives in pixels of the chart's content box (moved to where the chart's
  * element records), faded by the element's opacity, plus what the primitives lack: polylines with dash patterns
  * carried across segments and round joins, segments clipped to the plot (so zoomed-in data never makes huge or
- * invisible primitives), markers of every {@link Marker} shape, triangles and quads for areas, and pie wedges. Allocates
- * nothing.
+ * invisible primitives), markers of every {@link Marker} shape, triangles and quads for areas, and pie wedges.
+ * Allocates nothing.
  */
 public final class Canvas {
 

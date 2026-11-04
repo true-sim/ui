@@ -197,7 +197,8 @@ public final class StackedAreaSeries extends Series {
         double vx = xAxis.fromPixel(px);
         long i = Decimator.lowerBound(xs, vx, 0, count);
         long best = i >= count ? count - 1 : i;
-        if (i > 0 && i < count && Math.abs(xAxis.toPixel(xs.get(i - 1)) - px) < Math.abs(xAxis.toPixel(xs.get(i)) - px)) {
+        if (i > 0 && i < count
+            && Math.abs(xAxis.toPixel(xs.get(i - 1)) - px) < Math.abs(xAxis.toPixel(xs.get(i)) - px)) {
             best = i - 1;
         }
         int layer = -1;

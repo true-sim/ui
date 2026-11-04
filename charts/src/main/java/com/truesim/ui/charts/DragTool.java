@@ -8,8 +8,8 @@ import com.truesim.ui.style.ResolvedStyle;
 /**
  * Something on a chart the user drags (ImPlot's drag tools) to edit data or set a query range: its values are
  * {@code common-state} {@link com.truesim.common.state.VersionedDouble}s, bound two-way (the game sets them, the user
- * drags them; the chart shows both). Styled by its part, which shows {@code :hover} and {@code :pressed}; grabbed within
- * {@code ui.chart.grabPixels}.
+ * drags them; the chart shows both). Styled by its part, which shows {@code :hover} and {@code :pressed}; grabbed
+ * within {@code ui.chart.grabPixels}.
  */
 public abstract class DragTool {
 

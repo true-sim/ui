@@ -58,8 +58,8 @@ import java.util.List;
  * Cmd: Y axes only), over an axis that axis alone. Dragging with the primary button pans (an axis alone when pressed
  * on it); with the secondary button draws a zoom box (a thin box zooms one direction only); with Shift and the primary
  * button draws a selection ({@link #selection()}, a query range the game reads). Clicking an axis selects it; clicking
- * a legend entry hides or shows its item, hovering one highlights it. Drag tools ({@link #dragPoint}, {@link #dragLine},
- * {@link #dragRect}) move with the pointer. A double click or {@link UiCommand#CHART_RESET} (when focused) fits every
+ * a legend entry hides or shows its item, hovering one highlights it. Drag tools ({@link #dragPoint},
+ * {@link #dragLine}, {@link #dragRect}) move with the pointer. A double click or {@link UiCommand#CHART_RESET} (when focused) fits every
  * axis to the data again and resumes following and auto-fitting.
  *
  * <p><b>Frames.</b> Once a frame the chart polls its series' data and its axes' ranges (versions only); it records
@@ -1773,7 +1773,8 @@ public final class Chart implements Ui.FrameListener, UiListener {
             }
             if (!title.isEmpty() && titleBlock != null) {
                 ResolvedStyle ts = styleOf(titlePart);
-                float tx = Math.max(0, Math.min(width - titleBlock.width(), (plotX0 + plotX1 - titleBlock.width()) * 0.5f));
+                float centred = (plotX0 + plotX1 - titleBlock.width()) * 0.5f;
+                float tx = Math.max(0, Math.min(width - titleBlock.width(), centred));
                 c.text(titleBlock, tx, 0, c.fade(ts.rgba(Styles.COLOR)));
             }
         }

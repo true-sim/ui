@@ -272,7 +272,8 @@ public final class Decimator {
             double best = -1;
             long next = rangeStart;
             for (long j = rangeStart; j < rangeEnd; j++) {
-                double area = Math.abs((ax - avgX) * (t(yAxis, y.get(j)) - ay) - (ax - t(xAxis, x.get(j))) * (avgY - ay));
+                double area = Math.abs((ax - avgX) * (t(yAxis, y.get(j)) - ay)
+                    - (ax - t(xAxis, x.get(j))) * (avgY - ay));
                 if (area > best) {
                     best = area;
                     next = j;
