@@ -38,7 +38,8 @@ import java.util.List;
  * into a floating window ({@link DockHost}), whose title bar dragged over the space docks the panel again. While
  * dragging, a {@code dock-drop-preview} shows where it would dock and {@code dock-zones} guides (five
  * {@code dock-zone}s, the active one {@code :selected}) sit over the pane under the pointer. Shift held while dragging
- * ({@code ui.docking.dockModifier}) docks nothing. The arrangement is data ({@link #layout()}, {@link #restore}, text
+ * ({@code ui.docking.dockModifier}) docks nothing. In a pane, {@code NEXT_TAB}, {@code PREVIOUS_TAB} and {@code CLOSE_TAB}
+ * switch and close its panels, and {@code NEXT_WINDOW} moves to the next pane. The arrangement is data ({@link #layout()}, {@link #restore}, text
  * through {@link DockLayout}), remembered through a {@link LayoutStore}.
  *
  * <p>Elements, for styles: {@code dock-space} ({@code dock-zone}: how deep the side zones reach; {@code dock-min-pane}:
@@ -130,6 +131,10 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
     private final UiListener rootListener = new RootListener();
     private final UiListener tabListener = new TabListener();
     private final UiListener splitterListener = new SplitterListener();
+    private final UiListener paneListener = new PaneListener();
+    private Element focusLater;
+    private int focusLaterPlayer;
+    private int focusLaterFrames;
 
     /**
      * A dock space of the UI of {@code overlays}; undocked panels float in windows of {@code windows} (null: panels
@@ -865,6 +870,7 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
         Tabs t = (Tabs) node;
         Element e = ui.element("dock-tabs", t.style);
         e.semantics(Role.GROUP, null);
+        interaction.on(e, EventType.COMMAND.bit(), paneListener);
         Element strip = ui.element("dock-tab-strip", null);
         strip.semantics(Role.TAB_LIST, null);
         Element body = ui.element("dock-pane-body", null);
@@ -996,6 +1002,12 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
 
     @Override
     public void afterLayout() {
+        if (focusLater != null) { // a tab of a rebuilt pane: focusable once laid out
+            Element e = focusLater;
+            if (!e.alive() || interaction.focus(e, focusLaterPlayer) || --focusLaterFrames <= 0) {
+                focusLater = null;
+            }
+        }
         if (zones.showing() && hit && hitTabs != null) {
             int t = hitTabs.element.slot();
             int z = zonesElement.slot();
@@ -1514,6 +1526,91 @@ public final class DockSpace implements Ui.FrameListener, WindowDropTarget {
                 activate(to);
                 interaction.focus(to.tab);
             }
+        }
+    }
+
+    /**
+     * The tab and window commands in a pane (focus on its tab or in its panel): {@code NEXT_TAB} and
+     * {@code PREVIOUS_TAB} show the neighbouring panel (wrapping), {@code CLOSE_TAB} asks the shown one to close,
+     * {@code NEXT_WINDOW} moves the focus to the next pane (in this space's order, across its windows).
+     */
+    private final class PaneListener implements UiListener {
+        @Override
+        public void handle(UiEvent e) {
+            Tabs t = paneAt(e.currentSlot());
+            if (t == null || e.consumed()) {
+                return;
+            }
+            switch (e.command()) {
+                case NEXT_TAB, PREVIOUS_TAB -> {
+                    int n = t.panels.size();
+                    if (n < 2) {
+                        return;
+                    }
+                    e.consume();
+                    Element f = interaction.focused(e.player());
+                    boolean onTab = f != null && f.parent() == t.strip;
+                    int at = Math.min(t.active, n - 1);
+                    DockPanel to = t.panels.get(Math.floorMod(at + (e.command() == UiCommand.NEXT_TAB ? 1 : -1), n));
+                    activate(to);
+                    if (onTab) {
+                        interaction.focus(to.tab, e.player());
+                    } else {
+                        focusInto(to, e.player());
+                    }
+                }
+                case CLOSE_TAB -> {
+                    DockPanel p = t.active();
+                    if (p == null || !p.closable()) {
+                        return;
+                    }
+                    e.consume();
+                    p.requestClose();
+                    DockPanel shown = t.active();
+                    if (shown != null && shown.isOpen() && !interaction.focus(shown.tab, e.player())) {
+                        focusLater = shown.tab; // its pane was rebuilt: focused once laid out
+                        focusLaterPlayer = e.player();
+                        focusLaterFrames = 4;
+                    }
+                }
+                case NEXT_WINDOW -> {
+                    if (panes.length < 2) {
+                        return; // the windows cycle (the window manager's fallback)
+                    }
+                    int i = 0;
+                    while (i < panes.length && panes[i] != t) {
+                        i++;
+                    }
+                    Tabs next = panes[(i + 1) % panes.length];
+                    DockPanel shown = next.active();
+                    if (shown == null) {
+                        return;
+                    }
+                    e.consume();
+                    activate(shown);
+                    focusInto(shown, e.player());
+                }
+                default -> {
+                    // other commands pass
+                }
+            }
+        }
+    }
+
+    private Tabs paneAt(int slot) {
+        for (Tabs t : panes) {
+            if (t.element != null && t.element.slot() == slot) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    /** Focuses what was last focused in {@code panel}, or its tab. */
+    private void focusInto(DockPanel panel, int player) {
+        Element remembered = interaction.remembered(panel.content);
+        if (remembered == null || !interaction.focus(remembered, player)) {
+            interaction.focus(panel.tab, player);
         }
     }
 

@@ -11,6 +11,7 @@ import com.truesim.ui.core.UiState;
 import com.truesim.ui.core.UiStore;
 import com.truesim.ui.core.event.Interaction;
 import com.truesim.ui.core.event.PointerEvents;
+import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.layout.Layout;
 import com.truesim.ui.layout.LayoutKind;
 import com.truesim.ui.layout.Unit;
@@ -24,7 +25,7 @@ import java.util.Map;
  * The floating windows of one host: by default a {@code window-host} element covering the overlay layer, or any
  * container given (a world panel's root for windows in 3D and VR, a docked pane): nothing here assumes the screen.
  * Keeps their z-order (a press raises a window), the active window ({@code window:selected}), snapping, keyboard
- * cycling ({@link #focusNext()}), the remembered layout ({@link #persistence}) and the drop targets windows are
+ * cycling ({@link #focusNext()}, the {@code NEXT_WINDOW} command), the remembered layout ({@link #persistence}) and the drop targets windows are
  * docked into. Modal windows show on the modal layer (or, in a given host, in that host).
  *
  * <pre>{@code
@@ -98,6 +99,38 @@ public final class WindowManager implements Ui.FrameListener {
             modalHost = host;
         }
         ui.addFrameListener(this);
+        interaction.addCommandFallback(this::command);
+    }
+
+    /**
+     * Commands nothing else took: {@code NEXT_WINDOW} cycles the open windows ({@link #focusNext()});
+     * {@code WINDOW_MOVE} and {@code WINDOW_RESIZE} with nothing focused move or resize the active window from the
+     * keyboard (with the focus in a window, the window takes them itself).
+     */
+    private boolean command(UiCommand command, int player, int flags) {
+        switch (command) {
+            case NEXT_WINDOW -> {
+                if (openCount == 0) {
+                    return false;
+                }
+                focusNext();
+                return true;
+            }
+            case WINDOW_MOVE, WINDOW_RESIZE -> {
+                if (active == null || !active.isOpen() || interaction.focused(player) != null) {
+                    return false;
+                }
+                if (command == UiCommand.WINDOW_MOVE) {
+                    active.keyboardMove();
+                } else {
+                    active.keyboardResize();
+                }
+                return true;
+            }
+            default -> {
+                return false;
+            }
+        }
     }
 
     /** The tunables windows read. */
