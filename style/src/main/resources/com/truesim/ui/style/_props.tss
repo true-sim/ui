@@ -13,7 +13,7 @@
 @use "mixins" as *;
 
 $prop-label-width: 112px;
-$prop-cell-width: 112px;
+$prop-cell-width: 124px; // a number field with its steppers fits (112 overflowed into the next cell)
 
 // ------------------------------------------------------------------ panels and rows
 
