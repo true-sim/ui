@@ -1,0 +1,191 @@
+// The garish test look of charts (see _charts.tss for the element types and keys): every part and state looks
+// obviously different from the default theme, so a chart still looking default holds a presentational value in code.
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+
+chart {
+  min-width: 180px;
+  min-height: 140px;
+  padding: 11px;
+  radius: 0 18px 0 18px;
+  background: linear-gradient(90deg, #400040, #002b40);
+  border: 4px $sun;
+  palette: $lime, $hot, $cyan, $sun, #ff6600, #0000ff, #ff1493, #8a2be2, white, #00ff99;
+  colormap: #0000ff, $cyan, $lime, $sun, #ff6600, $hot;
+  chart-tooltips: per-series;
+  tooltip-offset: 22px;
+  cursor: pointer;
+  &:focus-visible { focus-ring: 5px $lime; }
+}
+
+chart-plot { clip: true; background: box(#200020); radius: 12px; }
+
+chart-title {
+  font: italic 900 16px "Comic Sans MS", "Comic Neue", cursive;
+  color: $sun;
+  margin: 0 0 7px 0;
+}
+
+chart-axis {
+  font: italic 700 12px "Comic Sans MS", "Comic Neue", cursive;
+  color: $cyan;
+  stroke: $hot;
+  line-width: 3px;
+  tick-length: 9px;
+  minor-tick-length: 5px;
+  tick-spacing: 90px;
+  minor-ticks: false;
+  gap: 6px;
+  fit-padding: 0.15;
+  &:hover { background: box(rgba($lime, 0.3)); }
+  &:selected { background: box(rgba($sun, 0.4)); stroke: $lime; color: $sun; }
+}
+
+chart-axis[side=left], chart-axis[side=right] { tick-spacing: 50px; }
+chart-axis-title { font: 900 13px "Comic Sans MS", cursive; color: $lime; }
+
+chart-grid { stroke: rgba($lime, 0.35); line-width: 2px; line-dash: 8px 4px; }
+chart-grid-minor { stroke: rgba($hot, 0.2); line-width: 1px; }
+
+chart-legend {
+  legend-position: bottom-left;
+  direction: row;
+  padding: 6px 10px;
+  margin: 6px;
+  gap: 7px;
+  swatch-size: 14px;
+  radius: 0 10px 0 10px;
+  background: box(rgba($sun, 0.85));
+  border: 3px $hot;
+}
+
+chart-legend-entry {
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: #400040;
+  &:hover { color: $hot; background: box($cyan); }
+  &:disabled { opacity: 0.25; }
+}
+
+chart-tooltip {
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: #000000;
+  padding: 5px 9px;
+  gap: 5px;
+  radius: 0 12px 0 12px;
+  background: box($cyan);
+  border: 3px $hot;
+}
+
+chart-tooltip-title { font: 900 12px "Comic Sans MS", cursive; color: $hot; }
+chart-crosshair { stroke: $sun; line-width: 2px; line-dash: 2px 2px; }
+chart-highlight { marker: diamond; marker-size: 16px; marker-fill: 0.6; marker-outline: 3px; stroke: $sun; }
+chart-zoom-box { background: box(rgba($hot, 0.3)); border: 3px $lime; }
+
+chart-selection {
+  background: box(rgba($cyan, 0.3));
+  border: 3px $sun;
+  fill: $cyan;
+  fill-opacity: 0.3;
+  stroke: $sun;
+  line-width: 3px;
+  line-dash: 2px 6px;
+  &:hover { fill-opacity: 0.5; }
+}
+
+chart-text { font: 900 13px "Comic Sans MS", cursive; color: $sun; }
+
+chart-annotation {
+  font: italic 700 12px "Comic Sans MS", cursive;
+  color: #000000;
+  padding: 3px 8px;
+  radius: 9px 0 9px 0;
+  background: box($lime);
+  border: 2px $hot;
+  stroke: $lime;
+  line-width: 3px;
+}
+
+chart-pie-label { font: 900 12px "Comic Sans MS", cursive; color: #000000; }
+
+chart-drag-point {
+  color: $hot;
+  marker: square;
+  marker-size: 14px;
+  marker-outline: 3px;
+  stroke: $lime;
+  &:hover { marker-size: 18px; }
+  &:pressed { color: $sun; }
+}
+
+chart-drag-line {
+  stroke: $cyan;
+  line-width: 4px;
+  line-dash: 10px 5px;
+  &:hover { stroke: $sun; }
+  &:pressed { stroke: $hot; }
+}
+
+chart-drag-rect {
+  fill: $hot;
+  fill-opacity: 0.3;
+  stroke: $lime;
+  line-width: 3px;
+  &:hover { fill-opacity: 0.45; }
+  &:pressed { fill-opacity: 0.6; }
+}
+
+chart-line, chart-stairs, chart-area, chart-stems, chart-shaded, chart-stacked, chart-errors, chart-candles,
+chart-digital {
+  line-width: 3px;
+  line-dash: 12px 4px;
+  line-join: none;
+  marker: up;
+  marker-size: 9px;
+  &:hover { line-width: 6px; }
+}
+
+chart-area { fill-opacity: 0.55; line-dash: none; }
+chart-shaded { fill-opacity: 0.6; line-width: 2px; }
+chart-stacked { fill-opacity: 0.9; line-dash: none; marker: none; }
+chart-stems { marker: square; marker-size: 9px; line-dash: none; }
+chart-digital { fill-opacity: 0.7; digital-height: 18px; line-dash: none; marker: none; }
+chart-errors { line-width: 2px; cap-width: 14px; marker: diamond; marker-size: 8px; line-dash: none; }
+chart-candles { line-width: 2px; bar-width: 0.5; up-color: $cyan; down-color: $hot; line-dash: none; marker: none; }
+chart-inf-lines { line-width: 3px; line-dash: 3px 3px; marker: none; }
+
+chart-scatter {
+  marker: cross;
+  marker-size: 11px;
+  marker-fill: 1;
+  marker-outline: 2px;
+  &:hover { marker-size: 15px; }
+}
+
+chart-bars, chart-histogram {
+  bar-width: 0.45;
+  fill-opacity: 0.7;
+  radius: 6px;
+  border: 2px $sun;
+  &:hover { fill-opacity: 1; }
+}
+
+// the style names' shapes, each another one than in the default theme
+$markers: (circle: square, square: diamond, diamond: up, up: down, down: left, left: right, right: cross,
+  cross: plus, plus: asterisk, asterisk: circle);
+@each $name, $shape in $markers {
+  chart-scatter.#{$name}, chart-line.#{$name} { marker: $shape; }
+}
+chart-pie.donut { donut-hole: 0.2; }
+chart-area.thin { fill-opacity: 0.3; line-width: 4px; }
+
+chart-histogram { bar-width: 0.8; radius: 0; }
+chart-heatmap, chart-histogram2d { fill-opacity: 0.8; }
+chart-pie { fill-opacity: 0.8; donut-hole: 0.45; stroke: $sun; line-width: 3px; }
+chart-image { fill-opacity: 0.6; }
+
+chart-subplots { layout: flex; direction: column; gap: 13px; }
+chart-subplots-row { layout: flex; direction: row; gap: 13px; grow: 1; }
+chart-subplots-row > chart { grow: 1; basis: 0; }

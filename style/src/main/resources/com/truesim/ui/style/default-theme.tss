@@ -11,6 +11,7 @@
 @import "data";
 @use "basic"; // the basic and container controls of ui-controls
 @use "text-edit"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "charts"; // charts (ui-charts, com.truesim.ui.charts)
 
 // ------------------------------------------------------------------ palette: live tokens, dark by default
 
