@@ -1809,7 +1809,7 @@ and `ui-controls` (`com.truesim.ui.controls.{text,overlay,windows,basic,anim,dat
 | Overlays and windows | `Overlays`/`Overlay` anchored to elements, points or scene objects, placed by `Placer` (side, align, gap, shift, flip, viewport margin; the side as fact `side`), pass-through, blocking or modal with a backdrop; overlays fade in and out by their `opacity` transition (input off while fading out); `Tooltips` (delay, warm moves, follow or anchored, long press, visible focus); `Popovers` (hover cards with a safe triangle and grace, click popovers, nesting); `WindowManager`/`FloatingWindow` (move with snapping, eight resize edges, minimise, maximise, close, modal, focus cycling, keyboard move and resize, `WindowLayout`); `DockSpace` (splits, tab groups, drop zones and preview, floating into windows and back, `DockLayout` round trip) | `controls.overlay`, `controls.windows` |
 | Basic and container controls | `Button`, `ToggleButton`, `Checkbox` (`:indeterminate`), `RadioGroup`, `Switch`, `SegmentedControl`, `IconLabel`, `ImageView`, `Separator`, `Badge`, `ProgressBar`, `Spinner`, `Slider` (range, vertical), `ColorPicker`, `DatePicker`, `TimePicker`, `KeyBindingField`, `DropDown`, `Menu`/`MenuBar` (submenus with hover intent, context menus), `Dialog`, `Toasts`, `Toolbar`, `StatusBar`, `Breadcrumbs`, `TabPane`, `Collapsible`, `Accordion`, `GroupBox`, `Card`, `SplitPane`, `Carousel`, `Stepper`, `Drawer`; models are `common-state` versioned values polled once a frame by `Controls` | `controls.basic` |
 | Animation | `Animator`: element channels (opacity, scale, drawn offset, colours, sizes, offsets, anchors) and controls' own, fast-forward reversal, CSS easings, `ui.animation.speed` (0: reduced motion); style transitions on restyle; `Visuals` per-element overrides; opacity and scale apply to the subtree; `DrawList.transform` draws scales and offsets without a renderer change | `controls.anim`, `ui-core` |
-| Data controls | `Scroller`, `ScrollView` (stylable bars, auto-hide, touch momentum, rubber band, keys), `ScrollPane` with sticky headers; virtualization (`VirtualView`, fixed or Fenwick-measured extents, a moving origin for a million rows); `ValueRenderer`/`ValueEditor`/`ValueRenderers`; `ListView`, `DataView` (sorted and filtered, O(log n + B) a change), `TreeModel`/`TreeView` (lazy, drag and drop), `TableView` (sort, filter row, resize, move, frozen columns, inline editing, row, multi-row or cell selection, column virtualization) | `controls.data` |
+| Data controls | `Scroller`, `ScrollView` (stylable bars, auto-hide, touch momentum, rubber band, keys), `ScrollPane` with sticky headers; virtualization (`VirtualView`, fixed or Fenwick-measured extents, a moving origin for a million rows); `ValueRenderer`/`ValueEditor`/`ValueRenderers`; `ListView`, `DataView` (sorted and filtered, O(log n + B) a change), `TreeView` over `common-state`'s `VersionedTree` (lazy, drag and drop), `TableView` (sort, filter row, resize, move, frozen columns, inline editing, row, multi-row or cell selection, column virtualization) | `controls.data` |
 | Cross-branch hooks | `SearchField` is a `DropDown.FilterSource` (it takes the focus when the list opens; `FilterSource.focusTarget`); `HexField` puts a hex text field in a `ColorPicker`'s hex slot; `TextCellEditor` is the `ValueEditor` of strings (Enter commits through `TextEditor.passSubmit`, Escape cancels, validators); `TextColumnFilter` puts a field in a table's filter row (contains, ignoring case). Styled as `textfield.cell`, `.column-filter`, `.hex` in both themes; the galleries use all four | `controls.text` |
 | Scrolling by clip offsets | Each clip record carries an offset added to its primitives' coordinates (`DrawList.CLIP_FLOATS` 7, `setClipOffset`, `drawnX`/`drawnY`); the UI records an element in its clip's content space (its rectangle plus the clip owner's scroll), and a scroll region (`Ui.scrollRegion`: a virtual view's body, a scroll pane's viewport; any clipping element) moves its clip's offset when it scrolls, so its rows are not recorded again. Layout scroll shifts are whole pixels when snapping (`Layout.scrollPixelsX/Y`), so picking, which reads the layout, hits exactly where the content draws. The engine's shader moves each primitive's quad by its clip's offset and tests the clip's rectangle unmoved | `ui-core`, `ui-layout`, `Ui`, engine `ui/draw.slang` |
 | Engine | `UiPlugin` (key `ui`): the `ui` action group, every UI tunable a setting (`UiTunables`, with `UiCommands.ALL`, group `ui`), each frame at its start `UiCommands`, `MousePointer` and `UiTextInput` into one `UiInput`, `ui.update(width, height, input, nanos)` with the view's size and the frame's real time, `GpuUiRenderer.submit`; with a window `SdlClipboard`, SDL text input, the display's content scale as the layout's, and the mouse cursor following the UI's (`Platform.setCursor`, `SystemCursor`). `UiTextInput`, `SdlClipboard`, `Window.startTextInput(kind)`, the colour glyph path of the shader (from `ui-text-input`) | engine `ui`, `platform` |
@@ -1879,11 +1879,13 @@ Looked at: the GPU images match the CPU previews; the test theme restyles every 
 - ~~The scroll pane of the data gallery lays the rows of a section's body on top of one another~~,
   ~~the game's changes to UI state show the next frame~~, ~~windows' title bar buttons draw no icons~~, ~~the tab
   strip's overflow button overlaps a clipped tab~~: fixed, see "Group A2 fixes" above.
-- From the branches: incremental shaping of very long paragraphs, ~~touch selection handles~~, spell checking,
+- From the branches: ~~incremental shaping of very long paragraphs~~ (built: below), ~~touch selection handles~~,
+  spell checking,
   grapheme-level password masking (text); OS windows for docking, bindings of the `ui` group for `keyboardMove`,
   `keyboardResize` and `focusNext` (windows); a transform table in the draw list instead of transforms baked into
   primitives, clips following transforms, mnemonics, a repeat button, logarithmic sliders, HDR and an eyedropper in
-  the colour picker (basic); `VersionedTree` in `common-state`, renderers chosen by a style key, records by their
+  the colour picker (basic); ~~`VersionedTree` in `common-state`~~ (built: below), renderers chosen by a style key,
+  records by their
   metadata, box select, hiding and grouping columns, horizontal list scrolling, a loading look for lazy tree nodes
   (data); world panels, scene picking (`Interactive`, the mesh BVH, GPU picking), touch, pen and XR pointer sources
   (groundwork).
@@ -1928,10 +1930,86 @@ Repository `ui` (modules `ui-core`, `ui-style`, `ui-layout`, `ui-text`, `ui-text
 - ~~The `Ui` engine plugin~~: built in A2 (`UiPlugin`).
 - Stage 2's binding, lenses, converters and effect channels (A2 built value renderers and editors, validators of
   text, tweens, style transitions and `scale` drawn by per-range transforms).
-- `common-state`'s `VersionedTree` and `VersionedRingBuffer` (needed by tree views and charts, groups B and C).
+- ~~`common-state`'s `VersionedTree` and `VersionedRingBuffer`~~: built after A2 (`VersionedTree`,
+  `VersionedDoubleRing`/`VersionedFloatRing`, below).
 - SVG icons through NanoSVG; atlas page eviction (colour emoji: built in A2, CBDT).
 - Touch, pen and XR pointer sources (the IME rectangle: built in A2).
 - 100,000 glyphs over a full-screen translucent backdrop is 0.40 to 0.45 ms, at or just above its 0.4 ms target.
 - A multi-range dirty list: one range per list spans all changed elements of a frame.
 - ~~Colour emoji without a bundled font~~: Noto Color Emoji is bundled in A2 (`ui-fonts-emoji`).
 - Benchmarks are tests in each module (`TRUESIM_BENCHMARK=true`), not yet recorded in `engine-bench`.
+
+### Incremental reshaping and `VersionedTree` (2026-11-04): local branches `a2-text-tree` (ui) and `versioned-tree` (common-state)
+
+#### Built
+
+- **Incremental reshaping** (`TextBlock`, used by every text field and area paragraph): a change of the text alone is
+  applied to the shaped and laid out block instead of shaping it again, for blocks of at least
+  `TextBlock.INCREMENTAL_MIN` (128) characters (`incremental(boolean)`, on by default; `incrementalEdits()` counts).
+  - The edit is the text between the common prefix and suffix (whole code points); per-character data after it moves.
+  - BiDi: paragraphs without right-to-left text keep level 0 unless the inserted text needs BiDi; otherwise the levels
+    from the last strong character before the edit to the first after it are resolved again (a level depends only on
+    its strong neighbours without explicit embeddings, isolates and brackets), or the whole paragraph's when it has
+    those or no strong character precedes the edit; the changed range is found by comparison. A paragraph whose
+    direction changes is shaped from scratch.
+  - Itemisation restarts at a character with a script of its own (its run's level, face and script are its own, so the
+    itemiser's state there does not depend on what came before) a margin before the edit, inside its run, and stops at
+    the first such character past the edit and its level changes, where the old runs go on.
+  - Shaping: a long run (a Latin paragraph is one run) is shaped again only in a segment `[w, z)` around the edit. Split
+    points are clusters whose glyphs lack HarfBuzz's `UNSAFE_TO_BREAK` flag (shapers without flags: after white
+    space); the segment must give the old glyphs again over a margin at both ends (`[w, x)` and `[y, z)`), else it
+    widens (four attempts, then the whole run). The old glyphs before `x` and from `z` stay in place; the rest is
+    spliced (`ShapedGlyphs.replace`). `UNSAFE_TO_CONCAT` would be the strict condition for reuse after an edit, but
+    HarfBuzz sets it on nearly every glyph a lookup looked at (every letter of a kerned font), so the overlap check
+    replaces it. HarfBuzz is given the run's script explicitly (the script of the run's first character of a script of
+    its own, HarfBuzz's own guess for the whole run), so a segment of common characters shapes as its run.
+  - Lines are broken again from a clean line start (not inside a split word) before the edit's line, until a line
+    starts, past the changed range, where an old line started clean (greedy breaking from a clean start depends on
+    nothing before it); the new lines replace the old ones in place and the following lines move. The break iterator
+    sees a window from 64 characters before the restart, not the whole paragraph.
+  - Exactness: glyph and caret positions are kept relative to their line (`glyphX`, `charX0/1` before alignment,
+    `glyphDy` from the baseline) and the line's offset and baseline are added when read or recorded, giving the same
+    floats as before; line tops and alignment are recomputed for the moved lines. A line's glyphs are found by binary
+    search in its runs when their clusters are monotone (all of HarfBuzz's), which also takes the full layout of a
+    long paragraph from O(lines x glyphs) to O(glyphs + lines log glyphs).
+  - Tests: `IncrementalShapingTest` in `ui-text` (JDK shaper, and a shaper marking flags) and `ui-text-native`
+    (HarfBuzz): random typing, deleting, replacing, pasting and line feeds in 600 to 3,000-character paragraphs mixing
+    Latin (kerning, ligatures), Arabic, CJK, Devanagari, marks, digits, brackets and (native) emoji, at several widths,
+    alignments and directions; after every edit the block equals one shaped from scratch glyph by glyph (id, face,
+    x, y, cluster, size), line by line (range, glyphs, left, width, baseline, top, direction) and caret by caret
+    (levels, character edges, caret x), compared exactly (many more seeds were run while building it).
+- Fixes found by the comparison: the JDK shaper read the whole character array as context (also stale characters past
+  the text's end); it now passes 8 characters of context on each side, as the HarfBuzz shaper does. Paragraph
+  separators get their paragraph's level instead of whatever the array held.
+- **`VersionedTree<T>`** in `common-state` (with `VersionedDoubleRing`/`VersionedFloatRing` for chart streaming:
+  appended ranges logged, `changesSince` visits the range appended since, clipped to the held samples). `TreeView` and
+  `TreeRows` take a `VersionedTree`; the data controls' own `TreeModel`/`TreeNode` went. View state moved into
+  `TreeRows`: expansion, lazy loaders (`TreeRows.ChildLoader`, `TreeView.lazy`) and loading, in arrays by node id
+  (ids are dense, never reused), stamped on the tree's clock, so two views of one tree open nodes independently.
+  Value changes come from `VersionedTree.changesSince` (its log survives structure changes, node identity being
+  stable).
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo; `BenchmarkTest.typingInLongParagraphs`, HarfBuzz, wrapped at 600 px)
+
+Per keystroke, typing into the middle of one paragraph (the text area shapes one block per paragraph):
+
+| Paragraph | Before (A2) | Full reshape now | Incremental |
+|---|---|---|---|
+| 5,000 characters, Latin | 892 µs | 540 µs | 23 µs |
+| 5,000 characters, Latin, Arabic, CJK, Devanagari | 1,183 µs | 1,206 µs | 31 µs |
+| 20,000 characters, Latin | 8,978 µs | 2,254 µs | 31 µs |
+| 20,000 characters, Latin, Arabic, CJK, Devanagari | 5,699 µs | 4,542 µs | 52 µs |
+
+Target well under 0.2 ms: met. Incremental stays; the full reshape is the fallback (short blocks, style or box
+changes, rich text, line feeds typed or deleted, a paragraph's direction changing, a segment that does not converge).
+What remains per keystroke is linear but cheap: comparing the text, moving per-character and per-glyph arrays, the
+following lines' cluster indices.
+
+#### Left
+
+- Rich text (style runs) still reshapes whole: its runs are rebuilt by the editor on every change.
+- Brackets or explicit embeddings in a paragraph with right-to-left text resolve the whole paragraph's BiDi on each
+  edit (0.25 ms at 20,000 characters); pairing brackets incrementally would remove that.
+- `common-state` 0.4.0 must be released with `VersionedTree` before `ui` can use the published artifact: the
+  dependency in `core/build.gradle.kts` stays 0.3.0 and builds use `-Ptruesim.common-state=../common-state-tree`
+  until then.

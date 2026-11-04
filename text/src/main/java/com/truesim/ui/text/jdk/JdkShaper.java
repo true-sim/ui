@@ -20,13 +20,26 @@ public final class JdkShaper implements TextShaper {
     private static final int INVISIBLE = 0xFFFF;
 
     private final FontRenderContext frc = new FontRenderContext(null, true, true);
+    /** Characters of context passed on each side of a run, as the HarfBuzz shaper does. */
+    static final int CONTEXT = 8;
+
     private float[] positions = new float[64];
+    private char[] context = new char[256];
 
     @Override
     public void shape(char[] text, int length, int start, int end, FontFace face, float sizePx,
         boolean rightToLeft, String language, ShapedGlyphs out) {
+        // The JDK reads the whole array as context: pass the run with CONTEXT characters on each side, within length
+        // (the array may hold stale characters past it)
+        int from = Math.max(0, start - CONTEXT);
+        int to = Math.min(length, end + CONTEXT);
+        if (context.length < to - from) {
+            context = new char[Math.max(to - from, context.length * 2)];
+        }
+        System.arraycopy(text, from, context, 0, to - from);
+        java.util.Arrays.fill(context, to - from, context.length, (char) 0);
         Font font = ((JdkFontFace) face).shapingFont(sizePx);
-        GlyphVector gv = font.layoutGlyphVector(frc, text, start, end,
+        GlyphVector gv = font.layoutGlyphVector(frc, context, start - from, end - from,
             rightToLeft ? Font.LAYOUT_RIGHT_TO_LEFT : Font.LAYOUT_LEFT_TO_RIGHT);
         int n = gv.getNumGlyphs();
         positions = gv.getGlyphPositions(0, n + 1, positions.length >= 2 * n + 2 ? positions : null);

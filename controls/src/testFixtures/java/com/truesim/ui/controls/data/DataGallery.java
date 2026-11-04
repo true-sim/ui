@@ -2,6 +2,7 @@ package com.truesim.ui.controls.data;
 
 import com.truesim.common.state.ChangeClock;
 import com.truesim.common.state.VersionedList;
+import com.truesim.common.state.VersionedTree;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.style.InlineStyle;
@@ -101,26 +102,26 @@ public final class DataGallery {
         ListView<Object> mixed = ListView.of(ui, "Values", values);
         root.add(sized(ui, mixed.root(), 240, 300));
 
-        TreeModel<String> model = new TreeModel<>(clock, "project");
-        TreeNode<String> assets = model.root().add("assets");
-        TreeNode<String> textures = assets.add("textures");
+        VersionedTree<String> model = clock.tree("project");
+        VersionedTree.Node<String> assets = model.root().add("assets");
+        VersionedTree.Node<String> textures = assets.add("textures");
         for (int i = 0; i < 5; i++) {
             textures.add("rock_" + i + ".png");
         }
-        TreeNode<String> models = assets.add("models");
-        models.lazy(node -> {
-            node.add("ship.glb");
-            node.add("station.glb");
-        });
-        TreeNode<String> src = model.root().add("src");
+        VersionedTree.Node<String> models = assets.add("models");
+        VersionedTree.Node<String> src = model.root().add("src");
         src.add("Main.java");
         src.add("Game.java");
         model.root().add("README.md");
         TreeView<String> tree = new TreeView<>(ui, "Project", model, Renderers.text());
         tree.draggable(true);
-        assets.expanded(true);
-        textures.expanded(true);
-        models.expanded(true);
+        tree.lazy(models, node -> {
+            node.add("ship.glb");
+            node.add("station.glb");
+        });
+        tree.expand(assets, true);
+        tree.expand(textures, true);
+        tree.expand(models, true);
         root.add(sized(ui, tree.root(), 260, 300));
 
         VersionedList<Unit> units = clock.list();

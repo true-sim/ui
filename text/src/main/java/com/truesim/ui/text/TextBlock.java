@@ -24,7 +24,22 @@ import java.util.Objects;
  * L2), trailing white space left out (rule L1, simplified); lines aligned in the box; caret positions per
  * character.</li>
  * </ol>
- * Unchanged inputs cost a comparison. {@link #record} writes one {@link DrawList#glyph GLYPH} primitive per visible
+ * Unchanged inputs cost a comparison.
+ *
+ * <p><b>Incremental reshaping.</b> When only the text changed (typing into a long paragraph), the block redoes only
+ * what the edit reaches ({@link #incremental(boolean)}, on by default; blocks shorter than {@value #INCREMENTAL_MIN}
+ * characters reshape whole): the edit is found by the common prefix and suffix; BiDi levels are kept for paragraphs
+ * without right-to-left text and inserted text without any, else resolved again with the changed range found by
+ * comparison; itemisation restarts at a run that starts at a character of a script of its own (whose run does not
+ * depend on what came before) a margin before the edit and stops where its runs meet the old ones again past it;
+ * within a long run, only a segment between split points is shaped again: clusters whose glyphs carry neither of the
+ * shaper's unsafe-to-break and unsafe-to-concat flags (HarfBuzz), or that follow white space (shapers without flags),
+ * with the old glyphs kept on either side once the new segment's tail matches the old glyphs over a margin; lines are
+ * broken again from a clean line start before the edit until a line starts where an old one did past it. The result
+ * equals shaping from scratch (glyphs, lines, carets); a change of a paragraph's direction, of paragraphs (line feeds)
+ * or of anything but the text shapes from scratch.
+ *
+ * <p>{@link #record} writes one {@link DrawList#glyph GLYPH} primitive per visible
  * glyph and allocates nothing.
  *
  * <p><b>Small text</b> (UI16): {@link #record} draws hinted raster glyphs ({@link DrawList#rasterGlyph}, on whole
@@ -50,6 +65,17 @@ import java.util.Objects;
  */
 public final class TextBlock {
 
+    /** Blocks shorter than this reshape whole on a text change: incremental bookkeeping pays on long text only. */
+    public static final int INCREMENTAL_MIN = 128;
+    /** Characters around an edit that are itemised and shaped again beyond it: more than a shaper's context. */
+    private static final int MARGIN = 16;
+    /** How far split points are looked for, characters. */
+    private static final int SPLIT_SEARCH = 64;
+    /** Characters before a line start a break iterator sees when breaking from there. */
+    private static final int BREAK_CONTEXT = 64;
+    /** Attempts at a shorter segment before a run is shaped whole. */
+    private static final int ATTEMPTS = 4;
+
     private static final UnicodeScript[] SCRIPTS = UnicodeScript.values();
 
     private final TextSystem system;
@@ -70,15 +96,23 @@ public final class TextBlock {
     private long fontsVersion;
     private TextRuns runs; // null: one style
     private long runsVersion;
+    private boolean incremental = true;
+    private long incrementalEdits;
+    private int editPrefix; // diff's result: characters equal at the start and at the end
+    private int editSuffix;
 
     // shaping, in logical order
     private FontFace primary;
+    private FontChain chain;
     private byte[] levels = new byte[32];
     private float[] charAdvance = new float[32];
     private int paraCount;
     private int[] paraStart = new int[4];
     private int[] paraEnd = new int[4];
     private boolean[] paraRtl = new boolean[4];
+    private boolean[] paraBidi = new boolean[4]; // levels resolved by Bidi (else all 0)
+    private boolean[] paraComplex = new boolean[4]; // with explicit embeddings, isolates or brackets
+    private int[] paraLine = new int[4]; // the first line
     private int[] paraRunStart = new int[4];
     private int[] paraRunEnd = new int[4];
     private int runCount;
@@ -90,6 +124,7 @@ public final class TextBlock {
     private FontFace[] runFace = new FontFace[8];
     private float[] runSize = new float[8];
     private int[] runStyle = new int[8]; // the style run of the run's first character, -1 without runs
+    private boolean[] runMono = new boolean[8]; // clusters in visual order: increasing (left to right) or decreasing
     private final ShapedGlyphs shapedGlyphs = new ShapedGlyphs();
     private int[] charStyle = new int[32];
     private FontChain[] styleChain = new FontChain[8];
@@ -100,8 +135,8 @@ public final class TextBlock {
     private int glyphCount;
     private int[] glyphIds = new int[32];
     private FontFace[] glyphFaces = new FontFace[32];
-    private float[] glyphX = new float[32];
-    private float[] glyphY = new float[32];
+    private float[] glyphX = new float[32]; // the pen from the line's left edge before alignment (lineLeft)
+    private float[] glyphDy = new float[32]; // from the line's baseline, y down
     private int[] glyphEntries = new int[32];
     private int[] glyphCluster = new int[32];
     private float[] glyphSize = new float[32];
@@ -117,7 +152,8 @@ public final class TextBlock {
     private float[] lineTop = new float[4];
     private float[] lineBox = new float[4];
     private boolean[] lineRtl = new boolean[4];
-    private float[] charX0 = new float[32];
+    private boolean[] lineClean = new boolean[4]; // starts where breaking may start: not inside a split word
+    private float[] charX0 = new float[32]; // from the line's left edge before alignment
     private float[] charX1 = new float[32];
     private int[] pieceRun = new int[8];
     private int[] pieceStart = new int[8];
@@ -127,6 +163,35 @@ public final class TextBlock {
     private float height;
     private float lineHeightPx;
     private float baselineOffset;
+    private boolean clean; // whether the next line starts clean
+    private int rangeLo; // glyphRange's result
+    private int rangeHi;
+
+    // incremental reshaping: where itemisation and line breaking may meet the old result, and scratch
+    private int convergeFrom = Integer.MAX_VALUE;
+    private int convergeDelta;
+    private int convergeLo;
+    private int convergeHi;
+    private boolean bidiUsed;
+    private byte[] oldLevels = new byte[32];
+    private int oldRunCount;
+    private int[] oRunStart = new int[8];
+    private int[] oRunEnd = new int[8];
+    private int[] oRunGlyphStart = new int[8];
+    private int[] oRunGlyphEnd = new int[8];
+    private byte[] oRunLevel = new byte[8];
+    private FontFace[] oRunFace = new FontFace[8];
+    private float[] oRunSize = new float[8];
+    private boolean[] oRunMono = new boolean[8];
+    private final ShapedGlyphs segment = new ShapedGlyphs();
+    private final ShapedGlyphs fresh = new ShapedGlyphs();
+    private int head; // shaping splice: old glyphs kept in place before and after the fresh ones
+    private int tail;
+    private boolean started;
+    private int[] tmpInt = new int[16];
+    private float[] tmpFloat = new float[16];
+    private boolean[] tmpBool = new boolean[16];
+    private Object[] tmpObject = new Object[16];
 
     // drawing
     private long version;
@@ -198,13 +263,13 @@ public final class TextBlock {
 
     private boolean set(CharSequence text, TextRuns styleRuns, List<String> families, float sizePx, int weight,
         boolean italic, TextAlign align, float maxWidth, float lineHeight, TextDirection direction, String language) {
-        boolean reshape = !shaped || !sameText(text) || families != this.families && !families.equals(this.families)
-            || sizePx != size || weight != this.weight || italic != this.italic || direction != this.direction
-            || !Objects.equals(language, this.language) || system.fonts().version() != fontsVersion
-            || styleRuns != runs || styleRuns != null && styleRuns.version() != runsVersion;
-        boolean relayout = reshape || align != this.align || maxWidth != this.maxWidth
-            || lineHeight != this.lineHeight;
-        if (!relayout) {
+        boolean sameStyle = shaped && (families == this.families || families.equals(this.families))
+            && sizePx == size && weight == this.weight && italic == this.italic && direction == this.direction
+            && Objects.equals(language, this.language) && system.fonts().version() == fontsVersion
+            && styleRuns == runs && (styleRuns == null || styleRuns.version() == runsVersion);
+        boolean reshape = !sameStyle || !diff(text);
+        boolean sameBox = align == this.align && maxWidth == this.maxWidth && lineHeight == this.lineHeight;
+        if (!reshape && sameBox) {
             return false;
         }
         if (!(sizePx > 0) || !(maxWidth > 0) || !(lineHeight >= 0)) {
@@ -222,6 +287,11 @@ public final class TextBlock {
                 return true;
             }
             return false;
+        }
+        if (reshape && sameStyle && sameBox && styleRuns == null && edit(text)) {
+            incrementalEdits++;
+            version++;
+            return true;
         }
         this.align = Objects.requireNonNull(align, "align");
         this.maxWidth = maxWidth;
@@ -243,16 +313,615 @@ public final class TextBlock {
         return true;
     }
 
-    private boolean sameText(CharSequence text) {
-        if (text.length() != length) {
+    /**
+     * Turns incremental reshaping on (the default) or off: off, every text change shapes and lays out the block from
+     * scratch (for comparisons and benchmarks).
+     */
+    public void incremental(boolean on) {
+        incremental = on;
+    }
+
+    /** Whether text changes reshape incrementally. */
+    public boolean incremental() {
+        return incremental;
+    }
+
+    /** How many text changes were applied incrementally (the rest shaped from scratch): for tests and benchmarks. */
+    public long incrementalEdits() {
+        return incrementalEdits;
+    }
+
+    /** Compares {@code text} with the block's: how many characters are equal at its start and end; true if all. */
+    private boolean diff(CharSequence text) {
+        int n = text.length();
+        int max = Math.min(n, length);
+        int p = 0;
+        while (p < max && text.charAt(p) == chars[p]) {
+            p++;
+        }
+        int s = 0;
+        while (s < max - p && text.charAt(n - 1 - s) == chars[length - 1 - s]) {
+            s++;
+        }
+        editPrefix = p;
+        editSuffix = s;
+        return n == length && p == length;
+    }
+
+    // ---------------------------------------------------------------- incremental reshaping
+
+    /**
+     * Applies a change of the text alone (found by {@link #diff}) to the shaped and laid out block, redoing only what
+     * it reaches; false when it cannot be done incrementally, having changed nothing.
+     */
+    private boolean edit(CharSequence text) {
+        int newLength = text.length();
+        if (!incremental || newLength < INCREMENTAL_MIN || length < INCREMENTAL_MIN) {
             return false;
         }
-        for (int i = 0; i < length; i++) {
-            if (text.charAt(i) != chars[i]) {
+        int p = editPrefix;
+        int s = editSuffix;
+        if (p > 0 && Character.isHighSurrogate(chars[p - 1])) {
+            p--; // whole code points
+        }
+        if (s > 0 && Character.isLowSurrogate(chars[length - s])) {
+            s--;
+        }
+        int oldEnd = length - s;
+        int newEnd = newLength - s;
+        for (int i = p; i < oldEnd; i++) {
+            if (separator(chars[i])) {
+                return false; // paragraphs change
+            }
+        }
+        for (int i = p; i < newEnd; i++) {
+            if (separator(text.charAt(i))) {
+                return false;
+            }
+        }
+        int para = paragraphAt(p);
+        int delta = newLength - length;
+        replaceText(text, p, oldEnd, newEnd);
+        paraEnd[para] += delta;
+        for (int q = para + 1; q < paraCount; q++) {
+            paraStart[q] += delta;
+            paraEnd[q] += delta;
+        }
+        int ps = paraStart[para];
+        int pe = paraEnd[para];
+
+        // BiDi levels, and the range where they changed
+        int levelFrom = p;
+        int levelTo = newEnd;
+        if (paraBidi[para] || direction == TextDirection.RTL || Bidi.requiresBidi(chars, p, newEnd)) {
+            if (oldLevels.length < pe - ps) {
+                growOldLevels(pe - ps);
+            }
+            // Without explicit embeddings, isolates and brackets, a level depends on the strong characters around it
+            // only: the levels from the last strong character before the edit to the first after it are resolved
+            // again (when one before keeps the paragraph's direction), else the whole paragraph's.
+            int w0 = paraBidi[para] && !paraComplex[para] && !complex(p, newEnd) ? strongBefore(ps, p) : -1;
+            int w1 = w0 >= 0 ? strongAfter(newEnd, pe) : pe;
+            if (w0 < 0) {
+                w0 = ps;
+            }
+            System.arraycopy(levels, w0, oldLevels, 0, w1 - w0); // the edit's own part is stale: not compared
+            if (w0 > ps || w1 < pe) {
+                Bidi bidi = bidi(w0, w1, paraRtl[para] ? TextDirection.RTL : TextDirection.LTR);
+                for (int r = 0; r < bidi.getRunCount(); r++) {
+                    Arrays.fill(levels, w0 + bidi.getRunStart(r), w0 + bidi.getRunLimit(r),
+                        (byte) bidi.getRunLevel(r));
+                }
+            } else {
+                boolean rtl = levels(ps, pe);
+                paraBidi[para] = bidiUsed;
+                paraComplex[para] = bidiUsed && complex(ps, pe);
+                if (rtl != paraRtl[para]) {
+                    shape(); // the paragraph's direction changed
+                    layout();
+                    return true;
+                }
+            }
+            for (int i = w0; i < p; i++) {
+                if (levels[i] != oldLevels[i - w0]) {
+                    levelFrom = i;
+                    break;
+                }
+            }
+            for (int i = w1 - 1; i >= newEnd; i--) {
+                if (levels[i] != oldLevels[i - w0]) {
+                    levelTo = i + 1;
+                    break;
+                }
+            }
+        } else {
+            Arrays.fill(levels, p, newEnd, (byte) 0);
+        }
+
+        // itemisation: from a run that does not depend on what came before, a margin before the change
+        int a = Math.max(ps, levelFrom - MARGIN);
+        int r0 = paraRunStart[para];
+        int r1 = paraRunEnd[para];
+        int rA = r0;
+        for (int lo = r0, hi = r1 - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (runStart[mid] <= a) {
+                rA = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        // a character with a script of its own decides the itemiser's state alone: start there, inside its run
+        int anchor = -1;
+        for (int c = a; r1 > r0 && c >= runStart[rA] && c > a - SPLIT_SEARCH; c--) {
+            if (!Character.isLowSurrogate(chars[c]) && independent(c)) {
+                anchor = c;
+                break;
+            }
+        }
+        while (anchor < 0 && rA > r0 && !independent(runStart[rA])) {
+            rA--; // else from a run starting at such a character, or the paragraph's start
+        }
+        int restart = rA < r1 ? runStart[rA] : ps;
+        if (anchor < 0 && rA > r0) {
+            anchor = restart;
+        }
+        saveRuns(rA);
+        int oldInPara = r1 - rA;
+        runCount = rA;
+        convergeFrom = levelTo + MARGIN;
+        convergeDelta = delta;
+        convergeHi = oldInPara;
+        int k = itemize(anchor >= 0 ? anchor : restart, restart, pe, chain);
+        convergeFrom = Integer.MAX_VALUE;
+        int newRunsEnd = runCount;
+        if (k < 0) {
+            k = oldInPara;
+        }
+        int changeEnd = Math.max(newEnd, levelTo);
+        if (newRunsEnd - rA >= 2) {
+            changeEnd = Math.max(changeEnd, runStart[newRunsEnd - 1]);
+        }
+        if (k >= 2) {
+            changeEnd = Math.max(changeEnd, oRunStart[k - 1] + delta);
+        }
+        for (int o = k; o < oldRunCount; o++) { // the old runs past the meeting point, moved
+            if (runCount == runStart.length) {
+                growRuns();
+            }
+            runStart[runCount] = oRunStart[o] + delta;
+            runEnd[runCount] = oRunEnd[o] + delta;
+            runLevel[runCount] = oRunLevel[o];
+            runFace[runCount] = oRunFace[o];
+            runSize[runCount] = oRunSize[o];
+            runStyle[runCount] = -1;
+            runMono[runCount] = oRunMono[o];
+            runCount++;
+        }
+        int runDelta = newRunsEnd - rA - k;
+        paraRunEnd[para] += runDelta;
+        for (int q = para + 1; q < paraCount; q++) {
+            paraRunStart[q] += runDelta;
+            paraRunEnd[q] += runDelta;
+        }
+
+        // shaping: the new runs, keeping the old glyphs a long run has on either side of the edit
+        int g0 = oldRunCount > 0 ? oRunGlyphStart[0] : shapedGlyphs.size();
+        int g1 = k > 0 ? oRunGlyphEnd[k - 1] : g0;
+        fresh.clear();
+        head = g0;
+        tail = g1;
+        started = false;
+        int cursor = g0;
+        int firstShaped = Integer.MAX_VALUE;
+        int shapedEnd = p;
+        for (int j = rA; j < newRunsEnd; j++) {
+            boolean last = j == newRunsEnd - 1;
+            int ns = runStart[j];
+            int ne = runEnd[j];
+            boolean rtl = (runLevel[j] & 1) != 0;
+            int o1 = j == rA && k > 0 && oRunStart[0] == ns && sameRun(j, 0) && anchor >= 0 ? 0 : -1;
+            int o2 = last && k > 0 && oRunEnd[k - 1] + delta == ne && sameRun(j, k - 1) ? k - 1 : -1;
+            // the old glyphs stay before x and from z: x and z are split points with a margin of old glyphs that
+            // the new segment [w, z) must give again ([w, x) and [y, z)), so the edit's effect ends inside the segment
+            int x = o1 >= 0 ? splitBefore(o1, Math.min(a, ne - 1), ns, p, delta) : ns;
+            int w = x > ns ? splitBefore(o1, x - MARGIN, ns, p, delta) : ns;
+            int y = o2 >= 0 ? splitAfter(o2, Math.max(oldEnd, levelTo - delta), p, delta) : -1;
+            int z = y >= 0 ? splitAfter(o2, y + MARGIN, p, delta) : -1;
+            for (int attempt = 1; ; attempt++) {
+                if (w == ns) {
+                    x = ns; // shaped from the run's start: nothing to keep before
+                }
+                if (attempt >= ATTEMPTS) {
+                    w = ns; // shape the whole run
+                    x = ns;
+                    z = -1;
+                }
+                int segEnd = z >= 0 ? z + delta : ne;
+                segment.clear();
+                system.shaper().shape(chars, length, ns, ne, w, segEnd, runFace[j], runSize[j], rtl, language,
+                    segment);
+                boolean leftOk = x == ns || segmentMatches(o1, w, x, 0, rtl);
+                boolean rightOk = z < 0 || segmentMatches(o2, y, z, delta, rtl);
+                if (leftOk && rightOk) {
+                    break;
+                }
+                if (!leftOk) {
+                    x = w;
+                    w = splitBefore(o1, x - MARGIN, ns, p, delta);
+                }
+                if (!rightOk) {
+                    y = z;
+                    z = splitAfter(o2, y + MARGIN, p, delta);
+                }
+            }
+            int segEnd = z >= 0 ? z + delta : ne;
+            // the segment's glyphs from x on (left to right at its end, mirrored at its start)
+            int s0 = 0;
+            int s1 = segment.size();
+            if (rtl) {
+                while (s1 > s0 && segment.cluster(s1 - 1) < x) {
+                    s1--;
+                }
+            } else {
+                while (s0 < s1 && segment.cluster(s0) < x) {
+                    s0++;
+                }
+            }
+            firstShaped = Math.min(firstShaped, x);
+            shapedEnd = Math.max(shapedEnd, segEnd);
+            Arrays.fill(charAdvance, x, segEnd, 0);
+            for (int g = s0; g < s1; g++) {
+                charAdvance[segment.cluster(g)] += segment.advance(g);
+            }
+            boolean mono = monotone(segment, s0, s1, rtl);
+            runGlyphStart[j] = cursor;
+            if (x > ns) {
+                mono &= oRunMono[o1];
+            }
+            if (z >= 0) {
+                mono &= oRunMono[o2];
+            }
+            // pieces in visual order: left to right the part before x, the segment, the part from z; mirrored
+            int gx = x > ns ? oldSplit(o1, x) : -1;
+            int gz = z >= 0 ? oldSplit(o2, z) : -1;
+            if (rtl) {
+                if (z >= 0) {
+                    cursor = emitOld(cursor, oRunGlyphStart[o2], gz, g0, g1, false, oldEnd, delta);
+                }
+                cursor = emitSegment(cursor, s0, s1);
+                if (x > ns) {
+                    cursor = emitOld(cursor, gx, oRunGlyphEnd[o1], g0, g1, last, oldEnd, delta);
+                }
+            } else {
+                if (x > ns) {
+                    cursor = emitOld(cursor, oRunGlyphStart[o1], gx, g0, g1, false, oldEnd, delta);
+                }
+                cursor = emitSegment(cursor, s0, s1);
+                if (z >= 0) {
+                    cursor = emitOld(cursor, gz, oRunGlyphEnd[o2], g0, g1, last, oldEnd, delta);
+                }
+            }
+            runGlyphEnd[j] = cursor;
+            runMono[j] = mono;
+        }
+        int glyphDelta = cursor - g1;
+        shapedGlyphs.moveClusters(g0, head, oldEnd, delta);
+        shapedGlyphs.replace(head, tail, fresh);
+        shapedGlyphs.moveClusters(head + fresh.size(), shapedGlyphs.size(), oldEnd, delta);
+        for (int r = newRunsEnd; r < runCount; r++) {
+            runGlyphStart[r] = oRunGlyphStart[k + r - newRunsEnd] + glyphDelta;
+            runGlyphEnd[r] = oRunGlyphEnd[k + r - newRunsEnd] + glyphDelta;
+        }
+        if (firstShaped == Integer.MAX_VALUE) {
+            firstShaped = Math.min(restart, p); // nothing shaped: the paragraph became empty
+        }
+        relayout(para, Math.min(firstShaped, p), Math.max(changeEnd, shapedEnd), delta);
+        return true;
+    }
+
+    /**
+     * Whether {@code chars[from, to)} has characters whose BiDi levels reach beyond their strong neighbours: explicit
+     * embeddings, overrides and isolates, and brackets (paired by rule N0).
+     */
+    private boolean complex(int from, int to) {
+        for (int i = from; i < to; ) {
+            int cp = Character.codePointAt(chars, i, to);
+            byte d = Character.getDirectionality(cp);
+            int type = Character.getType(cp);
+            if (d >= Character.DIRECTIONALITY_LEFT_TO_RIGHT_EMBEDDING
+                && d <= Character.DIRECTIONALITY_POP_DIRECTIONAL_FORMAT
+                || d >= Character.DIRECTIONALITY_LEFT_TO_RIGHT_ISOLATE
+                && d <= Character.DIRECTIONALITY_POP_DIRECTIONAL_ISOLATE
+                || type == Character.START_PUNCTUATION || type == Character.END_PUNCTUATION) {
+                return true;
+            }
+            i += Character.charCount(cp);
+        }
+        return false;
+    }
+
+    private static boolean strong(int cp) {
+        byte d = Character.getDirectionality(cp);
+        return d == Character.DIRECTIONALITY_LEFT_TO_RIGHT || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT
+            || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC;
+    }
+
+    /** The last strong character of {@code chars[from, to)}, or -1. */
+    private int strongBefore(int from, int to) {
+        for (int i = to; i > from; ) {
+            int cp = Character.codePointBefore(chars, i, from);
+            i -= Character.charCount(cp);
+            if (strong(cp)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** The end of the first strong character of {@code chars[from, to)}, or {@code to}. */
+    private int strongAfter(int from, int to) {
+        for (int i = from; i < to; ) {
+            int cp = Character.codePointAt(chars, i, to);
+            i += Character.charCount(cp);
+            if (strong(cp)) {
+                return i;
+            }
+        }
+        return to;
+    }
+
+    private static boolean separator(char c) {
+        return c == '\n' || c == ' ';
+    }
+
+    /** The paragraph character {@code i} (or the caret position) is in. */
+    private int paragraphAt(int i) {
+        int found = 0;
+        for (int lo = 0, hi = paraCount - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (paraStart[mid] <= i) {
+                found = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return found;
+    }
+
+    /** Replaces characters {@code [p, oldEnd)} by {@code text[p, newEnd)}, moving the per-character data after them. */
+    private void replaceText(CharSequence text, int p, int oldEnd, int newEnd) {
+        int newLength = length + newEnd - oldEnd;
+        if (chars.length < newLength) {
+            growText(newLength);
+        }
+        int rest = length - oldEnd;
+        System.arraycopy(chars, oldEnd, chars, newEnd, rest);
+        System.arraycopy(levels, oldEnd, levels, newEnd, rest);
+        System.arraycopy(charAdvance, oldEnd, charAdvance, newEnd, rest);
+        System.arraycopy(charX0, oldEnd, charX0, newEnd, rest);
+        System.arraycopy(charX1, oldEnd, charX1, newEnd, rest);
+        for (int i = p; i < newEnd; i++) {
+            chars[i] = text.charAt(i);
+        }
+        length = newLength;
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growOldLevels(int n) {
+        oldLevels = new byte[Math.max(n, oldLevels.length * 2)];
+    }
+
+    /**
+     * Whether character {@code i} starts the same run whatever came before it: it has a script of its own and is not a
+     * mark, joiner or modifier (which stay with their base), so its face, script and level are its own.
+     */
+    private boolean independent(int i) {
+        int cp = Character.codePointAt(chars, i, length);
+        UnicodeScript us = UnicodeScript.of(cp);
+        return us != UnicodeScript.COMMON && us != UnicodeScript.INHERITED && !staysWithBase(cp);
+    }
+
+    /** Keeps runs {@code [from, runCount)} (old coordinates) in the scratch. */
+    private void saveRuns(int from) {
+        int n = runCount - from;
+        if (oRunStart.length < n) {
+            growOldRuns(n);
+        }
+        System.arraycopy(runStart, from, oRunStart, 0, n);
+        System.arraycopy(runEnd, from, oRunEnd, 0, n);
+        System.arraycopy(runGlyphStart, from, oRunGlyphStart, 0, n);
+        System.arraycopy(runGlyphEnd, from, oRunGlyphEnd, 0, n);
+        System.arraycopy(runLevel, from, oRunLevel, 0, n);
+        System.arraycopy(runFace, from, oRunFace, 0, n);
+        System.arraycopy(runSize, from, oRunSize, 0, n);
+        System.arraycopy(runMono, from, oRunMono, 0, n);
+        oldRunCount = n;
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growOldRuns(int n) {
+        int c = Math.max(n, oRunStart.length * 2);
+        oRunStart = new int[c];
+        oRunEnd = new int[c];
+        oRunGlyphStart = new int[c];
+        oRunGlyphEnd = new int[c];
+        oRunLevel = new byte[c];
+        oRunFace = new FontFace[c];
+        oRunSize = new float[c];
+        oRunMono = new boolean[c];
+    }
+
+    /** The old run of the edited paragraph holding character {@code index} (old coordinates). */
+    private int oldRunContaining(int index) {
+        int found = 0;
+        for (int lo = 0, hi = convergeHi - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (oRunStart[mid] <= index) {
+                found = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return found;
+    }
+
+    /** Whether new run {@code j} shapes as old run {@code o} did: the same level, face and size. */
+    private boolean sameRun(int j, int o) {
+        return runLevel[j] == oRunLevel[o] && runFace[j] == oRunFace[o] && runSize[j] == oRunSize[o];
+    }
+
+    /**
+     * Old run {@code o}'s glyph where clusters reach character {@code c} (old coordinates): left to right the first
+     * glyph of a cluster at or after {@code c}, right to left the first of a cluster before it.
+     */
+    private int oldSplit(int o, int c) {
+        int lo = oRunGlyphStart[o];
+        int hi = oRunGlyphEnd[o];
+        boolean rtl = (oRunLevel[o] & 1) != 0;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            int cl = shapedGlyphs.cluster(mid);
+            if (rtl ? cl >= c : cl < c) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /** Character {@code c} of the old text (outside the edit {@code [p, p + its old length)}). */
+    private char oldChar(int c, int p, int delta) {
+        return c < p ? chars[c] : chars[c + delta];
+    }
+
+    /**
+     * Whether old run {@code o} may be split before character {@code c} (old coordinates): its clusters are in visual
+     * order, a cluster starts at {@code c}, and its glyphs are free of the unsafe-to-break flag (or, from a shaper
+     * without flags, it follows white space). The unsafe-to-concat flag would be the strict condition for reusing
+     * glyphs after an edit, but it marks nearly every glyph a lookup looked at (every kerned font's letters); the new
+     * segment's overlap with the old glyphs on both sides is checked instead.
+     */
+    private boolean safeSplit(int o, int c, int p, int delta) {
+        if (!oRunMono[o] || c <= oRunStart[o] || c >= oRunEnd[o]) {
+            return false;
+        }
+        boolean flags = system.shaper().marksUnsafeBreaks();
+        if (!flags && !Character.isWhitespace(oldChar(c - 1, p, delta))) {
+            return false;
+        }
+        int g = oldSplit(o, c);
+        boolean rtl = (oRunLevel[o] & 1) != 0;
+        int step = rtl ? -1 : 1;
+        int first = rtl ? g - 1 : g;
+        if (first < oRunGlyphStart[o] || first >= oRunGlyphEnd[o] || shapedGlyphs.cluster(first) != c) {
+            return false;
+        }
+        for (int i = first; flags && i >= oRunGlyphStart[o] && i < oRunGlyphEnd[o] && shapedGlyphs.cluster(i) == c;
+            i += step) {
+            if ((shapedGlyphs.flags(i) & ShapedGlyphs.UNSAFE_TO_BREAK) != 0) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** The last split point of old run {@code o} at or before {@code from} and after {@code min}; else {@code min}. */
+    private int splitBefore(int o, int from, int min, int p, int delta) {
+        for (int c = from; c > min && c > from - SPLIT_SEARCH; c--) {
+            if (safeSplit(o, c, p, delta)) {
+                return c;
+            }
+        }
+        return min;
+    }
+
+    /** The first split point of old run {@code o} at or after {@code from} (old coordinates); else -1. */
+    private int splitAfter(int o, int from, int p, int delta) {
+        for (int c = Math.max(from, oRunStart[o] + 1); c < oRunEnd[o] && c < from + SPLIT_SEARCH; c++) {
+            if (safeSplit(o, c, p, delta)) {
+                return c;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether the segment's glyphs of characters {@code [c0, c1)} (old coordinates, moved by {@code delta} in the new
+     * text) are old run {@code o}'s glyphs of those characters.
+     */
+    private boolean segmentMatches(int o, int c0, int c1, int delta, boolean rtl) {
+        int from = oldSplit(o, rtl ? c1 : c0);
+        int to = oldSplit(o, rtl ? c0 : c1);
+        int lo = c0 + delta;
+        int hi = c1 + delta;
+        int s0 = 0;
+        int s1 = segment.size();
+        if (rtl) { // clusters fall along the segment
+            while (s0 < s1 && segment.cluster(s0) >= hi) {
+                s0++;
+            }
+            int e = s0;
+            while (e < s1 && segment.cluster(e) >= lo) {
+                e++;
+            }
+            s1 = e;
+        } else {
+            while (s0 < s1 && segment.cluster(s0) < lo) {
+                s0++;
+            }
+            int e = s0;
+            while (e < s1 && segment.cluster(e) < hi) {
+                e++;
+            }
+            s1 = e;
+        }
+        if (s1 - s0 != to - from) {
+            return false;
+        }
+        for (int i = 0; i < s1 - s0; i++) {
+            if (!segment.same(s0 + i, shapedGlyphs, from + i, delta)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Whether glyphs {@code [from, to)}'s clusters only grow (left to right) or only shrink. */
+    private static boolean monotone(ShapedGlyphs glyphs, int from, int to, boolean rtl) {
+        for (int i = from + 1; i < to; i++) {
+            int d = glyphs.cluster(i) - glyphs.cluster(i - 1);
+            if (rtl ? d > 0 : d < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Puts old glyphs {@code [from, to)} next in the new glyphs of the replaced range {@code [g0, g1)}: left where
+     * they are when they open the range (or, {@code last}, close it), else copied into the fresh glyphs.
+     */
+    private int emitOld(int cursor, int from, int to, int g0, int g1, boolean last, int oldEnd, int delta) {
+        if (!started && from == g0) {
+            head = to;
+        } else if (last && to == g1) {
+            tail = from;
+        } else {
+            fresh.append(shapedGlyphs, from, to, oldEnd, delta);
+        }
+        started = true;
+        return cursor + to - from;
+    }
+
+    private int emitSegment(int cursor, int from, int to) {
+        fresh.append(segment, from, to, Integer.MAX_VALUE, 0);
+        started = true;
+        return cursor + to - from;
     }
 
     private void copy(CharSequence text) {
@@ -268,12 +937,12 @@ public final class TextBlock {
     @AllowAllocation("growing, rarely")
     private void growText(int n) {
         int c = Math.max(n, chars.length * 2);
-        chars = new char[c];
-        charStyle = new int[c];
-        levels = new byte[c];
-        charAdvance = new float[c];
-        charX0 = new float[c];
-        charX1 = new float[c];
+        chars = Arrays.copyOf(chars, c);
+        charStyle = Arrays.copyOf(charStyle, c);
+        levels = Arrays.copyOf(levels, c);
+        charAdvance = Arrays.copyOf(charAdvance, c);
+        charX0 = Arrays.copyOf(charX0, c);
+        charX1 = Arrays.copyOf(charX1, c);
     }
 
     // ---------------------------------------------------------------- shaping
@@ -281,7 +950,7 @@ public final class TextBlock {
     private void shape() {
         FontRegistry fonts = system.fonts();
         fontsVersion = fonts.version();
-        FontChain chain = fonts.chain(families, weight, italic);
+        chain = fonts.chain(families, weight, italic);
         primary = chain.primary();
         if (primary == null) {
             throw new IllegalStateException("no font is registered");
@@ -294,6 +963,9 @@ public final class TextBlock {
         for (int i = 0; i <= length; i++) {
             if (i == length || chars[i] == '\n' || chars[i] == ' ') {
                 paragraph(start, i, chain);
+                if (i < length) {
+                    levels[i] = (byte) (paraRtl[paraCount - 1] ? 1 : 0); // a separator: the paragraph's level (L1)
+                }
                 start = i + 1;
             }
         }
@@ -352,8 +1024,10 @@ public final class TextBlock {
         paraStart[p] = start;
         paraEnd[p] = end;
         paraRtl[p] = rtl;
+        paraBidi[p] = bidiUsed;
         paraRunStart[p] = runCount;
-        itemize(start, end, chain);
+        paraComplex[p] = bidiUsed && complex(start, end);
+        itemize(start, start, end, chain);
         paraRunEnd[p] = runCount;
         TextShaper shaper = system.shaper();
         for (int r = paraRunStart[p]; r < runCount; r++) {
@@ -364,10 +1038,11 @@ public final class TextBlock {
                     shapedGlyphs.add(-1, i, runs.objectWidth(st), 0, 0);
                 }
             } else {
-                shaper.shape(chars, length, runStart[r], runEnd[r], runFace[r], runSize[r], (runLevel[r] & 1) != 0,
-                    language, shapedGlyphs);
+                shaper.shape(chars, length, runStart[r], runEnd[r], runStart[r], runEnd[r], runFace[r], runSize[r],
+                    (runLevel[r] & 1) != 0, language, shapedGlyphs);
             }
             runGlyphEnd[r] = shapedGlyphs.size();
+            runMono[r] = monotone(shapedGlyphs, runGlyphStart[r], runGlyphEnd[r], (runLevel[r] & 1) != 0);
         }
     }
 
@@ -375,9 +1050,11 @@ public final class TextBlock {
     private boolean levels(int start, int end) {
         if (start == end || direction != TextDirection.RTL && !Bidi.requiresBidi(chars, start, end)) {
             Arrays.fill(levels, start, end, (byte) 0);
+            bidiUsed = false;
             return start == end && direction == TextDirection.RTL;
         }
-        Bidi bidi = bidi(start, end);
+        bidiUsed = true;
+        Bidi bidi = bidi(start, end, direction);
         for (int r = 0; r < bidi.getRunCount(); r++) {
             Arrays.fill(levels, start + bidi.getRunStart(r), start + bidi.getRunLimit(r), (byte) bidi.getRunLevel(r));
         }
@@ -385,8 +1062,8 @@ public final class TextBlock {
     }
 
     @AllowAllocation("BiDi analysis of a paragraph with right-to-left text, when its text changes")
-    private Bidi bidi(int start, int end) {
-        int flags = switch (direction) {
+    private Bidi bidi(int start, int end, TextDirection paragraphDirection) {
+        int flags = switch (paragraphDirection) {
             case AUTO -> Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT;
             case LTR -> Bidi.DIRECTION_LEFT_TO_RIGHT;
             case RTL -> Bidi.DIRECTION_RIGHT_TO_LEFT;
@@ -394,8 +1071,15 @@ public final class TextBlock {
         return new Bidi(chars, start, null, 0, end - start, flags);
     }
 
-    private void itemize(int start, int end, FontChain chain) {
-        int from = start;
+    /**
+     * Splits {@code chars[start, end)} into runs. With {@link #convergeFrom} set (incremental reshaping), stops at the
+     * first character from there on that has a script of its own, where the old runs meet the new ones: the current
+     * run ends where the old one holding that character did; returns the first old run after it (an index among the
+     * saved ones); else -1. Starts at {@code start} as if the current run had started at {@code runFrom} (an
+     * incremental restart at a character with a script of its own, inside its run).
+     */
+    private int itemize(int start, int runFrom, int end, FontChain chain) {
+        int from = runFrom;
         byte level = 0;
         int script = -1; // none yet: common characters take the script that follows
         FontFace face = null;
@@ -425,6 +1109,18 @@ public final class TextBlock {
                 f = c.faceFor(cp, neutral && script >= 0 ? SCRIPTS[script] : us);
             }
             byte l = levels[i];
+            if (i >= convergeFrom && s >= 0 && !staysWithBase(cp)) {
+                // A character with a script of its own decides its run's state alone: from here the old runs go on,
+                // the one it is in continuing the current run (or starting with it).
+                int old = oldRunContaining(i - convergeDelta);
+                boolean split = i > start && (l != level || f != face || s != script && script >= 0);
+                if (split) {
+                    addRun(from, i, level, face, style);
+                    from = i;
+                }
+                addRun(from, oRunEnd[old] + convergeDelta, l, f, -1);
+                return old + 1;
+            }
             if (i > start && (l != level || f != face || newStyle || s >= 0 && script >= 0 && s != script)) {
                 addRun(from, i, level, face, style);
                 from = i;
@@ -443,6 +1139,7 @@ public final class TextBlock {
         if (end > start) {
             addRun(from, end, level, face, style);
         }
+        return -1;
     }
 
     /**
@@ -506,26 +1203,184 @@ public final class TextBlock {
         width = 0;
         Arrays.fill(charX0, 0, length, Float.NaN);
         Arrays.fill(charX1, 0, length, Float.NaN);
+        convergeFrom = Integer.MAX_VALUE;
         for (int p = 0; p < paraCount; p++) {
-            breakLines(p);
+            paraLine[p] = lineCount;
+            breakLines(p, paraStart[p]);
         }
         height = lineCount == 0 ? 0 : lineTop[lineCount - 1] + lineBox[lineCount - 1];
         if (runs == null) {
             height = lineCount * lineHeightPx;
         }
-        float box = maxWidth < Float.POSITIVE_INFINITY ? maxWidth : width;
         for (int l = 0; l < lineCount; l++) {
-            float shift = (box - lineWidth[l]) * align.leftShare(lineRtl[l]);
-            lineLeft[l] = shift;
-            for (int g = lineGlyphStart[l]; g < lineGlyphEnd[l]; g++) {
-                glyphX[g] += shift;
-            }
-            for (int i = lineStart[l]; i < lineEnd[l]; i++) {
-                charX0[i] += shift;
-                charX1[i] += shift;
+            lineLeft[l] = Float.NaN;
+        }
+        realign();
+        lookUpGlyphs(rasterMode(lastOutline, lastWeight));
+    }
+
+    /**
+     * Lays out again the lines of paragraph {@code para} that characters {@code [changeStart, changeEnd)} (new
+     * coordinates; the text after them moved by {@code delta}) may have changed: from a clean line start before the
+     * change until a line starts, past it, where an old line did; the lines after move.
+     */
+    private void relayout(int para, int changeStart, int changeEnd, int delta) {
+        int oldLines = lineCount;
+        int oldGlyphs = glyphCount;
+        int first = paraLine[para];
+        int end = para + 1 < paraCount ? paraLine[para + 1] : oldLines;
+        int l = first;
+        for (int lo = first, hi = end - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (lineStart[mid] <= changeStart) {
+                l = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
             }
         }
-        lookUpGlyphs(rasterMode(lastOutline, lastWeight));
+        if (l > first) {
+            l--; // the change may let its line's first word move up
+        }
+        while (l > first && !lineClean[l]) {
+            l--;
+        }
+        convergeFrom = changeEnd + MARGIN;
+        convergeDelta = delta;
+        convergeLo = l + 1;
+        convergeHi = end;
+        int k = breakLines(para, lineStart[l]); // new lines go after the old ones
+        convergeFrom = Integer.MAX_VALUE;
+        if (k < 0) {
+            k = end;
+        }
+        int newLines = lineCount - oldLines;
+        int newGlyphs = glyphCount - oldGlyphs;
+        int gl = lineGlyphStart[l];
+        int gk = k < oldLines ? lineGlyphStart[k] : oldGlyphs;
+        int glyphDelta = gl + newGlyphs - gk;
+        for (int i = oldLines; i < lineCount; i++) {
+            lineGlyphStart[i] += gl - oldGlyphs;
+            lineGlyphEnd[i] += gl - oldGlyphs;
+        }
+        for (int i = k; i < oldLines; i++) {
+            lineStart[i] += delta;
+            lineEnd[i] += delta;
+            lineGlyphStart[i] += glyphDelta;
+            lineGlyphEnd[i] += glyphDelta;
+        }
+        for (int g = gk; g < oldGlyphs; g++) {
+            glyphCluster[g] += delta;
+        }
+        // lines [l, k) give way to the new ones, which were added at the end
+        rotate(lineStart, l, k, oldLines, lineCount);
+        rotate(lineEnd, l, k, oldLines, lineCount);
+        rotate(lineGlyphStart, l, k, oldLines, lineCount);
+        rotate(lineGlyphEnd, l, k, oldLines, lineCount);
+        rotate(lineWidth, l, k, oldLines, lineCount);
+        rotate(lineLeft, l, k, oldLines, lineCount);
+        rotate(lineRtl, l, k, oldLines, lineCount);
+        rotate(lineClean, l, k, oldLines, lineCount);
+        rotate(glyphIds, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphFaces, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphX, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphDy, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphEntries, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphCluster, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphSize, gl, gk, oldGlyphs, glyphCount);
+        rotate(glyphStyle, gl, gk, oldGlyphs, glyphCount);
+        lineCount = l + newLines + oldLines - k;
+        glyphCount = gl + newGlyphs + oldGlyphs - gk;
+        int lineDelta = newLines - (k - l);
+        for (int q = para + 1; q < paraCount; q++) {
+            paraLine[q] += lineDelta;
+        }
+        for (int i = l; i < lineCount; i++) { // uniform lines (incremental reshaping is for one style)
+            lineTop[i] = i * lineHeightPx;
+            lineBox[i] = lineHeightPx;
+            lineBaseline[i] = Math.round(i * lineHeightPx + baselineOffset);
+        }
+        for (int i = l; i < l + newLines; i++) {
+            lineLeft[i] = Float.NaN;
+        }
+        width = 0;
+        for (int i = 0; i < lineCount; i++) {
+            width = Math.max(width, lineWidth[i]);
+        }
+        height = lineCount * lineHeightPx;
+        realign();
+        GlyphAtlas atlas = system.atlas();
+        if (atlas != null) {
+            lookUpRange(atlas, gl, gl + newGlyphs, entriesRaster);
+            pending = glyphCount;
+        }
+    }
+
+    /** The old line of the edited paragraph that starts clean at {@code start} (new coordinates), or -1. */
+    private int oldLineAt(int start) {
+        int old = start - convergeDelta;
+        for (int lo = convergeLo, hi = convergeHi - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (lineStart[mid] == old) {
+                return lineClean[mid] ? mid : -1;
+            } else if (lineStart[mid] < old) {
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    @AllowAllocation("growing, rarely")
+    private void growScratch(int n) {
+        int c = Math.max(n, tmpInt.length * 2);
+        tmpInt = new int[c];
+        tmpFloat = new float[c];
+        tmpBool = new boolean[c];
+        tmpObject = new Object[c];
+    }
+
+    /** Moves {@code a[c, d)} to {@code a[b0, ...)}, followed by what was at {@code a[b, c)}: drops {@code a[b0, b)}. */
+    private void rotate(int[] a, int b0, int b, int c, int d) {
+        int n = d - c;
+        if (tmpInt.length < n) {
+            growScratch(n);
+        }
+        System.arraycopy(a, c, tmpInt, 0, n);
+        System.arraycopy(a, b, a, b0 + n, c - b);
+        System.arraycopy(tmpInt, 0, a, b0, n);
+    }
+
+    private void rotate(float[] a, int b0, int b, int c, int d) {
+        int n = d - c;
+        if (tmpFloat.length < n) {
+            growScratch(n);
+        }
+        System.arraycopy(a, c, tmpFloat, 0, n);
+        System.arraycopy(a, b, a, b0 + n, c - b);
+        System.arraycopy(tmpFloat, 0, a, b0, n);
+    }
+
+    private void rotate(boolean[] a, int b0, int b, int c, int d) {
+        int n = d - c;
+        if (tmpBool.length < n) {
+            growScratch(n);
+        }
+        System.arraycopy(a, c, tmpBool, 0, n);
+        System.arraycopy(a, b, a, b0 + n, c - b);
+        System.arraycopy(tmpBool, 0, a, b0, n);
+    }
+
+    private void rotate(Object[] a, int b0, int b, int c, int d) {
+        int n = d - c;
+        if (tmpObject.length < n) {
+            growScratch(n);
+        }
+        System.arraycopy(a, c, tmpObject, 0, n);
+        System.arraycopy(a, b, a, b0 + n, c - b);
+        System.arraycopy(tmpObject, 0, a, b0, n);
+        Arrays.fill(tmpObject, 0, n, null);
     }
 
     /** Moves the lines to their alignment in the current box; true if any moved. */
@@ -534,18 +1389,9 @@ public final class TextBlock {
         boolean moved = false;
         for (int l = 0; l < lineCount; l++) {
             float shift = (box - lineWidth[l]) * align.leftShare(lineRtl[l]);
-            float delta = shift - lineLeft[l];
-            if (delta == 0) {
-                continue;
-            }
-            moved = true;
-            lineLeft[l] = shift;
-            for (int g = lineGlyphStart[l]; g < lineGlyphEnd[l]; g++) {
-                glyphX[g] += delta;
-            }
-            for (int i = lineStart[l]; i < lineEnd[l]; i++) {
-                charX0[i] += delta;
-                charX1[i] += delta;
+            if (Float.floatToRawIntBits(shift) != Float.floatToRawIntBits(lineLeft[l])) {
+                moved = true;
+                lineLeft[l] = shift;
             }
         }
         return moved;
@@ -566,7 +1412,17 @@ public final class TextBlock {
         if (atlas == null) {
             return;
         }
-        for (int g = 0; g < glyphCount; g++) {
+        lookUpRange(atlas, 0, glyphCount, raster);
+        entriesRaster = raster;
+        entriesWorld = worldSpace;
+        entriesTechnique = atlas.settings().techniqueVersion();
+        atlasEpoch = atlas.epoch();
+        versionEpoch = atlasEpoch;
+        pending = glyphCount; // until recorded: the glyphs may still be generating
+    }
+
+    private void lookUpRange(GlyphAtlas atlas, int from, int to, boolean raster) {
+        for (int g = from; g < to; g++) {
             if (glyphIds[g] < 0) {
                 glyphEntries[g] = -1; // an inline object
             } else if (glyphFaces[g].colorStrike() > 0) {
@@ -577,35 +1433,43 @@ public final class TextBlock {
                 glyphEntries[g] = -1; // raster entries depend on where the pen falls within a pixel: record finds them
             }
         }
-        entriesRaster = raster;
-        entriesWorld = worldSpace;
-        entriesTechnique = atlas.settings().techniqueVersion();
-        atlasEpoch = atlas.epoch();
-        versionEpoch = atlasEpoch;
-        pending = glyphCount; // until recorded: the glyphs may still be generating
     }
 
-    private void breakLines(int p) {
-        int start = paraStart[p];
+    /**
+     * Breaks paragraph {@code p}'s lines from {@code start} (its start, or a clean line start of it) on, greedily.
+     * With {@link #convergeFrom} set (incremental reshaping), stops at a clean line start from there on where an old
+     * line started clean: returns that old line; else -1.
+     */
+    private int breakLines(int p, int start) {
         int end = paraEnd[p];
+        clean = true;
         // A paragraph that fits needs no break opportunities: greedy breaking would give this one line. It also spares
         // BreakIterator.setText, which allocates, for the common one-line label whose text changes every frame.
         if (!(maxWidth < Float.POSITIVE_INFINITY) || start == end
-            || advance(start, end) - trailingSpace(start, end) <= maxWidth) {
+            || start == paraStart[p] && advance(start, end) - trailingSpace(start, end) <= maxWidth) {
             line(start, end, p);
-            return;
+            return -1;
         }
-        BreakIterator breaks = system.lineBreaks(chars, start, end);
+        // from a line start inside the paragraph, the break iterator sees a window from a little before it: its
+        // breaks are those of the whole paragraph (rules look back a few characters), without a walk from the start
+        BreakIterator breaks = system.lineBreaks(chars, Math.max(paraStart[p], start - BREAK_CONTEXT), end);
         int from = start;
         float used = 0;
         int prev = start;
-        for (int b = breaks.next(); b != BreakIterator.DONE; b = breaks.next()) {
+        for (int b = breaks.following(start); b != BreakIterator.DONE; b = breaks.next()) {
             float segment = advance(prev, b);
             float ink = segment - trailingSpace(prev, b);
             if (from < prev && used + ink > maxWidth) {
                 line(from, prev, p);
                 from = prev;
                 used = 0;
+                clean = true;
+                if (prev >= convergeFrom) {
+                    int old = oldLineAt(prev);
+                    if (old >= 0) {
+                        return old;
+                    }
+                }
             }
             if (from == prev && ink > maxWidth) {
                 from = splitWord(prev, b, p);
@@ -616,6 +1480,7 @@ public final class TextBlock {
             prev = b;
         }
         line(from, end, p);
+        return -1;
     }
 
     /** Breaks a word wider than the line between grapheme clusters; returns the start of its last piece. */
@@ -659,6 +1524,10 @@ public final class TextBlock {
             growLines();
         }
         int l = lineCount++;
+        lineClean[l] = clean;
+        clean = false;
+        Arrays.fill(charX0, start, end, Float.NaN);
+        Arrays.fill(charX1, start, end, Float.NaN);
         int visible = end;
         while (visible > start && Character.isWhitespace(chars[visible - 1])) {
             visible--;
@@ -670,7 +1539,17 @@ public final class TextBlock {
         lineGlyphStart[l] = glyphCount;
 
         int pieces = 0;
-        for (int r = paraRunStart[p]; r < paraRunEnd[p]; r++) {
+        int first = paraRunStart[p];
+        for (int lo = first, hi = paraRunEnd[p] - 1; lo <= hi; ) { // the first run ending after the line's start
+            int mid = (lo + hi) >>> 1;
+            if (runEnd[mid] <= start) {
+                lo = mid + 1;
+                first = lo;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        for (int r = first; r < paraRunEnd[p] && runStart[r] < visible; r++) {
             int s = Math.max(runStart[r], start);
             int e = Math.min(runEnd[r], visible);
             if (s < e) {
@@ -682,7 +1561,7 @@ public final class TextBlock {
             }
         }
         reorder(pieces);
-        float baseline = lineMetrics(l, pieces, start);
+        lineMetrics(l, pieces, start);
 
         float pen = 0;
         for (int k = 0; k < pieces; k++) {
@@ -690,7 +1569,8 @@ public final class TextBlock {
             int r = pieceRun[piece];
             int s = pieceStart[piece];
             int e = pieceEnd[piece];
-            for (int g = runGlyphStart[r]; g < runGlyphEnd[r]; g++) {
+            glyphRange(r, s, e);
+            for (int g = rangeLo; g < rangeHi; g++) {
                 int c = shapedGlyphs.cluster(g);
                 if (c < s || c >= e) {
                     continue;
@@ -705,7 +1585,7 @@ public final class TextBlock {
                 }
                 if (!Character.isWhitespace(chars[c])) {
                     addGlyph(shapedGlyphs.glyph(g), runFace[r], pen + shapedGlyphs.offsetX(g),
-                        baseline - shapedGlyphs.offsetY(g), c, runSize[r], runs == null ? -1 : charStyle[c]);
+                        -shapedGlyphs.offsetY(g), c, runSize[r], runs == null ? -1 : charStyle[c]);
                 }
                 pen += advance;
             }
@@ -717,15 +1597,45 @@ public final class TextBlock {
     }
 
     /**
+     * Run {@code r}'s glyphs that may belong to characters {@code [s, e)}, into {@link #rangeLo} and {@link #rangeHi}:
+     * found by binary search when the run's clusters are in visual order, else all of them.
+     */
+    private void glyphRange(int r, int s, int e) {
+        int gs = runGlyphStart[r];
+        int ge = runGlyphEnd[r];
+        rangeLo = gs;
+        rangeHi = ge;
+        if (runMono[r] && ge - gs > 16) {
+            boolean rtl = (runLevel[r] & 1) != 0;
+            rangeLo = clusterSplit(gs, ge, rtl ? e : s, rtl);
+            rangeHi = clusterSplit(gs, ge, rtl ? s : e, rtl);
+        }
+    }
+
+    /** In glyphs {@code [lo, hi)} in visual order, the first of a cluster at or after {@code c} (mirrored: before). */
+    private int clusterSplit(int lo, int hi, int c, boolean rtl) {
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            int cl = shapedGlyphs.cluster(mid);
+            if (rtl ? cl >= c : cl < c) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /**
      * Line {@code l}'s top, box height and baseline from the runs of its {@code pieces} (rich text: the tallest run's
      * box above and below the baseline; an empty line the style at its start), or the block's uniform line height.
      */
-    private float lineMetrics(int l, int pieces, int start) {
+    private void lineMetrics(int l, int pieces, int start) {
         if (runs == null) {
             lineTop[l] = l * lineHeightPx;
             lineBox[l] = lineHeightPx;
             lineBaseline[l] = Math.round(l * lineHeightPx + baselineOffset);
-            return lineBaseline[l];
+            return;
         }
         float above = 0;
         float below = 0;
@@ -743,7 +1653,6 @@ public final class TextBlock {
         lineTop[l] = top;
         lineBox[l] = above + below;
         lineBaseline[l] = Math.round(top + above);
-        return lineBaseline[l];
     }
 
     /** Splits each cluster's extent among its characters and puts characters without a glyph at the line's end. */
@@ -808,14 +1717,14 @@ public final class TextBlock {
         }
     }
 
-    private void addGlyph(int glyph, FontFace face, float x, float y, int cluster, float glyphPx, int style) {
+    private void addGlyph(int glyph, FontFace face, float x, float dy, int cluster, float glyphPx, int style) {
         if (glyphCount == glyphIds.length) {
             growGlyphs();
         }
         glyphIds[glyphCount] = glyph;
         glyphFaces[glyphCount] = face;
         glyphX[glyphCount] = x;
-        glyphY[glyphCount] = y;
+        glyphDy[glyphCount] = dy;
         glyphCluster[glyphCount] = cluster;
         glyphSize[glyphCount] = glyphPx;
         glyphStyle[glyphCount] = style;
@@ -864,14 +1773,25 @@ public final class TextBlock {
         int waiting = 0;
         int fl = Math.max(0, firstLine);
         int el = Math.min(lineCount, endLine);
-        int from = fl < el ? lineGlyphStart[fl] : 0;
-        int to = fl < el ? lineGlyphEnd[el - 1] : 0;
-        for (int g = from; g < to; g++) {
+        for (int l = fl; l < el; l++) {
+            waiting += recordLine(list, x, top, l, color, outlineWidth, outlineColor, weight, opacity, atlas, raster);
+        }
+        pending = waiting;
+        seenCompletions = atlas.completions();
+    }
+
+    /** Records line {@code l}'s glyphs; returns how many are still generating. */
+    private int recordLine(DrawList list, float x, float top, int l, long color, float outlineWidth,
+        long outlineColor, float weight, float opacity, GlyphAtlas atlas, boolean raster) {
+        int waiting = 0;
+        float left = lineLeft[l];
+        float baseline = lineBaseline[l];
+        for (int g = lineGlyphStart[l]; g < lineGlyphEnd[l]; g++) {
             if (glyphIds[g] < 0) {
                 continue; // an inline object: its owner draws it
             }
-            float px = x + glyphX[g];
-            float py = top + glyphY[g];
+            float px = x + (glyphX[g] + left);
+            float py = top + (baseline + glyphDy[g]);
             float gs = glyphSize[g];
             long c = color;
             if (runs != null && glyphStyle[g] >= 0 && runs.hasColor(glyphStyle[g])) {
@@ -913,8 +1833,7 @@ public final class TextBlock {
                 waiting++;
             }
         }
-        pending = waiting;
-        seenCompletions = atlas.completions();
+        return waiting;
     }
 
     /**
@@ -1077,12 +1996,27 @@ public final class TextBlock {
 
     /** Visible glyph {@code g}'s pen position, pixels from the left. */
     public float glyphX(int g) {
-        return glyphX[g];
+        return glyphX[g] + lineLeft[glyphLine(g)];
     }
 
     /** Visible glyph {@code g}'s baseline, pixels from the top (offset by its shaping offset). */
     public float glyphY(int g) {
-        return glyphY[g];
+        return lineBaseline[glyphLine(g)] + glyphDy[g];
+    }
+
+    /** The line visible glyph {@code g} is on. */
+    private int glyphLine(int g) {
+        int found = 0;
+        for (int lo = 0, hi = lineCount - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (lineGlyphStart[mid] <= g) {
+                found = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return found;
     }
 
     /** The first character visible glyph {@code g} came from. */
@@ -1102,12 +2036,12 @@ public final class TextBlock {
 
     /** Character {@code index}'s left edge, pixels (its line's end for characters without a glyph). */
     public float charLeft(int index) {
-        return charX0[index];
+        return charX0[index] + lineLeft[caretLine(index)];
     }
 
     /** Character {@code index}'s right edge, pixels. */
     public float charRight(int index) {
-        return charX1[index];
+        return charX1[index] + lineLeft[caretLine(index)];
     }
 
     /** The style runs the block was set with, or null. */
@@ -1130,11 +2064,17 @@ public final class TextBlock {
     /** The line caret position {@code index} (0 to {@link #length()}) is on. */
     public int caretLine(int index) {
         checkIndex(index);
-        int l = 0;
-        while (l + 1 < lineCount && lineStart[l + 1] <= index) {
-            l++;
+        int found = 0;
+        for (int lo = 1, hi = lineCount - 1; lo <= hi; ) {
+            int mid = (lo + hi) >>> 1;
+            if (lineStart[mid] <= index) {
+                found = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
         }
-        return l;
+        return found;
     }
 
     /**
@@ -1144,13 +2084,13 @@ public final class TextBlock {
     public float caretX(int index) {
         int l = caretLine(index);
         if (index < lineEnd[l]) {
-            return (levels[index] & 1) != 0 ? charX1[index] : charX0[index];
+            return ((levels[index] & 1) != 0 ? charX1[index] : charX0[index]) + lineLeft[l];
         }
         if (index == lineStart[l]) { // an empty line
             return lineLeft[l];
         }
         int c = index - 1;
-        return (levels[c] & 1) != 0 ? charX0[c] : charX1[c];
+        return ((levels[c] & 1) != 0 ? charX0[c] : charX1[c]) + lineLeft[l];
     }
 
     /**
@@ -1166,9 +2106,10 @@ public final class TextBlock {
         int end = lineEnd[l];
         int best = lineRtl[l] ? end : start;
         float bestDistance = Float.MAX_VALUE;
+        float left = lineLeft[l];
         for (int i = start; i < end; i++) {
-            float x0 = charX0[i];
-            float x1 = charX1[i];
+            float x0 = charX0[i] + left;
+            float x1 = charX1[i] + left;
             if (x1 <= x0) {
                 continue; // hidden: trailing space, a mark
             }
@@ -1274,9 +2215,10 @@ public final class TextBlock {
             int s = Math.max(a, lineStart[l]);
             int e = Math.min(b, lineEnd[l]);
             int n = 0;
+            float left = lineLeft[l];
             for (int i = s; i < e; i++) {
-                float x0 = charX0[i];
-                float x1 = charX1[i];
+                float x0 = charX0[i] + left;
+                float x1 = charX1[i] + left;
                 if (!(x1 > x0)) {
                     continue;
                 }
@@ -1361,6 +2303,9 @@ public final class TextBlock {
         paraStart = Arrays.copyOf(paraStart, n);
         paraEnd = Arrays.copyOf(paraEnd, n);
         paraRtl = Arrays.copyOf(paraRtl, n);
+        paraBidi = Arrays.copyOf(paraBidi, n);
+        paraComplex = Arrays.copyOf(paraComplex, n);
+        paraLine = Arrays.copyOf(paraLine, n);
         paraRunStart = Arrays.copyOf(paraRunStart, n);
         paraRunEnd = Arrays.copyOf(paraRunEnd, n);
     }
@@ -1376,6 +2321,7 @@ public final class TextBlock {
         runFace = Arrays.copyOf(runFace, n);
         runSize = Arrays.copyOf(runSize, n);
         runStyle = Arrays.copyOf(runStyle, n);
+        runMono = Arrays.copyOf(runMono, n);
         pieceRun = new int[n];
         pieceStart = new int[n];
         pieceEnd = new int[n];
@@ -1395,6 +2341,7 @@ public final class TextBlock {
         lineTop = Arrays.copyOf(lineTop, n);
         lineBox = Arrays.copyOf(lineBox, n);
         lineRtl = Arrays.copyOf(lineRtl, n);
+        lineClean = Arrays.copyOf(lineClean, n);
     }
 
     @AllowAllocation("growing, rarely")
@@ -1403,7 +2350,7 @@ public final class TextBlock {
         glyphIds = Arrays.copyOf(glyphIds, n);
         glyphFaces = Arrays.copyOf(glyphFaces, n);
         glyphX = Arrays.copyOf(glyphX, n);
-        glyphY = Arrays.copyOf(glyphY, n);
+        glyphDy = Arrays.copyOf(glyphDy, n);
         glyphEntries = Arrays.copyOf(glyphEntries, n);
         glyphCluster = Arrays.copyOf(glyphCluster, n);
         glyphSize = Arrays.copyOf(glyphSize, n);

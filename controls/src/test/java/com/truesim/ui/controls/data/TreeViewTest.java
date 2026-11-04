@@ -3,6 +3,8 @@ package com.truesim.ui.controls.data;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.truesim.common.state.VersionedTree;
+import com.truesim.common.state.VersionedTree.Node;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Semantics;
 import com.truesim.ui.core.UiState;
@@ -19,23 +21,23 @@ class TreeViewTest {
     static final ValueRenderer<String> TEXT = Renderers.text();
 
     /** a (a1, a2 lazy: a2x, a2y), b, c (c1). */
-    static TreeModel<String> model(DataFrame f, List<String> loads) {
-        TreeModel<String> model = new TreeModel<>(f.ui.store().clock(), "root");
-        TreeNode<String> a = model.root().add("a");
+    static VersionedTree<String> model(DataFrame f) {
+        VersionedTree<String> model = f.ui.store().clock().tree("root");
+        Node<String> a = model.root().add("a");
         a.add("a1");
-        TreeNode<String> a2 = a.add("a2");
-        a2.lazy(node -> {
-            loads.add(node.value());
-            node.add("a2x");
-            node.add("a2y");
-        });
+        a.add("a2");
         model.root().add("b");
         model.root().add("c").add("c1");
         return model;
     }
 
-    static TreeView<String> tree(DataFrame f, TreeModel<String> model) {
+    static TreeView<String> tree(DataFrame f, VersionedTree<String> model, List<String> loads) {
         TreeView<String> tree = new TreeView<>(f.ui, "Files", model, TEXT);
+        tree.lazy(model.root().child(0).child(1), node -> {
+            loads.add(node.value());
+            node.add("a2x");
+            node.add("a2y");
+        });
         f.ui.root().add(tree.root());
         return tree;
     }
@@ -52,8 +54,8 @@ class TreeViewTest {
     void lazyChildrenLoadOnTheFirstExpandAndKeysOpenAndClose() {
         DataFrame f = new DataFrame();
         List<String> loads = new ArrayList<>();
-        TreeModel<String> model = model(f, loads);
-        TreeView<String> tree = tree(f, model);
+        VersionedTree<String> model = model(f);
+        TreeView<String> tree = tree(f, model, loads);
         f.run();
         assertThat(rows(tree)).containsExactly("a", "b", "c");
         f.ui.interaction().focus(tree.root());
@@ -64,9 +66,9 @@ class TreeViewTest {
         f.synthetic.press(UiCommand.RIGHT, UiCommand.DOWN); // into a1, then a2
         f.run();
         assertThat(tree.current()).isEqualTo(2);
-        TreeNode<String> a2 = tree.rows().get(2);
-        assertThat(a2.pending()).isTrue();
-        assertThat(a2.leaf()).isFalse();
+        Node<String> a2 = tree.rows().get(2);
+        assertThat(tree.treeRows().pending(a2)).isTrue();
+        assertThat(tree.treeRows().leaf(a2)).isFalse();
         f.synthetic.press(UiCommand.RIGHT); // loads
         f.run();
         assertThat(loads).containsExactly("a2");
@@ -74,7 +76,7 @@ class TreeViewTest {
         f.synthetic.press(UiCommand.LEFT, UiCommand.LEFT); // collapse a2, then to its parent
         f.run();
         assertThat(tree.current()).isZero();
-        a2.expanded(true); // loaded once only
+        tree.treeRows().expanded(a2, true); // loaded once only
         assertThat(loads).hasSize(1);
         f.synthetic.press(UiCommand.LEFT); // collapse a
         f.run();
@@ -93,7 +95,7 @@ class TreeViewTest {
     void clicksOnExpandersAndDoubleClicksToggleNodes() {
         DataFrame f = new DataFrame();
         List<String> loads = new ArrayList<>();
-        TreeView<String> tree = tree(f, model(f, loads));
+        TreeView<String> tree = tree(f, model(f), loads);
         f.run();
         UiStore store = f.ui.store();
         int expander = store.nextSibling(store.firstChild(tree.rowElement(2).slot())); // c's
@@ -115,8 +117,8 @@ class TreeViewTest {
     void nodesMoveByDragAndDrop() {
         DataFrame f = new DataFrame();
         List<String> loads = new ArrayList<>();
-        TreeModel<String> model = model(f, loads);
-        TreeView<String> tree = tree(f, model).draggable(true);
+        VersionedTree<String> model = model(f);
+        TreeView<String> tree = tree(f, model, loads).draggable(true);
         f.run();
         // drag b (row 1, y 20..40) into c's middle (row 2, y 40..60)
         f.mouse(100, 30, Pointer.PRIMARY);
@@ -150,7 +152,7 @@ class TreeViewTest {
         f.mouse(100, 150, 0);
         assertThat(rows(tree)).containsExactly("b", "c", "c1", "a");
         assertThatThrownBy(() -> model.root().remove()).isInstanceOf(IllegalStateException.class);
-        TreeNode<String> c = model.root().child(1);
+        Node<String> c = model.root().child(1);
         assertThatThrownBy(() -> c.move(c.child(0), 0)).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -158,11 +160,11 @@ class TreeViewTest {
     void valueChangesRebindTheirRowAndStructureChangesTheWindow() {
         DataFrame f = new DataFrame();
         List<String> loads = new ArrayList<>();
-        TreeModel<String> model = model(f, loads);
-        TreeView<String> tree = tree(f, model);
+        VersionedTree<String> model = model(f);
+        TreeView<String> tree = tree(f, model, loads);
         f.run();
         long structure = model.structureVersion();
-        TreeNode<String> b = model.root().child(1);
+        Node<String> b = model.root().child(1);
         b.value("bee");
         b.value("bee");
         f.run();
@@ -170,27 +172,31 @@ class TreeViewTest {
         assertThat(f.ui.text(f.ui.store().element(f.ui.store().lastChild(tree.rowElement(1).slot()))).toString())
             .isEqualTo("bee");
         b.touch();
-        TreeNode<String> d = model.root().add(1, "d");
+        Node<String> d = model.root().add(1, "d");
         f.run();
         assertThat(rows(tree)).containsExactly("a", "d", "bee", "c");
         d.remove();
         f.run();
         assertThat(rows(tree)).containsExactly("a", "bee", "c");
         assertThat(d.parent()).isNull();
-        assertThat(b.depth()).isZero();
+        assertThat(b.depth()).isOne();
         assertThat(tree.treeRows().rowOf(d)).isEqualTo(-1);
-        TreeNode<String> slow = model.root().add("slow");
-        slow.lazy(node -> node.loading());
-        slow.expanded(true);
-        assertThat(slow.isLoading()).isTrue();
+        Node<String> slow = model.root().add("slow");
+        TreeRows<String> rows = tree.treeRows();
+        tree.lazy(slow, rows::loading);
+        rows.expanded(slow, true);
+        assertThat(rows.isLoading(slow)).isTrue();
+        assertThat(rows.pending(slow)).isTrue();
         slow.add("late");
-        slow.loaded();
+        rows.loaded(slow);
         f.run();
         assertThat(rows(tree)).endsWith("slow", "late");
-        assertThat(slow.toString()).isEqualTo("slow");
+        assertThat(rows.tree()).isSameAs(model);
+        assertThat(tree.expanded(slow)).isTrue();
+        assertThat(rows.expanded(model.root())).isTrue();
         assertThat(tree.model()).isSameAs(model);
         // many value changes overflow the log: the window reconciles
-        for (int i = 0; i < TreeModel.LOG + 10; i++) {
+        for (int i = 0; i < 1024 + 10; i++) {
             b.value("b" + i);
         }
         f.run();
@@ -200,7 +206,7 @@ class TreeViewTest {
     @Test
     void theTreeExposesItsItems() {
         DataFrame f = new DataFrame();
-        TreeView<String> tree = tree(f, model(f, new ArrayList<>()));
+        TreeView<String> tree = tree(f, model(f), new ArrayList<>());
         f.run();
         tree.expand(tree.rows().get(0), true);
         f.run();

@@ -27,6 +27,10 @@ final class HarfBuzzCalls {
         FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT));
     private static final MethodHandle SET_DIRECTION = handle(HarfBuzz.Functions.buffer_set_direction,
         FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+    private static final MethodHandle SET_SCRIPT = handle(HarfBuzz.Functions.buffer_set_script,
+        FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT));
+    private static final MethodHandle UNICODE_SCRIPT = handle(HarfBuzz.Functions.unicode_script,
+        FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT));
     private static final MethodHandle SET_LANGUAGE = handle(HarfBuzz.Functions.buffer_set_language,
         FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG));
     private static final MethodHandle GUESS_SEGMENT_PROPERTIES = handle(
@@ -69,6 +73,23 @@ final class HarfBuzzCalls {
     static void setDirection(long buffer, int direction) {
         try {
             SET_DIRECTION.invokeExact(buffer, direction);
+        } catch (Throwable t) {
+            throw failed(t);
+        }
+    }
+
+    static void setScript(long buffer, int script) {
+        try {
+            SET_SCRIPT.invokeExact(buffer, script);
+        } catch (Throwable t) {
+            throw failed(t);
+        }
+    }
+
+    /** {@code hb_unicode_script}: the script of {@code codepoint} by {@code funcs}. */
+    static int unicodeScript(long funcs, int codepoint) {
+        try {
+            return (int) UNICODE_SCRIPT.invokeExact(funcs, codepoint);
         } catch (Throwable t) {
             throw failed(t);
         }

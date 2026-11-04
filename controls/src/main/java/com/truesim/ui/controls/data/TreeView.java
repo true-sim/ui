@@ -1,6 +1,8 @@
 package com.truesim.ui.controls.data;
 
 import com.truesim.annotations.AllowAllocation;
+import com.truesim.common.state.VersionedTree;
+import com.truesim.common.state.VersionedTree.Node;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
@@ -17,8 +19,9 @@ import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.layout.Unit;
 
 /**
- * A virtualized tree view (design 5.6) over a {@link TreeModel}: its visible rows ({@link TreeRows}) through a
- * {@link ValueRenderer} of the node values, lazy children loaded on expand, expand and collapse by the expander, a
+ * A virtualized tree view (design 5.6) over a {@link VersionedTree} (common-state): its visible rows
+ * ({@link TreeRows}, which also hold the view's expansion) through a {@link ValueRenderer} of the node values, lazy
+ * children loaded on expand ({@link #lazy}), expand and collapse by the expander, a
  * double click or the keys (RIGHT expands or enters the first child, LEFT collapses or goes to the parent), and drag
  * and drop moving nodes between parents and reordering them. Selection, keys and virtualization are
  * {@link VirtualView}'s.
@@ -31,35 +34,35 @@ import com.truesim.ui.layout.Unit;
  *
  * @param <T> the node value type
  */
-public final class TreeView<T> extends VirtualView<TreeNode<T>> {
+public final class TreeView<T> extends VirtualView<Node<T>> {
 
     /** The payload of a dragged tree node. */
-    public record Drag(TreeView<?> tree, TreeNode<?> node) {
+    public record Drag(TreeView<?> tree, Node<?> node) {
     }
 
     /** Drag and drop format of a dragged tree node. */
     public static final DataFormat<Drag> NODE = DataFormat.of("ui.tree.node", Drag.class);
 
-    private final TreeModel<T> model;
+    private final VersionedTree<T> model;
     private final TreeRows<T> treeRows;
     private final ValueRenderer<? super T> renderer;
     private final ViewContext context;
     private final Element indicator;
     private Element preview;
     private boolean draggable;
-    private TreeNode<T> dropParent;
+    private Node<T> dropParent;
     private int dropIndex = -1;
     private Element dropInto;
     private final TreeEvents treeEvents = new TreeEvents();
 
     /** A tree named {@code name} of {@code model}'s nodes shown through {@code renderer}. */
     @AllowAllocation("controls are made when a UI is built")
-    public TreeView(Ui ui, String name, TreeModel<T> model, ValueRenderer<? super T> renderer) {
+    public TreeView(Ui ui, String name, VersionedTree<T> model, ValueRenderer<? super T> renderer) {
         this(ui, name, model, new TreeRows<>(model), renderer);
     }
 
     @AllowAllocation("controls are made when a UI is built")
-    private TreeView(Ui ui, String name, TreeModel<T> model, TreeRows<T> rows, ValueRenderer<? super T> renderer) {
+    private TreeView(Ui ui, String name, VersionedTree<T> model, TreeRows<T> rows, ValueRenderer<? super T> renderer) {
         super(ui, "tree-view", "tree-body", name, rows, Role.TREE_ITEM, Selection.Mode.SINGLE);
         this.model = model;
         this.treeRows = rows;
@@ -75,7 +78,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     }
 
     /** The model. */
-    public TreeModel<T> model() {
+    public VersionedTree<T> model() {
         return model;
     }
 
@@ -91,14 +94,25 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     }
 
     /** Expands or collapses {@code node}; expanding loads lazy children. */
-    public void expand(TreeNode<T> node, boolean on) {
-        if (!node.leaf() || !on) {
-            node.expanded(on);
+    public void expand(Node<T> node, boolean on) {
+        if (!treeRows.leaf(node) || !on) {
+            treeRows.expanded(node, on);
         }
     }
 
+    /** Whether {@code node} shows its children. */
+    public boolean expanded(Node<T> node) {
+        return treeRows.expanded(node);
+    }
+
+    /** Fills {@code node}'s children with {@code loader} when first expanded; see {@link TreeRows#lazy}. */
+    public TreeView<T> lazy(Node<T> node, TreeRows.ChildLoader<T> loader) {
+        treeRows.lazy(node, loader);
+        return this;
+    }
+
     /** Where a dragged node would go: its new parent (null when no drag is over the tree). */
-    public TreeNode<T> dropParent() {
+    public Node<T> dropParent() {
         return dropParent;
     }
 
@@ -108,7 +122,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     }
 
     @Override
-    protected int kindOf(int index, TreeNode<T> row) {
+    protected int kindOf(int index, Node<T> row) {
         return renderer.kind(row.value());
     }
 
@@ -130,21 +144,21 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     }
 
     @Override
-    protected void prepare(int index, TreeNode<T> node, CellState state) {
-        state.tree(node.depth(), node.expanded(), node.leaf());
+    protected void prepare(int index, Node<T> node, CellState state) {
+        state.tree(node.depth() - 1, treeRows.expanded(node), treeRows.leaf(node));
     }
 
     @Override
-    protected void bindRow(Element row, int kind, int index, TreeNode<T> node, CellState state) {
+    protected void bindRow(Element row, int kind, int index, Node<T> node, CellState state) {
         UiStore store = ui.store();
         int indent = store.firstChild(row.slot());
         int expander = store.nextSibling(indent);
         int content = store.nextSibling(expander);
         float step = ui.styles().styleOf(row.slot()).getFloat(DataStyles.INDENT);
         layout.width(indent, state.depth() * step, Unit.PX);
-        store.state(row.slot(), UiState.EXPANDED, node.expanded());
-        store.state(expander, UiState.EXPANDED, node.expanded());
-        store.state(expander, UiState.DISABLED, node.leaf());
+        store.state(row.slot(), UiState.EXPANDED, treeRows.expanded(node));
+        store.state(expander, UiState.EXPANDED, treeRows.expanded(node));
+        store.state(expander, UiState.DISABLED, treeRows.leaf(node));
         renderer.bind(store.element(content), node.value(), state);
     }
 
@@ -161,21 +175,21 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
         if (i < 0 || i >= rows().size()) {
             return;
         }
-        TreeNode<T> node = rows().get(i);
+        Node<T> node = rows().get(i);
         switch (e.command()) {
             case RIGHT -> {
-                if (!node.leaf() && !node.expanded()) {
+                if (!treeRows.leaf(node) && !treeRows.expanded(node)) {
                     expand(node, true);
-                } else if (node.expanded() && node.childCount() > 0) {
+                } else if (treeRows.expanded(node) && node.childCount() > 0) {
                     moveTo(i + 1, false, false);
                 }
                 e.consume();
             }
             case LEFT -> {
-                if (node.expanded() && !node.leaf()) {
+                if (treeRows.expanded(node) && !treeRows.leaf(node)) {
                     expand(node, false);
                 } else {
-                    TreeNode<T> parent = node.parent();
+                    Node<T> parent = node.parent();
                     if (parent != null && parent != model.root()) {
                         moveTo(treeRows.rowOf(parent), false, false);
                     }
@@ -190,7 +204,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     // ---------------------------------------------------------------- drag and drop
 
     /** Works out where a node dragged over UI pixel {@code y} would go: into a row's middle, else between rows. */
-    private boolean target(TreeNode<?> dragged, float y) {
+    private boolean target(Node<?> dragged, float y) {
         clearTarget();
         int n = rows().size();
         double at = (y - layout.y(viewport.slot())) / scale() + vertical().position();
@@ -203,7 +217,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
         double top = extents().offset(i);
         double size = extents().size(i);
         double part = (at - top) / Math.max(1, size);
-        TreeNode<T> node = rows().get(i);
+        Node<T> node = rows().get(i);
         if (at >= top + size) {
             // below the last row: the end of the top level
             dropParent = model.root();
@@ -217,7 +231,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
             int k = dropParent.indexOf(node);
             dropIndex = part >= 0.75 ? k + 1 : k;
         }
-        if (dragged == dropParent || dragged.model() == model && isAncestor(dragged, dropParent)) {
+        if (dragged == dropParent || dragged.tree() == model && isAncestor(dragged, dropParent)) {
             clearTarget();
             return false;
         }
@@ -233,8 +247,8 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
     }
 
     @SuppressWarnings("unchecked")
-    private static boolean isAncestor(TreeNode<?> node, TreeNode<?> of) {
-        return ((TreeNode<Object>) node).isAncestorOf((TreeNode<Object>) of);
+    private static boolean isAncestor(Node<?> node, Node<?> of) {
+        return ((Node<Object>) node).isAncestorOf((Node<Object>) of);
     }
 
     private void clearTarget() {
@@ -260,10 +274,10 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
                     if (index < 0) {
                         return;
                     }
-                    TreeNode<T> node = rows().get(index);
+                    Node<T> node = rows().get(index);
                     boolean onExpander = ui.store().type(e.targetSlot()).equals("tree-expander");
                     if (onExpander || e.clickCount() == 2) {
-                        expand(node, !node.expanded());
+                        expand(node, !treeRows.expanded(node));
                         e.consume();
                     }
                 }
@@ -275,7 +289,7 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
                     if (index < 0) {
                         return;
                     }
-                    TreeNode<T> node = rows().get(index);
+                    Node<T> node = rows().get(index);
                     Element row = rowElement(index);
                     if (preview == null) {
                         preview = ui.label(null, "");
@@ -288,23 +302,23 @@ public final class TreeView<T> extends VirtualView<TreeNode<T>> {
                 }
                 case DROP_OVER -> {
                     Drag drag = e.drag() == null ? null : e.drag().get(NODE);
-                    if (drag != null && drag.node().model() == model && target(drag.node(), e.y())) {
+                    if (drag != null && drag.node().tree() == model && target(drag.node(), e.y())) {
                         e.acceptDrop(DragOperation.MOVE);
                     }
                 }
                 case DROP -> {
                     Drag drag = e.drag().get(NODE);
-                    TreeNode<T> parent = dropParent;
+                    Node<T> parent = dropParent;
                     int index = dropIndex;
                     clearTarget();
-                    if (drag != null && parent != null && drag.node().model() == model) {
-                        TreeNode<T> node = (TreeNode<T>) drag.node();
+                    if (drag != null && parent != null && drag.node().tree() == model) {
+                        Node<T> node = (Node<T>) drag.node();
                         if (node.parent() == parent && parent.indexOf(node) < index) {
                             index--; // counted after taking the node out
                         }
                         node.move(parent, index);
-                        if (parent != model.root() && !parent.expanded()) {
-                            parent.expanded(true);
+                        if (parent != model.root() && !treeRows.expanded(parent)) {
+                            treeRows.expanded(parent, true);
                         }
                     }
                 }

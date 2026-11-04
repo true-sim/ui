@@ -101,6 +101,55 @@ class BenchmarkTest {
         System.out.printf("BENCH reshape 200 chars, JDK fallback, Latin: %.2f us%n", jdkUs);
     }
 
+    /**
+     * Microseconds per keystroke typing into the middle of a {@code length}-character paragraph wrapped at 600 px: each
+     * keystroke inserts a character at the caret and sets the block again (what a text area does with a paragraph).
+     */
+    static double typing(TextSystem system, List<String> families, String paragraph, boolean incremental) {
+        TextBlock block = new TextBlock(system);
+        block.incremental(incremental);
+        StringBuilder text = new StringBuilder(paragraph);
+        String typed = "the quick brown fox jumps over the lazy dog ";
+        int n = incremental ? 4_000 : 150;
+        int caret = paragraph.length() / 2;
+        double[] rounds = new double[ROUNDS + 3];
+        for (int r = 0; r < rounds.length; r++) { // the first rounds warm past C2
+            text.setLength(0);
+            text.append(paragraph);
+            block.set(text, families, 14, 400, false, TextAlign.START, 600, 0);
+            int at = caret;
+            long t0 = System.nanoTime();
+            for (int i = 0; i < n; i++) {
+                text.insert(at++, typed.charAt(i % typed.length()));
+                block.set(text, families, 14, 400, false, TextAlign.START, 600, 0);
+            }
+            rounds[r] = (System.nanoTime() - t0) / 1000.0 / n;
+        }
+        assertThat(block.lineCount()).isGreaterThan(10);
+        return median(Arrays.copyOfRange(rounds, 3, rounds.length));
+    }
+
+    @Test
+    void typingInLongParagraphs() {
+        Random random = new Random(3);
+        GlyphAtlas atlas = new GlyphAtlas(new UiTextures(), NativeFonts.BACKEND.msdfGenerator(), null, null,
+            new AtlasSettings());
+        TextSystem harfbuzz = new TextSystem(NativeFonts.REGISTRY, new HarfBuzzShaper(), atlas);
+        for (int length : new int[] {5_000, 20_000}) {
+            String latin = label("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do office AV", length,
+                random);
+            String mixed = label("Score مرحبا 你好世界 office AV 42 नमस्ते", length, random);
+            for (boolean incremental : new boolean[] {false, true}) {
+                System.out.printf("BENCH typing, %d chars, %s, Latin: %.1f us a keystroke (target well under 200)%n",
+                    length, incremental ? "incremental" : "full", typing(harfbuzz, NativeFonts.LATIN, latin,
+                        incremental));
+                System.out.printf("BENCH typing, %d chars, %s, Latin+Arabic+CJK+Devanagari: %.1f us a keystroke%n",
+                    length, incremental ? "incremental" : "full", typing(harfbuzz, NativeFonts.LATIN, mixed,
+                        incremental));
+            }
+        }
+    }
+
     @Test
     void mtsdfGenerationPerGlyph() {
         NativeFontFace face = NativeFonts.face("Inter");
