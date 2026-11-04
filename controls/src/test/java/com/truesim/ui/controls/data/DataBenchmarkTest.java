@@ -157,6 +157,76 @@ class DataBenchmarkTest {
     }
 
     @Test
+    void aGroupedTableOfAHundredThousandRowsTakesAHundredChangesAFrame() {
+        assumeTrue("true".equals(System.getenv("TRUESIM_BENCHMARK")), "benchmark");
+        Ui ui = new Ui(Tss.defaultTheme(), UiTestAccess.nativeText());
+        ChangeClock clock = ui.store().clock();
+        VersionedList<Row> rows = clock.list(4096);
+        String[] pool = pool(1_000);
+        Row[] values = new Row[100_000];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = new Row(i, (int) ((i * 2_654_435_761L) & 0xFFFF), i * 0.01, pool[i % pool.length]);
+        }
+        rows.addAll(Arrays.asList(values));
+        TableView<Row> table = TableView.of(ui, "Grouped", clock, rows);
+        table.add(Column.<Row>ofText("Name", Row::name).width(220));
+        Column<Row> group = Column.<Row>ofInt("Group", r -> r.value() % 16).width(80);
+        Column<Row> sub = Column.<Row>ofInt("Sub", r -> r.id() % 4).width(80);
+        Column<Row> value = Column.<Row>ofInt("Value", Row::value).width(90);
+        table.add(group).add(sub).add(value);
+        table.sort(value, false);
+        ui.root().add(table.root());
+        size(ui, table.root(), 900, 1000);
+        long tb = System.nanoTime();
+        table.groupBy(java.util.List.of(group, sub));
+        table.groupSum(Row::load, "Load", 1);
+        for (int i = 0; i < 4; i++) {
+            ui.update(W, H);
+        }
+        System.out.println("100,000 rows grouped (64 groups, two levels) in " + (System.nanoTime() - tb) / 1_000_000
+            + " ms: " + table.rows().size() + " rows with headers");
+        int frames = 3_000;
+        Row[] next = new Row[frames * 100];
+        int[] at = new int[frames * 100];
+        java.util.Random random = new java.util.Random(9);
+        for (int k = 0; k < next.length; k++) {
+            at[k] = random.nextInt(values.length);
+            next[k] = new Row(at[k], random.nextInt(0x10000), at[k] * 0.01, pool[at[k] % pool.length]);
+        }
+        long[] times = new long[frames];
+        for (int round = 0; round < 3; round++) {
+            for (int f = 0; f < frames; f++) {
+                long t0 = System.nanoTime();
+                int base = f * 100;
+                for (int k = 0; k < 100; k++) {
+                    rows.set(at[base + k], next[base + k]); // most change group: they move between groups
+                }
+                ui.update(W, H);
+                times[f] = System.nanoTime() - t0;
+                ui.layers()[0].clean();
+            }
+            System.out.println("grouped table 100,000 rows, 100 changes a frame, round " + round + ": "
+                + stats(times));
+            for (int k = 0; k < next.length; k++) {
+                Row old = rows.get(at[k]);
+                rows.set(at[k], next[k]);
+                next[k] = old;
+            }
+            ui.update(W, H);
+        }
+        // what a regrouping from scratch costs (a new group appearing, a group emptying)
+        long[] rebuilds = new long[20];
+        for (int i = 0; i < rebuilds.length; i++) {
+            long t0 = System.nanoTime();
+            table.grouped().sum(Row::load); // regroups at the next refresh
+            ui.update(W, H);
+            rebuilds[i] = System.nanoTime() - t0;
+        }
+        System.out.println("grouped table 100,000 rows, regrouped from scratch: " + stats(rebuilds));
+        assertThat(table.grouped().groups()).isEqualTo(64);
+    }
+
+    @Test
     void aTableOfAHundredThousandRowsAndTwentyColumnsScrolls() {
         assumeTrue("true".equals(System.getenv("TRUESIM_BENCHMARK")), "benchmark");
         Ui ui = new Ui(Tss.defaultTheme(), UiTestAccess.nativeText());
