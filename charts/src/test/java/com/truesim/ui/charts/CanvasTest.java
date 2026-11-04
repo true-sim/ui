@@ -1,5 +1,6 @@
 package com.truesim.ui.charts;
 
+import com.truesim.ui.controls.charts.Marker;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 

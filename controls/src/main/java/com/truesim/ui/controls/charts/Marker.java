@@ -1,4 +1,4 @@
-package com.truesim.ui.charts;
+package com.truesim.ui.controls.charts;
 
 /** A marker's shape (the style key {@code marker}): boxes, triangles or lines, outlined and filled as styled. */
 public enum Marker {

@@ -1,5 +1,7 @@
 package com.truesim.ui.charts;
 
+import com.truesim.ui.controls.charts.ChartStyles;
+import com.truesim.ui.controls.charts.Marker;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.state.VersionedDouble;
 import com.truesim.ui.style.ResolvedStyle;

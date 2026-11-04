@@ -1,4 +1,4 @@
-package com.truesim.ui.charts;
+package com.truesim.ui.controls.charts;
 
 /** How a chart shows the values at the hovered X (the style key {@code chart-tooltips}). */
 public enum TooltipMode {

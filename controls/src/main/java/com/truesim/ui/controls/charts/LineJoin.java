@@ -1,4 +1,4 @@
-package com.truesim.ui.charts;
+package com.truesim.ui.controls.charts;
 
 /**
  * How the segments of a series' line meet (the style key {@code line-join}): the line primitive draws segments with

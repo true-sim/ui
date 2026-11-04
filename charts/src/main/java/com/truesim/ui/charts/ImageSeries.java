@@ -1,5 +1,6 @@
 package com.truesim.ui.charts;
 
+import com.truesim.ui.controls.charts.ChartStyles;
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.core.draw.Rgba;
 import com.truesim.ui.core.draw.UiTexture;

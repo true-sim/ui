@@ -1511,7 +1511,7 @@ public final class Ui {
                 outline.color().rgba(), 0);
             drawnTextVersion[slot] = b.version();
             if (underlined[slot] > 0) {
-                recordUnderline(slot, b, cx0, cy0, textColor, opacity);
+                recordUnderline(slot, b, cx0, cy0, textColor); // the entry fades it
             }
         } else if (content[slot] == IMAGE) {
             recordImage(slot, s.get(Styles.IMAGE), cx0, cy0, cx1, cy1);
@@ -1611,7 +1611,7 @@ public final class Ui {
     }
 
     /** The underline of a label's character ({@link #underline}), if its part's style underlines. */
-    private void recordUnderline(int slot, TextBlock b, float x, float y, long textColor, float opacity) {
+    private void recordUnderline(int slot, TextBlock b, float x, float y, long textColor) {
         Element part = underlineParts[slot];
         int at = underlined[slot] - 1;
         if (part == null || !part.alive() || at >= b.length()) {
@@ -1623,7 +1623,7 @@ public final class Ui {
         }
         int end = Math.min(b.length(), at + (Character.isHighSurrogate(strings[slot].charAt(at)) ? 2 : 1));
         int n = Math.min(b.rangeBoxes(at, end, 0, underlineBox), underlineBox.length / 4);
-        long color = Rgba.fade(ps.isSet(Styles.COLOR) ? ps.rgba(Styles.COLOR) : textColor, opacity);
+        long color = ps.isSet(Styles.COLOR) ? ps.rgba(Styles.COLOR) : textColor;
         float thick = Math.max(1, layout.scale());
         for (int k = 0; k < n; k++) {
             int line = b.lineAt(underlineBox[k * 4 + 1] + 0.5f);

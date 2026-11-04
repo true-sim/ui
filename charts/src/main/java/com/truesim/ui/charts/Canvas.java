@@ -1,5 +1,8 @@
 package com.truesim.ui.charts;
 
+import com.truesim.ui.controls.charts.ChartStyles;
+import com.truesim.ui.controls.charts.LineJoin;
+import com.truesim.ui.controls.charts.Marker;
 import com.truesim.common.math.Maths;
 import com.truesim.ui.core.draw.DrawList;
 import com.truesim.ui.core.draw.Primitive;

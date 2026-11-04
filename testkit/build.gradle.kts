@@ -12,5 +12,4 @@ dependencies {
     api(project(":ui-controls"))
     testImplementation(project(":ui-fonts")) // LayoutSanity's tests read real glyphs
     testImplementation(testFixtures(project(":ui-controls"))) // and check the galleries
-    testRuntimeOnly(project(":ui-charts")) // the themes style charts with its keys
 }

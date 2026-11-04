@@ -1,4 +1,4 @@
-package com.truesim.ui.charts;
+package com.truesim.ui.controls.charts;
 
 /** Where a chart's legend sits inside its plot (the style key {@code legend-position}). */
 public enum LegendPosition {

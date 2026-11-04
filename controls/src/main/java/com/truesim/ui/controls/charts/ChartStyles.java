@@ -1,4 +1,4 @@
-package com.truesim.ui.charts;
+package com.truesim.ui.controls.charts;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.ui.style.StyleKey;
