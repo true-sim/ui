@@ -3,6 +3,8 @@ package com.truesim.ui.controls;
 import com.truesim.ui.controls.basic.Controls;
 import com.truesim.ui.controls.basic.ControlsGallery;
 import com.truesim.ui.controls.data.DataGallery;
+import com.truesim.ui.controls.debug.DebuggerGallery;
+import com.truesim.ui.controls.imm.ImmGallery;
 import com.truesim.ui.controls.text.TextGallery;
 import com.truesim.ui.controls.windows.WindowsScene;
 import com.truesim.ui.core.draw.UiTextures;
@@ -123,5 +125,17 @@ class GallerySanityTest {
     @ValueSource(strings = {"default", "test"})
     void textGallery(String theme) {
         check("text gallery", theme, ui -> TextGallery.build(ui, 1280, 720));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void immGallery(String theme) {
+        check("immediate-mode tool", theme, ui -> ImmGallery.build(ui, 1280, 720));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void debuggerGallery(String theme) {
+        check("UI debugger", theme, ui -> DebuggerGallery.build(ui, 1280, 800));
     }
 }

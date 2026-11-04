@@ -11,6 +11,8 @@
 @import "data";
 @use "basic"; // the basic and container controls of ui-controls
 @use "text-edit"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "console"; // the developer console (ui-console)
+@use "tools"; // the immediate-mode façade and the UI debugger (ui-controls)
 
 // ------------------------------------------------------------------ palette: live tokens, dark by default
 

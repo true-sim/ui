@@ -6,6 +6,8 @@
 @import "data-test";
 @use "basic-test"; // the basic and container controls of ui-controls
 @use "text-edit-test"; // text fields, areas, rich text (com.truesim.ui.controls.text)
+@use "console-test"; // the developer console (ui-console)
+@use "tools-test"; // the immediate-mode façade and the UI debugger (ui-controls)
 
 $hot: #ff00ff;
 $lime: #39ff14;
