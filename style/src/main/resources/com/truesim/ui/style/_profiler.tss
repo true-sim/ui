@@ -1,0 +1,170 @@
+// The profiler's views (ui-profiler, com.truesim.ui.profiler) in the default theme: a quiet panel, zones in the
+// charts' palette (each name keeps its colour), budgets and hitches in the warning colours.
+//
+// Element types: frame-graph (the overlay's panel) with label.frame-graph-stats and chart.frame-graph, whose series
+// are styled cpu, gpu, wait, frame (chart-line.<name>), budget and hitch (chart-inf-lines.<name>); profiler (the
+// detailed view), profiler-toolbar, label.profiler-status, profiler-timeline (palette: zone colours) with the style
+// parts profiler-ruler, profiler-lane (gutter-width, lane-gap), profiler-zone (row-height, label-min-width, stroke:
+// zones merged below a pixel; :selected), profiler-frame (stroke: frame starts), profiler-hitch (background: hitch
+// frames), profiler-selection; profiler-flame (palette) with profiler-flame-node (row-height, label-min-width;
+// :selected: the hovered node); profiler-table with profiler-table-header and profiler-table-row (.stripe,
+// :selected); scroll-pane.profiler-counters holding a chart.profiler-counter per counter group. The keys row-height,
+// lane-gap, gutter-width and label-min-width are ProfilerStyles'; palette, stroke and line-width ChartStyles'.
+
+@use "tokens";
+@use "mixins" as *;
+
+// ------------------------------------------------------------------ frame graph overlay
+
+frame-graph {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-xs;
+  width: 470px;
+  padding: tokens.$space-s;
+  radius: tokens.$radius-m;
+  background: box(rgba(#0d1117, 0.78));
+  border: 1px var(--edge);
+}
+
+label.frame-graph-stats {
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg);
+}
+
+chart.frame-graph {
+  height: 150px;
+  min-height: 90px;
+  padding: tokens.$space-xs;
+  radius: tokens.$radius-s;
+  background: box(transparent);
+  border: 0 transparent;
+  plot-background: rgba(#0d1117, 0.45);
+  chart-tooltips: merged;
+}
+
+chart.frame-graph chart-legend { legend-position: outside-top; gap: tokens.$space-s; margin: 0 0 2px 0; swatch-size: 8px; }
+chart.frame-graph chart-axis { tick-spacing: 28px; minor-ticks: false; }
+
+chart-line.cpu { color: #58a6ff; line-width: 1.5px; }
+chart-line.gpu { color: #3fb950; line-width: 1.5px; }
+chart-line.wait { color: #8b949e; line-width: 1px; }
+chart-line.frame { color: #e3b341; line-width: 1px; }
+chart-inf-lines.budget { color: rgba(#f0883e, 0.75); line-width: 1px; line-dash: 4px 3px; }
+chart-inf-lines.hitch { color: rgba(#ff5c5c, 0.85); line-width: 2px; line-dash: none; }
+
+// ------------------------------------------------------------------ detailed profiler
+
+profiler {
+  layout: flex;
+  direction: column;
+  gap: tokens.$space-s;
+  padding: tokens.$space-s;
+  background: box(var(--overlay));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+}
+
+profiler > split-pane, profiler tab-pane { grow: 1; }
+profiler split-first > profiler-timeline, profiler tab-content > profiler-flame, profiler tab-content > profiler-table,
+profiler tab-content > scroll-pane.profiler-counters { width: 100%; height: 100%; }
+
+profiler-toolbar > button, profiler-toolbar > toggle-button { shrink: 0; }
+
+profiler-toolbar {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: tokens.$space-s;
+}
+
+label.profiler-status {
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg-muted);
+  text-wrap: false;
+  grow: 1;
+  clip: true;
+}
+
+profiler-timeline, profiler-flame, profiler-table {
+  grow: 1;
+  min-height: 80px;
+  clip: true;
+  background: box(rgba(#0d1117, 0.6));
+  palette: #4c72b0, #dd8452, #55a868, #c44e52, #8172b3, #937860, #da8bc3, #8c8c8c, #ccb974, #64b5cd;
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+
+profiler-ruler {
+  row-height: 20px;
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg-muted);
+  stroke: rgba(#8b949e, 0.6);
+  line-width: 1px;
+  background: box(rgba(#161b22, 0.9));
+}
+
+profiler-lane {
+  gutter-width: 150px;
+  lane-gap: 6px;
+  padding: 0 0 0 tokens.$space-s;
+  font-family: tokens.$font-ui;
+  @include text(caption, 600);
+  color: var(--fg);
+  background: box(rgba(#161b22, 0.85));
+}
+
+profiler-zone {
+  row-height: 18px;
+  label-min-width: 28px;
+  padding: 0 0 0 3px;
+  radius: 2px;
+  font-family: tokens.$font-ui;
+  @include text(caption);
+  color: #0d1117;
+  stroke: rgba(#8b949e, 0.55);
+  &:selected { border: 2px white; }
+}
+
+profiler-frame { stroke: rgba(#e6edf3, 0.16); line-width: 1px; }
+profiler-hitch { background: box(rgba(#ff5c5c, 0.14)); }
+profiler-selection { background: box(rgba(#3fa7ff, 0.14)); border: 1px rgba(#3fa7ff, 0.6); }
+
+profiler-flame-node {
+  row-height: 18px;
+  label-min-width: 28px;
+  padding: 0 0 0 3px;
+  radius: 2px;
+  font-family: tokens.$font-ui;
+  @include text(caption);
+  color: #0d1117;
+  background: box(rgba(#8b949e, 0.35));
+  &:selected { border: 2px white; }
+}
+
+profiler-table-header {
+  row-height: 22px;
+  gutter-width: 220px;
+  padding: 0 0 0 tokens.$space-s;
+  font-family: tokens.$font-ui;
+  @include text(caption, 600);
+  color: var(--fg);
+  background: box(rgba(#161b22, 0.95));
+}
+
+profiler-table-row {
+  row-height: 19px;
+  padding: 0 0 0 tokens.$space-s;
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg);
+  &.stripe { background: box(rgba(#8b949e, 0.06)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.25)); }
+}
+
+scroll-pane.profiler-counters { grow: 1; min-height: 80px; }
+scroll-pane.profiler-counters scroll-content { layout: flex; direction: row; wrap: wrap; gap: tokens.$space-s; }
+chart.profiler-counter { width: 360px; height: 170px; }

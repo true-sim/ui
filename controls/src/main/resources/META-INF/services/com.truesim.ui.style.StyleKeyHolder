@@ -5,3 +5,4 @@ com.truesim.ui.controls.windows.WindowStyles
 com.truesim.ui.controls.text.TextStyles
 com.truesim.ui.controls.props.PropsStyles
 com.truesim.ui.controls.charts.ChartStyles
+com.truesim.ui.controls.profiler.ProfilerStyles

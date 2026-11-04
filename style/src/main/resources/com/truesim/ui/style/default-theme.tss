@@ -16,6 +16,7 @@
 @use "props"; // generated property panels and collection editors (ui-props)
 @use "console"; // the developer console (ui-console)
 @use "tools"; // the immediate-mode façade and the UI debugger (ui-controls)
+@use "profiler"; // the profiler views: frame graph, timeline, flame graph, zone table (ui-profiler)
 
 // ------------------------------------------------------------------ palette: live tokens, dark by default
 
