@@ -1,0 +1,236 @@
+// Charts (ui-charts, com.truesim.ui.charts) in the default theme: a quiet plot on the surface colour, muted axes and
+// grid, the seaborn "deep" palette and viridis. The chart's own keys (stroke, line-width, line-dash, line-join, fill,
+// fill-opacity, marker, marker-size, marker-fill, marker-outline, palette, colormap, bar-width, cap-width, donut-hole,
+// digital-height, up-color, down-color, tick-length, minor-tick-length, tick-spacing, minor-ticks, fit-padding,
+// legend-position, swatch-size, chart-tooltips, tooltip-offset) are declared by ChartStyles.
+//
+// Element types: chart (the axes' frame: palette, colormap, tooltips), chart-plot (the plot area; it clips the
+// series), chart-overlay; style parts chart-axis (#<axis id>, [side=bottom|top|left|right], :hover, :selected),
+// chart-axis-title, chart-title, chart-grid, chart-grid-minor, chart-legend, chart-legend-entry (:hover, :disabled
+// when its item is hidden), chart-tooltip, chart-tooltip-title, chart-crosshair, chart-highlight, chart-zoom-box,
+// chart-selection, chart-text, chart-annotation, chart-pie-label, chart-drag-point, chart-drag-line, chart-drag-rect
+// (:hover, :pressed); series parts by kind with the series' style name: chart-line, chart-stairs, chart-area,
+// chart-scatter, chart-stems, chart-digital, chart-shaded, chart-stacked, chart-bars, chart-histogram,
+// chart-histogram2d, chart-heatmap, chart-pie, chart-candles, chart-errors, chart-inf-lines, chart-image (:hover while
+// their legend entry is); chart-subplots and chart-subplots-row lay subplots out.
+
+@use "tokens";
+@use "mixins" as *;
+
+$chart-text: tokens.$font-ui;
+
+chart {
+  min-width: 160px;
+  min-height: 120px;
+  padding: tokens.$space-m;
+  radius: tokens.$radius-m;
+  background: box(var(--surface));
+  border: 1px var(--edge);
+  focus-ring-offset: 1px;
+  palette: #4c72b0, #dd8452, #55a868, #c44e52, #8172b3, #937860, #da8bc3, #8c8c8c, #ccb974, #64b5cd;
+  colormap: #440154, #482878, #3e4989, #31688e, #26828e, #1f9e89, #35b779, #6ece58, #b5de2b, #fde725;
+  chart-tooltips: merged;
+  tooltip-offset: 14px;
+  cursor: crosshair;
+
+  &:focus-visible { focus-ring: 2px var(--accent); }
+}
+
+chart-plot {
+  clip: true;
+  background: box(rgba(#0d1117, 0.35));
+}
+
+chart-title {
+  font-family: $chart-text;
+  @include text(body, 600);
+  color: var(--fg);
+  margin: 0 0 tokens.$space-s 0;
+}
+
+chart-axis {
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg-muted);
+  stroke: rgba(#8b949e, 0.6);
+  line-width: 1px;
+  tick-length: 4px;
+  minor-tick-length: 2px;
+  tick-spacing: 70px;
+  minor-ticks: true;
+  gap: 3px;
+  fit-padding: 0.05;
+
+  &:hover { background: box(rgba(#3fa7ff, 0.08)); }
+  &:selected { background: box(rgba(#3fa7ff, 0.18)); color: var(--fg); stroke: var(--accent); }
+}
+
+chart-axis[side=left], chart-axis[side=right] { tick-spacing: 40px; }
+
+chart-axis-title {
+  font-family: $chart-text;
+  @include text(caption, 600);
+  color: var(--fg-muted);
+}
+
+chart-grid { stroke: rgba(#8b949e, 0.16); line-width: 1px; }
+chart-grid-minor { stroke: rgba(#8b949e, 0.06); line-width: 1px; }
+
+chart-legend {
+  legend-position: top-right;
+  direction: column;
+  padding: tokens.$space-s tokens.$space-m;
+  margin: tokens.$space-m;
+  gap: tokens.$space-s;
+  swatch-size: 10px;
+  radius: tokens.$radius-s;
+  background: box(rgba(#161b22, 0.82));
+  border: 1px var(--edge);
+}
+
+chart-legend-entry {
+  font-family: $chart-text;
+  @include text(caption);
+  color: var(--fg);
+  opacity: 1;
+  &:hover { color: var(--accent); }
+  &:disabled { opacity: 0.4; }
+}
+
+chart-tooltip {
+  font-family: tokens.$font-numbers;
+  @include text(caption);
+  color: var(--fg);
+  padding: tokens.$space-s tokens.$space-m;
+  gap: 3px;
+  radius: tokens.$radius-s;
+  background: box(rgba(#0d1117, 0.94));
+  border: 1px var(--edge);
+  @include raised(1);
+}
+
+chart-tooltip-title {
+  font-family: tokens.$font-numbers;
+  @include text(caption, 600);
+  color: var(--fg-muted);
+}
+
+chart-crosshair { stroke: rgba(#e6edf3, 0.35); line-width: 1px; line-dash: 4px 3px; }
+chart-highlight { marker: circle; marker-size: 9px; marker-fill: 1; marker-outline: 2px; stroke: #0d1117; }
+chart-zoom-box { background: box(rgba(#3fa7ff, 0.12)); border: 1px rgba(#3fa7ff, 0.8); }
+
+chart-selection {
+  background: box(rgba(#ffc857, 0.1));
+  border: 1px rgba(#ffc857, 0.8);
+  fill: #ffc857;
+  fill-opacity: 0.12;
+  stroke: rgba(#ffc857, 0.85);
+  line-width: 1px;
+  line-dash: 5px 3px;
+  &:hover { fill-opacity: 0.2; }
+}
+
+chart-text {
+  font-family: $chart-text;
+  @include text(caption);
+  color: var(--fg);
+}
+
+chart-annotation {
+  font-family: $chart-text;
+  @include text(caption);
+  color: var(--fg);
+  padding: 2px tokens.$space-s;
+  radius: tokens.$radius-s;
+  background: box(rgba(#161b22, 0.92));
+  border: 1px var(--edge);
+  stroke: rgba(#e6edf3, 0.5);
+  line-width: 1px;
+}
+
+chart-pie-label {
+  font-family: tokens.$font-numbers;
+  @include text(caption, 600);
+  color: white;
+}
+
+chart-drag-point {
+  color: #ffc857;
+  marker: circle;
+  marker-size: 10px;
+  marker-outline: 2px;
+  stroke: #0d1117;
+  &:hover { marker-size: 13px; }
+  &:pressed { color: white; }
+}
+
+chart-drag-line {
+  stroke: rgba(#ffc857, 0.8);
+  line-width: 1.5px;
+  line-dash: 6px 4px;
+  &:hover { stroke: #ffc857; line-width: 2px; }
+  &:pressed { stroke: white; }
+}
+
+chart-drag-rect {
+  fill: #3fa7ff;
+  fill-opacity: 0.1;
+  stroke: rgba(#3fa7ff, 0.8);
+  line-width: 1px;
+  &:hover { fill-opacity: 0.18; }
+  &:pressed { fill-opacity: 0.25; }
+}
+
+// ------------------------------------------------------------------ series
+
+chart-line, chart-stairs, chart-area, chart-stems, chart-shaded, chart-stacked, chart-errors, chart-candles,
+chart-digital {
+  line-width: 1.5px;
+  line-join: round;
+  marker-size: 5px;
+  &:hover { line-width: 2.5px; }
+}
+
+chart-area { fill-opacity: 0.25; }
+chart-shaded { fill-opacity: 0.25; line-width: 0; }
+chart-stacked { fill-opacity: 0.75; line-width: 1px; }
+chart-stems { marker: circle; marker-size: 5px; }
+chart-digital { fill-opacity: 0.35; digital-height: 12px; }
+chart-errors { line-width: 1px; cap-width: 6px; marker: circle; marker-size: 4px; }
+chart-candles { line-width: 1px; bar-width: 0.7; up-color: #3fb950; down-color: #f85149; }
+chart-inf-lines { line-width: 1px; line-dash: 2px 3px; &:hover { line-width: 2px; } }
+
+chart-scatter {
+  marker: circle;
+  marker-size: 5px;
+  marker-fill: 0.7;
+  marker-outline: 0;
+  &:hover { marker-size: 7px; }
+}
+
+chart-bars, chart-histogram {
+  bar-width: 0.7;
+  fill-opacity: 0.9;
+  radius: 2px;
+  &:hover { fill-opacity: 1; }
+}
+
+// series style names for marker shapes, donuts, faint areas
+$markers: circle, square, diamond, up, down, left, right, cross, plus, asterisk;
+@each $m in $markers {
+  chart-scatter.#{$m}, chart-line.#{$m} { marker: $m; }
+}
+chart-scatter.cross, chart-scatter.plus, chart-scatter.asterisk { marker-size: 7px; marker-outline: 1.5px; }
+chart-pie.donut { donut-hole: 0.5; }
+chart-area.thin { fill-opacity: 0.12; line-width: 1px; }
+
+chart-histogram { bar-width: 1; radius: 0; border: 1px rgba(#0d1117, 0.6); }
+chart-heatmap, chart-histogram2d { fill-opacity: 1; }
+chart-pie { fill-opacity: 0.95; stroke: #161b22; line-width: 1.5px; &:hover { fill-opacity: 1; } }
+chart-image { fill-opacity: 1; }
+
+// ------------------------------------------------------------------ subplots
+
+chart-subplots { layout: flex; direction: column; gap: tokens.$space-m; }
+chart-subplots-row { layout: flex; direction: row; gap: tokens.$space-m; grow: 1; }
+chart-subplots-row > chart { grow: 1; basis: 0; }

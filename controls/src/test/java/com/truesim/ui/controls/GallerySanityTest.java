@@ -1,5 +1,6 @@
 package com.truesim.ui.controls;
 
+import com.truesim.ui.charts.ChartsGallery;
 import com.truesim.ui.controls.basic.Controls;
 import com.truesim.ui.controls.basic.ControlsGallery;
 import com.truesim.ui.controls.data.DataGallery;
@@ -123,5 +124,15 @@ class GallerySanityTest {
     @ValueSource(strings = {"default", "test"})
     void textGallery(String theme) {
         check("text gallery", theme, ui -> TextGallery.build(ui, 1280, 720));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void chartsGallery(String theme) {
+        check("charts gallery", theme, ui -> {
+            ChartsGallery g = ChartsGallery.build(ui);
+            settle(ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
+            g.pose(ui, ChartsGallery.WIDTH, ChartsGallery.HEIGHT);
+        });
     }
 }

@@ -503,6 +503,26 @@ public final class DrawList {
         emit(p);
     }
 
+    /**
+     * A filled triangle with corners {@code a, b, c} in {@code color}; {@code edges} ({@link Primitive#EDGE_AB},
+     * {@link Primitive#EDGE_BC}, {@link Primitive#EDGE_CA}) names its anti-aliased edges: a shape's outline, not the
+     * edges its triangles share.
+     */
+    public void triangle(float xa, float ya, float xb, float yb, float xc, float yc, long color, int edges) {
+        float x0 = Math.min(xa, Math.min(xb, xc));
+        float y0 = Math.min(ya, Math.min(yb, yc));
+        float x1 = Math.max(xa, Math.max(xb, xc));
+        float y1 = Math.max(ya, Math.max(yb, yc));
+        int[] p = start(Primitive.TRIANGLE, edges & 7, x0, y0, x1, y1, color, 0);
+        p[Primitive.XA] = Float.floatToRawIntBits(scale * xa + offsetX); // the corners move as the box does
+        p[Primitive.YA] = Float.floatToRawIntBits(scale * ya + offsetY);
+        p[Primitive.XB] = Float.floatToRawIntBits(scale * xb + offsetX);
+        p[Primitive.YB] = Float.floatToRawIntBits(scale * yb + offsetY);
+        p[Primitive.XC] = Float.floatToRawIntBits(scale * xc + offsetX);
+        p[Primitive.YC] = Float.floatToRawIntBits(scale * yc + offsetY);
+        emit(p);
+    }
+
     private static int texels(int v) {
         if (v < 0 || v > 255) {
             throw new IllegalArgumentException("nine-slice insets are 0 to 255 texels: " + v);
@@ -707,6 +727,12 @@ public final class DrawList {
             p[Primitive.Y0] = Float.floatToRawIntBits(drawnY(i, Primitive.Y0));
             p[Primitive.X1] = Float.floatToRawIntBits(drawnX(i, Primitive.X1));
             p[Primitive.Y1] = Float.floatToRawIntBits(drawnY(i, Primitive.Y1));
+            if (kind == Primitive.TRIANGLE) { // the corners draw as the box does
+                for (int w = Primitive.XA; w <= Primitive.YC; w += 2) {
+                    p[w] = Float.floatToRawIntBits(drawnX(i, w));
+                    p[w + 1] = Float.floatToRawIntBits(drawnY(i, w + 1));
+                }
+            }
             float s = drawnScale(i);
             if (s != 1) {
                 scaleSizes(p, s);

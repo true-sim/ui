@@ -1753,6 +1753,12 @@ one PR per repository per group, CI and release once per group.
 The draw list's transform table and dirty ranges, CSS's automatic minimum size of flex items, SVG icons and atlas
 page eviction. Engine branch `ui-rest-render` (engine-ui's renderer and shader).
 
+### Group A3, charts (2026-11-04): local branch a3-charts
+
+Design section 7 and stages 9, 10 and 11 (Group C) as the new module `ui-charts` (directory `charts`, package
+`com.truesim.ui.charts`, on top of `ui-controls`, published like the others). No engine work yet: what the engine must do
+is listed under Left.
+
 #### Built
 
 | Part | Built | Where |
@@ -1837,6 +1843,92 @@ fixed-size cells keep their height and centre a pixel or two higher. Draw-list d
   draw only through a text system with an atlas (a UI without text shows nothing for them).
 - Picking does not follow drawn transforms (as before): a scaled element is hit at its layout box.
 - An element that once composed keeps its entry until its layer is rebuilt (a small table, never cleaned up sooner).
+
+| Model | `Chart`: any number of `Axis` objects (X at the bottom or top, Y left or right, stacked outwards), scales `LINEAR`, `LOG`, `SYMLOG` (constant per axis), `TIME` (seconds since 1970 UTC plus a zone offset), `CATEGORY` (names); ranges are versioned `AxisRange`s, so linking axes is sharing one (`Axis.link`), across charts too; a `Crosshair` (versioned) shared by charts shows the hovered X in all of them; axes can be hidden, inverted, auto-fitted (`autoFit`), kept out of fitting (`fits(false)`), followed (`follow`); series name their axes (`Series.axes`); every series, legend item, annotation and drag tool can be shown and hidden | `Chart`, `Axis`, `AxisRange`, `Crosshair` |
+| Ticks | nice numbers (1, 2, 5 times a power of ten, nearest the spacing asked for on a log scale) with minors; log decades (every n-th when narrow, 2 to 9 as minors, linear within a decade); symlog zero and signed powers thinned to the spacing; time by calendar (microseconds to seconds as nice numbers, then 1 s to 1 week, 1/2/3/6 months, nice years) with labels by the step (`mm:ss.fff`, `HH:mm:ss`, `HH:mm`, `MM-dd`, `yyyy-MM`, `yyyy`); categories within their names. Labels are text without allocation (`TickFormat`: decimals of the step, scientific beyond 1e7 or below 1e-6, Hinnant's civil dates); X labels wider than their room thin the ticks; label blocks are reused by their text, so a pan shapes only the labels coming into view | `Ticks`, `TickFormat` |
+| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it: no rotated text); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
+| New primitive | `Primitive.TRIANGLE` (kind 7): the bounding box in words 1-4, colour A, corners in words 9-14, per-edge anti-aliasing flags (`EDGE_AB`, `EDGE_BC`, `EDGE_CA`: a shape's outline anti-aliased, its shared inner edges hard); `DrawList.triangle`. Recorded through the public API only; `DrawList` changed by one method (`triangle`, using `start`/`emit` and the range transform), `Primitive` by the constants | `ui-core` |
+| Data | `Column`s by absolute index (`first`..`end`): `Columns.of` over `VersionedDoubleArray`, `VersionedFloatArray`, `VersionedDoubleRing`, `VersionedFloatRing` (appended samples visited by `changesSince`), plain `double[]`/`float[]` (`changed()`), getters with a `Versioned` trigger, and `Columns.index(start, step)` (implicit evenly spaced X) | `Column`, `Columns` |
+| Series | `line` (stairs `Step.POST/PRE/MID`, `area` to a baseline), `scatter`, `stems`, `digital` (lanes at the plot's bottom), `shaded` (band between two columns), `stackedArea`, `bars` (grouped, `stacked`, `horizontal`), `histogram` (bins, range, density, cumulative; binned on change), `histogram2d`, `heatmap` (`HeatTexture`: a `UiTextures` texture coloured by the `colormap`, cells several texels wide so linear filtering keeps them sharp), `pie` (a donut by `donut-hole`, share labels), `candlestick` (or `ohlc`), `errorBars` (vertical or horizontal), `infiniteLines`, `image`, `text`, `annotate` (callouts kept in the plot); `Subplots` (rows of charts, `linkColumns`, `linkRows`, `linkAllX`, one crosshair) | `*Series`, `InfiniteLines`, `Annotation`, `Subplots` |
+| Decimation (UI23) | `MinMaxPyramid`: a segment tree over blocks of `ui.chart.pyramidBlock` samples (power of two; 8 by default), partial blocks read directly; for rings laid over the ring's slots, so an appended sample updates its block and ancestors in O(log n) (`Tracked`, `XYSeries.poll`: appended ranges only, a rebuild on any other change). `Decimator.minMax`: per pixel column the index range (arithmetic for evenly spaced X, else a search guided by the last column's width), first, last, min and max (M4); the line draws a stroke per column and a connector only where neighbouring columns' spans do not touch. `Decimator.lttb`: Largest-Triangle-Three-Buckets in the axes' transformed units. Per series `Decimation.NONE`, `MIN_MAX`, `LTTB`, `AUTO` (min-max for lines and areas above `ui.chart.decimateAbove` samples a pixel, LTTB for markers; LTTB falls back to min-max above `ui.chart.lttbMaxInput`) | `MinMaxPyramid`, `Decimator`, `XYSeries`, `Tracked` |
+| Hit queries | nearest sample by binary search on sorted X (by X for the crosshair, in two dimensions for clicks); a `ScatterGrid` (uniform grid in transformed units, built on change, ring search) for unsorted data; bars, pie slices, heatmap cells and images by geometry; `Chart.hitTest`, `axisAt`, `legendEntryAt`; all without allocation | `XYSeries`, `ScatterGrid`, kinds' `contains` |
+| Interaction | hover crosshair (shared), nearest-point highlights, tooltips merged (Grafana) or per series (stacked so they do not cover each other) by `chart-tooltips`; legend click hides an item, hover highlights its series (`:hover` look of its part); wheel zooms about the pointer (all axes, the selected ones when any is, Shift X only, Ctrl or Cmd Y only; over an axis that axis); drag pans (on an axis that axis); secondary-button drag zooms to a box (a thin box one direction); Shift-drag selects (`Chart.selection()`, a `DragRect` the game reads as a query range); clicking an axis selects it; `DragPoint`, `DragLine`, `DragRect` (move and resize) bound to `VersionedDouble`s; double click and `UiCommand.CHART_RESET` fit everything again and resume follow and auto-fit; zooming or panning an axis pauses its follow and auto-fit | `Chart`, `DragTool` |
+| Styles | `ChartStyles` (registered as a `StyleKeyHolder` service): `stroke`, `line-width`, `line-dash`, `line-join`, `fill`, `fill-opacity`, `marker`, `marker-size`, `marker-fill`, `marker-outline`, `palette`, `colormap`, `bar-width`, `cap-width`, `donut-hole`, `digital-height`, `up-color`, `down-color`, `tick-length`, `minor-tick-length`, `tick-spacing`, `minor-ticks`, `fit-padding`, `legend-position`, `swatch-size`, `chart-tooltips`, `tooltip-offset`; standard keys for fonts, colours, boxes, padding, gaps, radii, shadows. Partials `_charts.tss` (seaborn deep palette, viridis) and `_charts-test.tss`, one `@use` in each theme; style names for marker shapes and donuts | `ChartStyles`, themes |
+| Tunables | `ChartTunables` (`ui.chart.zoomStep`, `decimateAbove`, `pyramidBlock`, `lttbPerPixel`, `lttbMaxInput`, `maxPoints`, `gridPerCell`, `hoverDistance`, `maxTicks`, `followLead`, `dragPixels`, `grabPixels`, `arcPixels`, `heatmapTexels`), listed by `Ui.tunables()` through the new `TunableSource` service of `ui-core` | `ChartTunables`, `ui-core`, `Ui` |
+| Gallery | `ChartsGallery` (test fixture of `ui-charts`): the ImPlot-parity demo page, 16 tiles (linked charts with three Y axes each, log and symlog, time with stairs and digital, scatter markers, grouped bars on a category axis, stacked horizontal bars, areas, histogram, 2D histogram, heatmap, pie and donut, candlesticks, error bars and stems, annotations and drag tools, 2 x 2 subplots), `pose` for the hovered look; in `GallerySanityTest` (both themes, posed) | `charts/src/testFixtures` |
+
+#### Decisions
+
+- *Charts are three elements, not one.* A painter cannot add a clip, so the plot is a child with `clip: true` whose
+  painter records the series, and an overlay child takes what draws over the series and outside the plot (legend,
+  tooltips). Axes, ticks and labels are the chart element's own drawing. The chart places its children after layout.
+- *A triangle primitive rather than approximations.* Areas, bands, pie slices and triangle markers need triangles;
+  boxes per pixel column fill dense envelopes (exact at the pixel), triangles the trapezoids of sparse data, with
+  anti-aliasing on outlines only, so translucent fills show no seams.
+- *Lines keep the segment primitive.* Joins are discs at vertices (`line-join: round`), dashes are split on the CPU
+  with the phase carried along the polyline; decimated lines need neither.
+- *Pyramid blocks of 8 by default* (benchmarked 8, 16, 32, 64): 4 bytes a sample (40 MB for 10 million) for the
+  fastest envelope; a tunable for memory against time.
+- *UI24: the CPU path stays.* It meets the targets (below), keeps the envelope exact in doubles, needs no readback for
+  hit queries and adds no frame of latency. The GPU compute alternative for the engine phase: the columns uploaded as
+  storage buffers (appended ranges only; values relative to the axis origin, or double-float pairs to stay exact), a
+  compute pass with one workgroup per pixel column finding its index range (arithmetic or a binary search in the
+  buffer) and reducing first, last, min and max in shared memory (or over a GPU min-max pyramid kept by a compute pass
+  on appends), writing per-column segments for an indirect instanced line draw. At 10 million visible samples that
+  reads about 80 MB a frame without a pyramid; it is worth it only when the CPU envelope is the bottleneck.
+- *Fitting* happens with the first data, on a reset and for auto-fitting axes; an axis with `fits(false)` keeps the range
+  code gave it (a streaming window's span). Follow mode keeps the span and puts the newest sample at the end, less
+  `ui.chart.followLead`.
+- *Colormaps interpolate in sRGB* (as they are made), and draw in linear light.
+- *Style keys with plain names* (`stroke`, `line-width`, `fill`...) live in `ChartStyles`; a module declaring the same
+  names (gizmos) must reuse them, not declare them again (`StyleKeys` refuses a second key of a name).
+- *Text reshaping without allocation:* `FontRegistry`'s chain key compared family lists with `List.equals`, which walks
+  an iterator: an allocation per reshape without escape analysis whenever two styles hold equal but distinct lists;
+  now compared by index.
+
+#### Tests
+
+`TicksTest` (nice steps, linear, log, symlog, category and time ticks, number and time formats, civil dates against
+`java.time`), `AxisTest` (transforms both ways for every scale, inverted, zoom keeps the point under the pointer, pan,
+box, fitting, linking), `DecimationTest` (the pyramid against brute force over random ranges: arrays, block sizes,
+NaN, rings appended, wrapped, partly filled and cleared; the envelope against brute force for sorted, duplicated,
+evenly spaced, log and inverted X; LTTB against the reference implementation; the scatter grid against brute force),
+`SeriesTest` (every kind: what it draws, its nearest sample and geometry hits, stacking, hiding items), `CanvasTest`
+(dashes and their phase, clipping, every marker, wedges, quads, ring order checks), `InteractionTest` (scripts of
+synthetic input: wheel zoom over the plot, axes and with modifiers, selected axes, pans, box zoom, box select and
+moving it, legend toggles and highlights, drag tools, double click and `CHART_RESET`, streaming with follow and
+auto-fit, a shared crosshair, per-series tooltips in the test theme, charts without text), `ChartAllocationTest`
+(streaming 1,000 samples a frame with follow, hovering, wheel and pan; the whole demo page idle and hovered: no
+allocation, without escape analysis), `ChartsGalleryTest` (LayoutSanity in both themes plain and posed; with
+`TRUESIM_SCREENSHOTS=true` the CPU previews), `ChartBenchmarkTest` (`TRUESIM_BENCHMARK=true`); `GallerySanityTest`
+and `UiTunablesTest` in `ui-controls`.
+
+#### Benchmarks (Ryzen 9 9950X3D, without JaCoCo, while other agents built: noisy, to be re-measured)
+
+| Target | Budget | Measured |
+|---|---|---|
+| 1,000,000 samples streaming 1,000 a frame, 3,930 pixel columns (4K), CPU | ≤ 0.5 ms | envelope 0.21 ms median, 0.30 ms p99; whole frame (poll, pyramid appends, envelope, recording axes, plot and overlay) 0.38 ms median, 0.66 ms p99 |
+| 10,000,000 samples zooming and panning every frame, CPU | ≤ 1 ms | sorted X stored: envelope 0.38 ms median (1.2 p99), frame 0.95 ms median (p99 up to 6 ms under load); evenly spaced X: envelope 0.20 ms median (0.51 p99), frame 0.52 ms median (2.0 p99) |
+| Pyramid memory | — | 4 bytes a sample at blocks of 8 (40 MB for 10 million), 2 at 16, 1 at 32, 0.5 at 64 |
+
+#### Left
+
+- **Engine**: the `TRIANGLE` kind in the UI shader (`ui/draw.slang`, `primitive.slang`): its quad is the bounding box
+  (grown by a pixel for anti-aliasing), moved by its clip's offset with its corners; coverage is the product over its
+  three edges of the signed distance's coverage for anti-aliased edges (flags 1, 2, 4 in header bits 8-10) and a hard
+  half-open test for the others (a top-left rule, so triangles sharing an edge never cover a pixel twice); in the
+  per-kind path a `triangleMain`. `engine-ui` depends on `ui-charts` (the shipped themes need `ChartStyles`' keys at
+  run time) and registers `ChartTunables` like the others (they arrive through `Ui.tunables()`). GPU screenshots of
+  `ChartsGallery` in both themes (`charts-{default,test}.png`, plain and posed). The chart benchmarks recorded in
+  engine-bench; the GPU line targets (1M streaming ≤ 0.2 ms GPU) measured.
+- Engine-side line quality (design 7 GPU): instanced segments with miter joins and a bevel fallback, round caps and
+  dashes by cumulative length in the shader would replace the CPU's discs and dash splitting; SDF markers instanced.
+- A nearest-sampled image flag would let heatmaps use one texel a cell.
+- Not built: rotated text (Y axis titles sit above their axes), axis tags, heatmap value labels, histogram binning on
+  the GPU, decimation of bars and candlesticks beyond `ui.chart.maxPoints`, a custom scale (ImPlot's transform
+  callbacks), legends outside the plot.
+- `common-state` with `VersionedDoubleRing`/`VersionedFloatRing` must be released (`ui-core` asks for 0.4.0; the build
+  uses `-Ptruesim.common-state=../common-state-tree`).
 
 ### Window options (2026-11-04): local branches `a3-window-options` (ui and engine), not yet in CI
 

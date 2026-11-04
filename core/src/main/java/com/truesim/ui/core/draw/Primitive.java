@@ -23,6 +23,12 @@ package com.truesim.ui.core.draw;
  *  14   gradient angle          -                      weight offset (bold)       nine slice: source insets  -
  *       (radians, if GRADIENT)                                                    (4 x 8-bit texels l t r b)
  * </pre>
+ *
+ * <p>A {@link #TRIANGLE} (charts: areas, pie slices, triangle and diamond markers) keeps its bounding box in words 1-4
+ * (its quad, what clips and picking read), colour A as its fill, and its corners a, b, c as floats in words 9-14
+ * ({@link #XA} to {@link #YC}), in the same space as the box (transformed alike, moved by its clip's offset alike).
+ * Its flags say which edges are anti-aliased ({@link #EDGE_AB}, {@link #EDGE_BC}, {@link #EDGE_CA}): a polygon's
+ * outline, not the edges triangles of one shape share (those are hard, so no seam shows between them).
  */
 public final class Primitive {
 
@@ -45,8 +51,10 @@ public final class Primitive {
     public static final int NINE_SLICE = 5;
     /** An anti-aliased line segment. */
     public static final int LINE = 6;
+    /** A filled triangle (corners in words 9-14), anti-aliased on the edges its flags name. */
+    public static final int TRIANGLE = 7;
     /** How many kinds exist (kinds are below this). */
-    public static final int KINDS = 7;
+    public static final int KINDS = 8;
 
     /** Flag: a box's fill is a linear gradient from colour A to colour B. */
     public static final int FLAG_GRADIENT = 1;
@@ -59,6 +67,13 @@ public final class Primitive {
      * own colours. Pixel range, outline and weight are 0.
      */
     public static final int FLAG_COLOR = 4;
+
+    /** Flag of a {@link #TRIANGLE}: its edge from a to b is anti-aliased. */
+    public static final int EDGE_AB = 1;
+    /** Flag of a {@link #TRIANGLE}: its edge from b to c is anti-aliased. */
+    public static final int EDGE_BC = 2;
+    /** Flag of a {@link #TRIANGLE}: its edge from c to a is anti-aliased. */
+    public static final int EDGE_CA = 4;
 
     /** Word offsets. */
     public static final int HEADER = 0;
@@ -80,6 +95,13 @@ public final class Primitive {
     public static final int WEIGHT = 14;
     public static final int SOURCE_INSETS = 14;
     public static final int TRANSFORM = 15;
+    /** A {@link #TRIANGLE}'s corners. */
+    public static final int XA = 9;
+    public static final int YA = 10;
+    public static final int XB = 11;
+    public static final int YB = 12;
+    public static final int XC = 13;
+    public static final int YC = 14;
 
     private Primitive() {
     }

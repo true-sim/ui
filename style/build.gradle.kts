@@ -10,6 +10,7 @@ dependencies {
     // The shipped themes style the controls in their partials with the controls' own keys, found as
     // StyleKeyHolder services: the theme tests here need those holders on the class path.
     testRuntimeOnly(project(":ui-controls"))
+    testRuntimeOnly(project(":ui-charts")) // and the charts' (ChartStyles)
 }
 
 // The reload benchmark (TRUESIM_BENCHMARK=true) prints its timings; it measures the code, not coverage probes, with
