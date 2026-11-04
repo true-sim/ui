@@ -27,8 +27,17 @@ import com.truesim.ui.core.UiStore;
  * (min-content sizes): a flex base size from content is measured at most the container's inner size; a container
  * sized by its content under an at-most constraint takes its content's size even when that is larger (it overflows,
  * and its parent shrinks it if it may), except a wrapping container, which stays within the constraint and fills it
- * once its items wrap; items do not shrink below their padding; justify-content's spacing modes spread only positive
- * free space. Checked against Yoga 3.4.3 (with its web flex basis) on random trees, see {@code YogaOracleTest}.
+ * once its items wrap (but is never narrower than its widest item); justify-content's spacing modes spread only
+ * positive free space. Checked against Yoga 3.4.3 (with its web flex basis) on random trees, see
+ * {@code YogaOracleTest}.
+ *
+ * <p><b>Automatic minimum size</b> (CSS 4.5, {@code min-width: auto}): an item whose main-axis minimum is auto and
+ * which does not clip its content ({@link Layout#clipsContent}) shrinks no further than its min-content size (measured
+ * under an at-most constraint of 0: text breaks at every opportunity, so its longest word; a container its items'
+ * minimums), or than its specified size if that is smaller, within its maximum; never below its padding. An explicit
+ * minimum wins, and a clipping or scrolling item keeps a minimum of 0 (its padding). The size is measured only when an
+ * item is to be smaller than its hypothetical size (shrinking, or growing from a basis below its content), so a line
+ * that fits measures nothing more. Yoga lets items shrink to their padding instead: a squeezed label overflows its box.
  *
  * <p>Where this follows CSS and Yoga does not:
  * <ul>
@@ -54,6 +63,38 @@ final class FlexLayout {
     private static final float EPSILON = 1e-4f;
 
     private FlexLayout() {
+    }
+
+    /**
+     * The automatic minimum main size of item {@code c} (CSS 4.5), or its padding where it has none: an explicit
+     * minimum, a clipping item. Measured once a run, when first needed.
+     */
+    private static float floor(Layout l, int c, boolean row, float mainOwner, float ow, float oh, boolean rtl) {
+        float pad = padMain(l, c, row);
+        if ((row ? l.minWidthUnit[c] : l.minHeightUnit[c]) != U_AUTO || l.clipsContent[c]) {
+            return pad;
+        }
+        float m = l.sAutoMin[c];
+        if (m == m) {
+            return m;
+        }
+        float ca = l.sCrossAvail[c];
+        int cm = l.sCrossMode[c];
+        if (row) {
+            l.layoutNode(c, 0, Layout.AT_MOST, ca, cm, ow, oh, false, rtl);
+        } else {
+            l.layoutNode(c, ca, cm, 0, Layout.AT_MOST, ow, oh, false, rtl);
+        }
+        m = row ? l.resW : l.resH;
+        float em = l.fontSize[c];
+        float specified = row ? resolve(l.width[c], l.widthUnit[c], mainOwner, em)
+            : resolve(l.height[c], l.heightUnit[c], mainOwner, em);
+        if (specified == specified) {
+            m = Math.min(m, specified);
+        }
+        m = Math.max(Math.min(m, maxMain(l, c, row, mainOwner)), pad);
+        l.sAutoMin[c] = m;
+        return m;
     }
 
     /**
@@ -93,7 +134,19 @@ final class FlexLayout {
             }
             float em = l.fontSize[c];
             float padMain = padMain(l, c, row);
+            l.sAutoMin[c] = Float.NaN;
+            float mCross0 = marginCross(l, c, row);
+            float ca0 = crossMode == UNDEFINED ? 0 : Math.max(0, crossAvail - mCross0);
+            int cm0 = crossMode == EXACTLY && selfAlign(l.alignSelf[c], items) == A_STRETCH && crossAuto(l, c, row)
+                ? EXACTLY : sub(crossMode);
+            if (cm0 == EXACTLY) {
+                ca0 = Math.max(clamp(ca0, minMain(l, c, !row, crossOwner), maxMain(l, c, !row, crossOwner)),
+                    padMain(l, c, !row));
+            }
+            l.sCrossAvail[c] = ca0;
+            l.sCrossMode[c] = cm0;
             float b = stack ? Float.NaN : resolve(l.basis[c], l.basisUnit[c], mainOwner, em);
+            boolean measuredBasis = false;
             if (b != b) {
                 b = row ? resolve(l.width[c], l.widthUnit[c], mainOwner, em)
                     : resolve(l.height[c], l.heightUnit[c], mainOwner, em);
@@ -106,17 +159,12 @@ final class FlexLayout {
                 }
             }
             if (b != b) {
+                measuredBasis = true;
                 float mMain = marginMain(l, c, row);
-                float mCross = marginCross(l, c, row);
                 float ma = mainMode == UNDEFINED ? 0 : Math.max(0, mainAvail - mMain);
                 int mm = sub(mainMode);
-                float ca = crossMode == UNDEFINED ? 0 : Math.max(0, crossAvail - mCross);
-                int cm = crossMode == EXACTLY && selfAlign(l.alignSelf[c], items) == A_STRETCH && crossAuto(l, c, row)
-                    ? EXACTLY : sub(crossMode);
-                if (cm == EXACTLY) {
-                    ca = Math.max(clamp(ca, minMain(l, c, !row, crossOwner), maxMain(l, c, !row, crossOwner)),
-                        padMain(l, c, !row));
-                }
+                float ca = ca0;
+                int cm = cm0;
                 if (row) {
                     l.layoutNode(c, ma, mm, ca, cm, ow, oh, false, rtl);
                 } else {
@@ -126,7 +174,9 @@ final class FlexLayout {
             }
             b = Math.max(b, padMain);
             l.sBasis[c] = b;
-            l.sHypo[c] = Math.max(clamp(b, minMain(l, c, row, mainOwner), maxMain(l, c, row, mainOwner)), padMain);
+            // A basis measured from the content is at least its min-content size; a given one may be smaller.
+            float least = stack || measuredBasis ? padMain : floor(l, c, row, mainOwner, ow, oh, rtl);
+            l.sHypo[c] = Math.max(clamp(b, minMain(l, c, row, mainOwner), maxMain(l, c, row, mainOwner)), least);
         }
 
         // B: lines.
@@ -136,11 +186,13 @@ final class FlexLayout {
         int count = 0;
         float sum = 0;
         float longest = 0;
+        float widest = 0;
         for (int c = st.firstChild(s); c != UiStore.NONE; c = st.nextSibling(c)) {
             if (l.hidden[c]) {
                 continue;
             }
             float outer = l.sHypo[c] + marginMain(l, c, row);
+            widest = Math.max(widest, outer);
             if (wrap && count > 0 && mainMode != UNDEFINED && sum + mainGap + outer > mainAvail + EPSILON) {
                 pushLine(l, first, count);
                 lines++;
@@ -171,13 +223,13 @@ final class FlexLayout {
         } else {
             // A wrapping container stays within an at-most constraint, and fills it once its items wrap (fit-content,
             // as CSS and Yoga size it); others take their content's size, which may overflow.
-            float content = !wrap || mainMode != Layout.AT_MOST ? longest : lines > 1 ? mainAvail
+            float content = !wrap || mainMode != Layout.AT_MOST ? longest : lines > 1 ? Math.max(mainAvail, widest)
                 : Math.min(longest, mainAvail);
             main = Math.max(clamp(content, minMain, maxMain), 0);
         }
         for (int li = 0; li < lines; li++) {
             resolveLine(l, l.is[lineBase + li * 2], l.is[lineBase + li * 2 + 1], row, stack, main, mainGap,
-                mainOwner);
+                mainOwner, ow, oh, rtl);
         }
 
         // D: hypothetical cross sizes and line cross sizes.
@@ -250,7 +302,7 @@ final class FlexLayout {
 
     /** CSS 9.7, resolving the flexible lengths of one line into {@link Layout#sTarget}. */
     private static void resolveLine(Layout l, int first, int count, boolean row, boolean stack, float main,
-            float gap, float owner) {
+            float gap, float owner, float ow, float oh, boolean rtl) {
         UiStore st = l.store;
         float sumHypo = gap * (count - 1);
         int c = first;
@@ -319,8 +371,9 @@ final class FlexLayout {
                 } else {
                     t = b + (sumScaled > 0 ? free * l.shrink[c] * b / sumScaled : 0);
                 }
-                float clamped = Math.max(clamp(t, minMain(l, c, row, owner), maxMain(l, c, row, owner)),
-                    padMain(l, c, row));
+                // below its hypothetical size an item meets its automatic minimum (measured only then)
+                float least = t < l.sHypo[c] ? floor(l, c, row, owner, ow, oh, rtl) : padMain(l, c, row);
+                float clamped = Math.max(clamp(t, minMain(l, c, row, owner), maxMain(l, c, row, owner)), least);
                 l.sTarget[c] = clamped;
                 l.sTemp[c] = t;
                 violation += clamped - t;

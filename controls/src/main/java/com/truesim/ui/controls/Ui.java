@@ -925,6 +925,7 @@ public final class Ui {
             .padding(slot, padding.top() + bw, padding.right() + bw, padding.bottom() + bw, padding.left() + bw)
             .margin(slot, margin.top(), margin.right(), margin.bottom(), margin.left())
             .aspectRatio(slot, s.getFloat(Styles.ASPECT_RATIO))
+            .clipsContent(slot, s.get(Styles.CLIP)) // a clipping flex item may shrink below its content
             .region(slot, REGIONS[s.get(Styles.REGION).ordinal()])
             .fontSize(slot, s.getFloat(Styles.FONT_SIZE));
         if ((code & CODE_FLEX) == 0) {
