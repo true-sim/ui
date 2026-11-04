@@ -12,9 +12,10 @@ import java.util.List;
  * for {@code .tss} compilation as an installed {@link StyleKeyHolder}; the shipped themes style charts in the partials
  * {@code _charts.tss} and {@code _charts-test.tss}. Sizes are in panel units (scaled with the UI).
  *
- * <p>The parts that read them: {@code chart} (the palette, colormap and tooltip mode), {@code chart-axis},
- * {@code chart-grid} and {@code chart-grid-minor}, series parts ({@code chart-line}, {@code chart-scatter},
- * {@code chart-area}, {@code chart-bars} and the others, with the series' style name), {@code chart-legend},
+ * <p>The parts that read them: {@code chart} (the palette, colormap, tooltip mode and plot background),
+ * {@code chart-axis}, {@code chart-grid} and {@code chart-grid-minor}, series parts ({@code chart-line},
+ * {@code chart-scatter}, {@code chart-area}, {@code chart-bars} and the others, with the series' style name),
+ * {@code chart-legend},
  * {@code chart-crosshair}, {@code chart-highlight} and the drag tools.
  */
 @AllowAllocation("keys are declared once")
@@ -75,7 +76,7 @@ public final class ChartStyles implements StyleKeyHolder {
     public static final StyleKey<Boolean> MINOR_TICKS = StyleKey.of("minor-ticks", StyleTypes.bool(), true);
     /** Empty room around fitted data, as a share of its span on each side. */
     public static final StyleKey<Float> FIT_PADDING = StyleKey.of("fit-padding", StyleTypes.fraction(), 0.05f);
-    /** Where the legend sits in the plot. */
+    /** Where the legend sits: in the plot, at its best place there, or outside it. */
     public static final StyleKey<LegendPosition> LEGEND_POSITION =
         StyleKey.of("legend-position", LegendPosition.class, LegendPosition.TOP_RIGHT);
     /** The size of a legend entry's colour swatch. */
@@ -85,6 +86,13 @@ public final class ChartStyles implements StyleKeyHolder {
         StyleKey.of("chart-tooltips", TooltipMode.class, TooltipMode.MERGED);
     /** How far a tooltip keeps from the pointer. */
     public static final StyleKey<Float> TOOLTIP_OFFSET = StyleKey.number("tooltip-offset", 14, 0, 512);
+    /**
+     * The plot rectangle's fill, drawn by the chart first, under its grid (as charts look: background, grid, data),
+     * its edges on whole pixels, so a renderer can fill it as a rectangle (the engine clears it over a folded panel).
+     * ({@code chart-plot}'s own background is drawn over the grid.)
+     */
+    public static final StyleKey<Color> PLOT_BACKGROUND =
+        StyleKey.of("plot-background", StyleTypes.color(), Color.TRANSPARENT);
 
     /** Made by {@link java.util.ServiceLoader}: initialises the keys. */
     public ChartStyles() {

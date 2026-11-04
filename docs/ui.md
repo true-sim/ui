@@ -1789,6 +1789,47 @@ two scale with a thumbstick snap, cancel, rebinding the grab to the trigger, a l
 
 **Left**: pad bindings for bounds, spaces and pivots (taste); the XR `cancelDrag` B (its game default is the
 confirm setting's).
+### Group A3, chartfix (2026-11-04): local branch a3-chartfix
+
+Legends that never cover the data, and the plot's background under the grid where the renderer can clear it. Engine
+branch `ui-rest-chartfix` (from `ui-rest`).
+
+| Part | Built | Where |
+|---|---|---|
+| Legend positions | `LegendPosition` gains `BEST` (`legend-position: best`: in the plot, at the first of top right, top left, bottom left, bottom right, right, left, bottom, top with the least data under the box, as matplotlib's `'best'`; probe points `ui.chart.legendProbe` pixels apart over the box, each covered when a shown series `contains` it or has a sample within reach (`nearest`); picked again when data, ranges, size or entries change) and `OUTSIDE_TOP`, `OUTSIDE_BOTTOM`, `OUTSIDE_LEFT`, `OUTSIDE_RIGHT` (the plot gives up the box's room plus its margins: above the plot between the title and top axes, below the bottom axes, beside the outermost Y axes; rows wrap at the chart's width; beside the plot a column). The legend is measured before the chart is arranged and placed after it, in the same frame (`legendMeasure`, `legendPlace`); its box is public (`legendLeft/Top/Right/Bottom`) | `Chart`, `LegendPosition`, `ChartTunables` |
+| Themes | default: `legend-position: outside-top`, entries in a row without a box, centred over the plot under the title; test: `outside-right` (its garish box) | `_charts.tss`, `_charts-test.tss` |
+| Plot background | `plot-background` (a colour on `chart`, `ChartStyles.PLOT_BACKGROUND`): the chart draws it first, under its grid (background, grid, data, as charts look), its edges on whole pixels. The default theme moves its `rgba(#0d1117, 0.35)` from `chart-plot`'s background (drawn over the grid) to it, and its grid's alphas from 0.16 / 0.06 to 0.11 / 0.04 (what showed through the old background); the test theme `#200020`, with a square bordered `chart-plot` | `Chart`, `ChartStyles`, themes |
+| Engine | `GpuUiRenderer`: the boxes drawn right after a folded backdrop (or first of all) that are square, borderless, unclipped, without a gradient and on whole pixels of the image, opaque or translucent over the clear alone (inside the backdrop's corner and border band, over no box cleared before) are cleared as rectangles (`vkCmdClearAttachments`, `PassContext.clear`, `Commands.clearAttachments`) to what drawing them leaves; `clearedBoxes()` names them; `foldBackdrop(false)` draws them as before | engine-ui, engine-graph, engine-vulkan |
+
+#### Decisions
+
+- *Outside the plot by default*: `best` still covers data in charts whose data fill every corner (oscillating lines,
+  scatter, stacked areas: about half the gallery); a row above the plot never does, costs nothing per frame and never
+  jumps. `best` stays for legends inside the plot.
+- *The plot's background clears*: drawn under the grid and first after the folded panel, the 3790 x 950 translucent
+  box is cleared to its colour over the panel's instead of blended (the streaming chart's GPU time 0.219 to about
+  0.17 ms p50, its line chart 0.187 to about 0.135). An opaque colour in the theme, drawn, was measured too: no
+  faster (0.231 ms); without a plot background at all 0.145.
+
+#### Tests
+
+`LegendTest` (best moves away from a rising, then a falling line, never over data; falls back to the least covered
+place; each outside position takes room and never meets the plot, entries still toggle), `ChartsGalleryTest` (no
+legend box over a sample or shape of its chart in either theme, plain and posed: with the old `top-right` it fails
+on "Linked charts, three Y axes"), engine `UiRendererTest.boxesDrawnFirstOverAFoldedPanelAreClearedWithTheSamePixels`
+(a chart's panel, plot background, an opaque box: cleared, the image equal to drawing them; not cleared over the
+panel's corners, over a box cleared before, off whole pixels, rounded; cleared without a backdrop). GPU screenshots
+`final/ui-charts/charts-*.png`.
+
+#### Benchmarks
+
+engine-bench `uiBench` (RX 9070 XT, quiet machine, three runs after): the streaming chart's filled area on the GPU
+0.2192 / 0.2241 ms (p50 / p99) before, 0.166-0.174 / 0.169-0.177 after; its line 0.1866 / 0.1884 before,
+0.132-0.139 / 0.133-0.140 after. CPU rows unchanged within their run-to-run noise.
+
+#### Left
+
+- `best` places by samples, not segments: a steep line between two far samples may pass under it unseen.
 
 ### Group A3, occl (2026-11-04): local branch a3-occl
 
@@ -2052,7 +2093,7 @@ and `UiTunablesTest` in `ui-controls`.
 - A nearest-sampled image flag would let heatmaps use one texel a cell.
 - Not built: rotated text (Y axis titles sit above their axes), axis tags, heatmap value labels, histogram binning on
   the GPU, decimation of bars and candlesticks beyond `ui.chart.maxPoints`, a custom scale (ImPlot's transform
-  callbacks), legends outside the plot.
+  callbacks), ~~legends outside the plot~~ (built: chartfix).
 - `common-state` with `VersionedDoubleRing`/`VersionedFloatRing` must be released (`ui-core` asks for 0.4.0; the build
   uses `-Ptruesim.common-state=../common-state-tree`).
 

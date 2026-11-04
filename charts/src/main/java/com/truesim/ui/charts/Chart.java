@@ -133,6 +133,17 @@ public final class Chart implements Ui.FrameListener, UiListener {
     private float legendX1;
     private float legendY1;
     private int legendHover = -1;
+    private LegendPosition legendWhere = LegendPosition.NONE; // the style's position this frame
+    private LegendPosition legendBest = LegendPosition.TOP_RIGHT; // BEST's pick
+    private boolean legendStale = true; // BEST picks again (data, ranges, size or entries changed)
+    private float legendW; // the box's size
+    private float legendH;
+    private float legendReserve; // the room an outside legend takes from the plot, on its side
+    private float legendBand; // where the room above the plot starts below the title (an outside-top legend's place)
+    private final Hit legendProbe = new Hit();
+    private static final LegendPosition[] BEST_ORDER = {LegendPosition.TOP_RIGHT, LegendPosition.TOP_LEFT,
+        LegendPosition.BOTTOM_LEFT, LegendPosition.BOTTOM_RIGHT, LegendPosition.RIGHT, LegendPosition.LEFT,
+        LegendPosition.BOTTOM, LegendPosition.TOP};
 
     // hover, highlight and tooltip
     private boolean hovering;
@@ -342,6 +353,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
     public void changed() {
         changed = true;
         layoutDirty = true;
+        legendStale = true;
         ui.repaint(root);
         ui.repaint(plot);
         ui.repaint(overlay);
@@ -689,6 +701,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
         }
         if (data) {
             dataChanged = true;
+            legendStale = true;
             ui.repaint(plot);
             ui.repaint(overlay);
         }
@@ -865,21 +878,23 @@ public final class Chart implements Ui.FrameListener, UiListener {
         float h = Math.max(0, l.height(slot) - 2 * bw - (pad.top() + pad.bottom()) * s);
         long styles = styleStamp();
         boolean sized = w != width || h != height || s != scale;
+        boolean restyled = styles != styleStamp || s != scale;
         contentX = cx;
         contentY = cy;
-        if (sized || styles != styleStamp || layoutDirty || rangesMoved()) {
-            boolean restyled = styles != styleStamp || s != scale;
-            width = w;
-            height = h;
-            scale = s;
+        width = w;
+        height = h;
+        scale = s;
+        boolean reserved = legendMeasure(); // an outside legend's room, which the plot gives up
+        if (sized || restyled || layoutDirty || reserved || rangesMoved()) {
             styleStamp = styles;
             layoutDirty = false;
+            legendStale = true;
             arrange(restyled || sized);
             ui.repaint(root);
             ui.repaint(plot);
             ui.repaint(overlay);
         }
-        legend();
+        legendPlace();
         hover();
         changed = false;
     }
@@ -932,6 +947,11 @@ public final class Chart implements Ui.FrameListener, UiListener {
             gapTitle = titleBlock.height() + ts.get(Styles.MARGIN).bottom() * scale;
             top += gapTitle;
         }
+        legendBand = top;
+        if (legendWhere == LegendPosition.OUTSIDE_TOP) { // between the title and the top axes
+            gapTitle += legendReserve;
+            top += legendReserve;
+        }
         // horizontal axes: their thickness does not depend on their ticks' values
         float bottom = 0;
         float yTitles = 0;
@@ -960,6 +980,9 @@ public final class Chart implements Ui.FrameListener, UiListener {
             }
         }
         top += yTitles;
+        if (legendWhere == LegendPosition.OUTSIDE_BOTTOM) {
+            bottom += legendReserve;
+        }
         float plotH = Math.max(1, height - top - bottom);
         // vertical axes: ticks for the plot's height, then their labels' width
         float left = 0;
@@ -982,6 +1005,11 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 a.offset = right;
                 right += a.thickness + gap;
             }
+        }
+        if (legendWhere == LegendPosition.OUTSIDE_LEFT) {
+            left += legendReserve;
+        } else if (legendWhere == LegendPosition.OUTSIDE_RIGHT) {
+            right += legendReserve;
         }
         // the plot, and the horizontal axes' ticks for its width
         plotX0 = Math.min(left, width);
@@ -1165,8 +1193,11 @@ public final class Chart implements Ui.FrameListener, UiListener {
 
     // ---------------------------------------------------------------- legend
 
-    /** Lays the legend out in the plot: entries, their text, the box. */
-    private void legend() {
+    /**
+     * Shapes the legend's entries and, for a legend outside the plot, lays them out and sizes its box: the room it
+     * takes from the plot. True when that room changed (the chart is arranged again, in the same frame).
+     */
+    private boolean legendMeasure() {
         ResolvedStyle ls = styleOf(legendPart);
         LegendPosition where = ls.get(ChartStyles.LEGEND_POSITION);
         int n = 0;
@@ -1178,48 +1209,70 @@ public final class Chart implements Ui.FrameListener, UiListener {
         }
         if (where == LegendPosition.NONE || n == 0 || ui.textSystem() == null) {
             legendCount = 0;
-            return;
+            where = LegendPosition.NONE;
+        } else {
+            ensureLegend(n);
+            ResolvedStyle es = styleOf(legendEntryPart);
+            int k = 0;
+            for (int i = 0; i < series.size(); i++) {
+                Series s = series.get(i);
+                if (!s.inLegend()) {
+                    continue;
+                }
+                for (int it = 0; it < s.items(); it++) {
+                    legendSeries[k] = s;
+                    legendItem[k] = it;
+                    shape(legendText[k], s.item(it), es);
+                    k++;
+                }
+            }
+            legendCount = k;
         }
-        ensureLegend(n);
-        int k = 0;
-        ResolvedStyle es = styleOf(legendEntryPart);
+        float reserve = 0;
+        if (outside(where)) {
+            Insets margin = ls.get(Styles.MARGIN);
+            boolean across = where == LegendPosition.OUTSIDE_TOP || where == LegendPosition.OUTSIDE_BOTTOM;
+            float room = across ? width - (margin.left() + margin.right()) * scale : 0; // beside the plot: a column
+            legendEntries(ls, room);
+            reserve = across ? legendH + (margin.top() + margin.bottom()) * scale
+                : legendW + (margin.left() + margin.right()) * scale;
+        }
+        boolean moved = where != legendWhere || reserve != legendReserve;
+        legendWhere = where;
+        legendReserve = reserve;
+        return moved;
+    }
+
+    private static boolean outside(LegendPosition where) {
+        return where == LegendPosition.OUTSIDE_TOP || where == LegendPosition.OUTSIDE_BOTTOM
+            || where == LegendPosition.OUTSIDE_LEFT || where == LegendPosition.OUTSIDE_RIGHT;
+    }
+
+    /**
+     * Lays the shaped entries out relative to the box's content (in rows wrapping at {@code room} pixels of the box's
+     * width, or in a column) and sizes the box ({@link #legendW}, {@link #legendH}).
+     */
+    private void legendEntries(ResolvedStyle ls, float room) {
         float swatch = ls.getFloat(ChartStyles.SWATCH_SIZE) * scale;
         float gap = ls.getFloat(Styles.GAP) * scale;
         Insets pad = ls.get(Styles.PADDING);
-        Insets margin = ls.get(Styles.MARGIN);
         boolean row = ls.get(Styles.DIRECTION) == com.truesim.ui.style.value.Direction.ROW;
+        int k = legendCount;
         float entryH = 0;
         float widest = 0;
-        for (int i = 0; i < series.size(); i++) {
-            Series s = series.get(i);
-            if (!s.inLegend()) {
-                continue;
-            }
-            for (int it = 0; it < s.items(); it++) {
-                legendSeries[k] = s;
-                legendItem[k] = it;
-                shape(legendText[k], s.item(it), es);
-                float ew = swatch + gap + legendText[k].width();
-                entryH = Math.max(entryH, Math.max(swatch, legendText[k].height()));
-                widest = Math.max(widest, ew);
-                k++;
-            }
+        for (int i = 0; i < k; i++) {
+            entryH = Math.max(entryH, Math.max(swatch, legendText[i].height()));
+            widest = Math.max(widest, swatch + gap + legendText[i].width());
         }
-        legendCount = k;
-        float px0 = plotX0 + margin.left() * scale;
-        float px1 = plotX1 - margin.right() * scale;
-        float py0 = plotY0 + margin.top() * scale;
-        float py1 = plotY1 - margin.bottom() * scale;
         float padX = (pad.left() + pad.right()) * scale;
         float padY = (pad.top() + pad.bottom()) * scale;
-        // entries in rows (wrapping at the plot's width) or in a column, relative to the box's content
-        float room = Math.max(widest, px1 - px0 - padX);
+        float wrap = Math.max(widest, room - padX);
         float ex = 0;
         float ey = 0;
         float contentW = 0;
         for (int i = 0; i < k; i++) {
             float ew = swatch + gap + legendText[i].width();
-            if (row && ex > 0 && ex + ew > room) {
+            if (row && ex > 0 && ex + ew > wrap) {
                 ex = 0;
                 ey += entryH + gap;
             }
@@ -1235,30 +1288,136 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 ey += entryH + gap;
             }
         }
-        float boxW = contentW + padX;
-        float boxH = (k == 0 ? 0 : legendRect[(k - 1) * 4 + 3]) + padY;
-        float bx = switch (where) {
-            case TOP_LEFT, LEFT, BOTTOM_LEFT -> px0;
-            case TOP, BOTTOM -> (px0 + px1 - boxW) * 0.5f;
-            default -> px1 - boxW;
-        };
-        float by = switch (where) {
-            case TOP_LEFT, TOP, TOP_RIGHT -> py0;
-            case LEFT, RIGHT -> (py0 + py1 - boxH) * 0.5f;
-            default -> py1 - boxH;
-        };
-        bx = Math.max(0, Math.min(width - boxW, bx));
-        by = Math.max(0, Math.min(height - boxH, by));
+        legendW = contentW + padX;
+        legendH = (k == 0 ? 0 : legendRect[(k - 1) * 4 + 3]) + padY;
+    }
+
+    /** Places the legend's box and its entries for this frame's plot. */
+    private void legendPlace() {
+        LegendPosition where = legendWhere;
+        if (where == LegendPosition.NONE) {
+            legendCount = 0;
+            return;
+        }
+        ResolvedStyle ls = styleOf(legendPart);
+        Insets pad = ls.get(Styles.PADDING);
+        Insets margin = ls.get(Styles.MARGIN);
+        float bx;
+        float by;
+        if (outside(where)) {
+            switch (where) {
+                case OUTSIDE_TOP -> {
+                    bx = (plotX0 + plotX1 - legendW) * 0.5f;
+                    by = legendBand + margin.top() * scale;
+                }
+                case OUTSIDE_BOTTOM -> {
+                    bx = (plotX0 + plotX1 - legendW) * 0.5f;
+                    by = height - margin.bottom() * scale - legendH;
+                }
+                case OUTSIDE_LEFT -> {
+                    bx = margin.left() * scale;
+                    by = plotY0;
+                }
+                default -> {
+                    bx = width - margin.right() * scale - legendW;
+                    by = plotY0;
+                }
+            }
+        } else {
+            legendEntries(ls, plotX1 - plotX0 - (margin.left() + margin.right()) * scale);
+            if (where == LegendPosition.BEST) {
+                if (legendStale) {
+                    legendBest = best(margin);
+                }
+                where = legendBest;
+            }
+            bx = cornerX(where, margin);
+            by = cornerY(where, margin);
+        }
+        legendStale = false;
+        bx = Math.max(0, Math.min(width - legendW, bx));
+        by = Math.max(0, Math.min(height - legendH, by));
+        if (bx != legendX0 || by != legendY0 || bx + legendW != legendX1 || by + legendH != legendY1) {
+            ui.repaint(overlay);
+        }
         legendX0 = bx;
         legendY0 = by;
-        legendX1 = bx + boxW;
-        legendY1 = by + boxH;
+        legendX1 = bx + legendW;
+        legendY1 = by + legendH;
         float ox = bx + pad.left() * scale;
         float oy = by + pad.top() * scale;
-        for (int i = 0; i < k * 4; i += 2) {
+        for (int i = 0; i < legendCount * 4; i += 2) {
             legendRect[i] += ox;
             legendRect[i + 1] += oy;
         }
+    }
+
+    /** The box's left edge at {@code where} in the plot. */
+    private float cornerX(LegendPosition where, Insets margin) {
+        float px0 = plotX0 + margin.left() * scale;
+        float px1 = plotX1 - margin.right() * scale;
+        return switch (where) {
+            case TOP_LEFT, LEFT, BOTTOM_LEFT -> px0;
+            case TOP, BOTTOM -> (px0 + px1 - legendW) * 0.5f;
+            default -> px1 - legendW;
+        };
+    }
+
+    /** The box's top edge at {@code where} in the plot. */
+    private float cornerY(LegendPosition where, Insets margin) {
+        float py0 = plotY0 + margin.top() * scale;
+        float py1 = plotY1 - margin.bottom() * scale;
+        return switch (where) {
+            case TOP_LEFT, TOP, TOP_RIGHT -> py0;
+            case LEFT, RIGHT -> (py0 + py1 - legendH) * 0.5f;
+            default -> py1 - legendH;
+        };
+    }
+
+    /**
+     * The first place of {@link #BEST_ORDER} with the least data under the box: points {@code ui.chart.legendProbe}
+     * pixels apart over it, each covered when a shown series has a shape under it or a sample within reach of it.
+     */
+    private LegendPosition best(Insets margin) {
+        LegendPosition pick = BEST_ORDER[0];
+        int least = Integer.MAX_VALUE;
+        for (LegendPosition where : BEST_ORDER) {
+            int covered = covered(cornerX(where, margin), cornerY(where, margin), least);
+            if (covered < least) {
+                least = covered;
+                pick = where;
+                if (covered == 0) {
+                    break;
+                }
+            }
+        }
+        return pick;
+    }
+
+    /** How many probe points over the box at {@code bx, by} have data at them (counting stops at {@code stop}). */
+    private int covered(float bx, float by, int stop) {
+        float step = Math.max(1, ChartTunables.LEGEND_PROBE.get() * scale);
+        int columns = Math.max(1, (int) Math.ceil(legendW / step));
+        int rows = Math.max(1, (int) Math.ceil(legendH / step));
+        float sx = legendW / columns;
+        float sy = legendH / rows;
+        float reach = (float) Math.sqrt(sx * sx + sy * sy) * 0.5f;
+        int covered = 0;
+        for (int r = 0; r < rows && covered < stop; r++) {
+            float py = by + (r + 0.5f) * sy;
+            for (int c = 0; c < columns && covered < stop; c++) {
+                float px = bx + (c + 0.5f) * sx;
+                for (int i = 0; i < series.size(); i++) {
+                    Series s = series.get(i);
+                    if (s.enabled() && (s.contains(px, py, legendProbe.clear())
+                        || s.nearest(px, py, reach, false, legendProbe.clear()))) {
+                        covered++;
+                        break;
+                    }
+                }
+            }
+        }
+        return covered;
     }
 
     @AllowAllocation("the legend grows with the series, rarely")
@@ -1289,6 +1448,26 @@ public final class Chart implements Ui.FrameListener, UiListener {
     /** How many legend entries show. */
     public int legendCount() {
         return legendCount;
+    }
+
+    /** The legend box's left edge (content-box pixels). */
+    public float legendLeft() {
+        return legendX0;
+    }
+
+    /** The legend box's top edge (content-box pixels). */
+    public float legendTop() {
+        return legendY0;
+    }
+
+    /** The legend box's right edge (content-box pixels). */
+    public float legendRight() {
+        return legendX1;
+    }
+
+    /** The legend box's bottom edge (content-box pixels). */
+    public float legendBottom() {
+        return legendY1;
     }
 
     /** Legend entry {@code i}'s series. */
@@ -1769,6 +1948,7 @@ public final class Chart implements Ui.FrameListener, UiListener {
             frameTextSeen = textVersions(0); // before recording: a glyph arriving meanwhile records again
             Canvas c = canvas;
             c.begin(list, x0, y0, -1e6f, -1e6f, 1e6f, 1e6f, opacity, scale, vertices);
+            plotBackground(c, x0, y0);
             grid(c, gridMinorPart, false);
             grid(c, gridPart, true);
             for (int i = 0; i < axes.size(); i++) {
@@ -1784,6 +1964,22 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 c.text(titleBlock, tx, 0, c.fade(ts.rgba(Styles.COLOR)));
             }
             c.end();
+        }
+
+        /**
+         * The plot's {@code plot-background}, under the grid, its edges on whole pixels (a renderer can then fill it as
+         * a rectangle rather than draw and blend it).
+         */
+        private void plotBackground(Canvas c, float ox, float oy) {
+            long fill = styleOf(root).rgba(ChartStyles.PLOT_BACKGROUND);
+            if (Rgba.a(fill) <= 0) {
+                return;
+            }
+            float bx0 = Math.round(plotX0 + ox) - ox;
+            float by0 = Math.round(plotY0 + oy) - oy;
+            float bx1 = Math.round(plotX1 + ox) - ox;
+            float by1 = Math.round(plotY1 + oy) - oy;
+            c.box(bx0, by0, bx1, by1, c.fade(fill), 0, 0, 0);
         }
 
         private void grid(Canvas c, Element part, boolean majors) {

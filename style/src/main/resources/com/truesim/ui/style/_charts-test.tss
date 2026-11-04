@@ -18,10 +18,11 @@ chart {
   chart-tooltips: per-series;
   tooltip-offset: 22px;
   cursor: pointer;
+  plot-background: #200020;
   &:focus-visible { focus-ring: 5px $lime; }
 }
 
-chart-plot { clip: true; background: box(#200020); radius: 12px; }
+chart-plot { clip: true; border: 2px rgba($cyan, 0.6); }
 
 chart-title {
   font: italic 900 16px "Comic Sans MS", "Comic Neue", cursive;
@@ -51,7 +52,7 @@ chart-grid { stroke: rgba($lime, 0.35); line-width: 2px; line-dash: 8px 4px; }
 chart-grid-minor { stroke: rgba($hot, 0.2); line-width: 1px; }
 
 chart-legend {
-  legend-position: bottom-left;
+  legend-position: outside-right;
   direction: row;
   padding: 6px 10px;
   margin: 6px;
