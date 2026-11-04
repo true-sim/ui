@@ -78,7 +78,7 @@ class LogRingTest {
         ring.log(LogLevel.INFO, null, longLine, null, 0);
         CharSequence m = ring.last().message();
         assertThat(m.length()).isEqualTo((int) ConsoleTunables.MAX_LINE.get());
-        assertThat(m.charAt(m.length() - 1)).isEqualTo('…');
+        assertThat(m.charAt(m.length() - 1)).isEqualTo('\u2026');
         ring.log(LogLevel.INFO, "a", "two\nlines\tand tab", null, 0);
         assertThat(ring.last().message().toString()).isEqualTo("two lines and tab");
         assertThat(ring.last().message().subSequence(0, 3).toString()).isEqualTo("two");

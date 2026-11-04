@@ -1,0 +1,90 @@
+// The garish test look of the developer console (_console.tss for the element types): every part and state looks
+// obviously different from the default theme.
+
+$hot: #ff00ff;
+$lime: #39ff14;
+$sun: #ffef00;
+$cyan: #00ffff;
+
+console {
+  layout: flex;
+  direction: column;
+  width: 100%;
+  height: 520px;
+  offsets: 0 -560px 0 0;
+  background: linear-gradient(0deg, #2b0040, #400040);
+  border: 6px $lime;
+  clip: true;
+  pointer-events: all;
+  transition: offsets 700ms linear;
+  &:expanded { offsets: 0 12px 0 0; }
+}
+
+console-bar { layout: flex; direction: row-reverse; align-items: center; gap: 9px; padding: 9px; background: box($cyan); }
+console-level {
+  layout: stack;
+  padding: 3px 11px;
+  radius: 0;
+  border: 3px $hot;
+  > label { font-size: 13px; line-height: 1.4; color: black; scale: 1; text-outline: 0px black; }
+  &:checked { background: box($sun); border: 3px #0000ff; }
+}
+label.console-logger { font-size: 13px; line-height: 1.4; color: white; background: box(#0000ff); padding: 2px 8px; }
+textfield.console-search { width: 180px; font-size: 13px; line-height: 1.4; padding: 2px 6px; }
+
+log-view { grow: 1; scroll-step: 23; border: 4px $sun; }
+
+log-row {
+  layout: flex;
+  direction: row;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 4px;
+  background: box(#330033);
+  &:hover { background: box($hot); }
+  label { font-size: 13px; line-height: 1.6; color: $lime; scale: 1; text-outline: 0px black; text-wrap: false; }
+  label.log-time { width: 110px; shrink: 0; color: $cyan; }
+  label.log-level { width: 70px; shrink: 0; color: $sun; }
+  label.log-logger { width: 90px; shrink: 0; clip: true; color: #ff6600; }
+  label.log-message { grow: 1; shrink: 1; width: 0px; clip: true; }
+  label.log-count { background: box($sun); color: black; padding: 0 6px; }
+  label.log-source { color: white; }
+}
+log-row[level=warn] { background: box(#665500); }
+log-row[level=error] { background: box(#0000aa); }
+log-row[level=command] { background: box(#006400); }
+
+console-input { layout: flex; direction: row-reverse; align-items: center; gap: 9px; padding: 9px; background: box($hot); }
+label.console-prompt { font-size: 15px; line-height: 1.4; color: $sun; }
+textfield.console { grow: 1; width: 0px; font-size: 15px; line-height: 1.4; padding: 3px 8px; }
+
+console-completions {
+  layout: flex;
+  direction: column;
+  min-width: 300px;
+  padding: 7px;
+  background: box($cyan);
+  border: 5px $hot;
+  radius: 0 20px 0 20px;
+  pointer-events: all;
+}
+console-hint {
+  layout: flex;
+  direction: row;
+  gap: 8px;
+  padding: 4px;
+  background: box($sun);
+  label { font-size: 13px; line-height: 1.4; color: black; scale: 1; text-outline: 0px black; }
+  label.hint-current { color: $hot; }
+}
+console-completion {
+  layout: flex;
+  direction: row-reverse;
+  gap: 14px;
+  padding: 3px 9px;
+  background: box(#008080);
+  &:selected { background: box($hot); }
+  label.completion-text { font-size: 14px; line-height: 1.4; color: white; scale: 1; text-outline: 0px black; }
+  label.completion-detail { font-size: 12px; line-height: 1.4; color: $sun; scale: 1; text-outline: 0px black; }
+}

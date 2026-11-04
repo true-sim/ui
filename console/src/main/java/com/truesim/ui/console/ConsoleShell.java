@@ -40,6 +40,7 @@ public final class ConsoleShell {
     private NodeProvider nodes;
     private ScriptSource scripts;
     private final LogSink output;
+    private java.util.function.LongSupplier clock = System::currentTimeMillis;
     private int depth;
 
     /** A shell printing to {@code output}, with the built-in commands. */
@@ -155,7 +156,18 @@ public final class ConsoleShell {
 
     /** Prints {@code text} at {@code level} ({@link LogLevel}) to the console's output. */
     public void print(int level, CharSequence text) {
-        output.log(level, LOGGER, text, null, System.currentTimeMillis());
+        output.log(level, LOGGER, text, null, clock.getAsLong());
+    }
+
+    /** Sets the clock output is stamped with (milliseconds since the epoch; tests and screenshots fix it). */
+    public ConsoleShell clock(java.util.function.LongSupplier value) {
+        clock = value;
+        return this;
+    }
+
+    /** The time output is stamped with now. */
+    public long now() {
+        return clock.getAsLong();
     }
 
     // ---------------------------------------------------------------- running

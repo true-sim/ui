@@ -92,7 +92,7 @@ public final class LogRing implements LogSink {
             buffer[i] = c == '\n' || c == '\r' || c == '\t' ? ' ' : c;
         }
         if (n < text.length() && n > 0) {
-            buffer[n - 1] = '…'; // cut: an ellipsis says so
+            buffer[n - 1] = '\u2026'; // cut: an ellipsis says so
         }
         return n;
     }
