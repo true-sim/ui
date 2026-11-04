@@ -1,6 +1,7 @@
 package com.truesim.ui.scene;
 
 import com.truesim.scene.core.Mobility;
+import com.truesim.scene.core.PickMesh;
 import com.truesim.testing.AllocationAssertions;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.Element;

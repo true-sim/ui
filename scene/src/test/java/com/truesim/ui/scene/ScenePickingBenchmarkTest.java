@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.truesim.scene.core.Mobility;
 import com.truesim.scene.core.NodeHandle;
+import com.truesim.scene.core.PickMesh;
 import com.truesim.ui.core.event.Interaction;
 import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiInput;

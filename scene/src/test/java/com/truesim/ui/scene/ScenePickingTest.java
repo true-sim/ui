@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 import com.truesim.scene.core.Mobility;
 import com.truesim.scene.core.NodeHandle;
+import com.truesim.scene.core.PickMesh;
+import com.truesim.scene.core.Pickable;
 import com.truesim.ui.controls.basic.Controls;
 import com.truesim.ui.controls.basic.Menu;
 import com.truesim.ui.core.Element;
@@ -181,7 +183,7 @@ class ScenePickingTest {
         r.picking.remove(car); // the wheel's element goes back up
         assertThat(r.picking.element(wheel).parent()).isNotNull();
         assertThat(r.picking.has(car)).isFalse();
-        assertThat(r.scene.layers(car) & SceneRig.INTERACTIVE.mask()).isZero();
+        assertThat(r.scene.components().has(car, Pickable.TYPE)).as("the pickable it was given goes").isFalse();
         seen.clear();
         r.click(400, 300);
         assertThat(seen).containsExactly("wheel true");
@@ -227,9 +229,9 @@ class ScenePickingTest {
     void customNarrowPhasesDecideAndNodesWithoutComponentsCostNothing() {
         SceneRig r = rig();
         long sphere = r.box(0, 0, -10, 1, Mobility.STATIC);
-        long plain = r.box(0, 0, -8, 1, Mobility.STATIC); // no component: not on the layer
-        long stray = r.box(0, 0, -9, 1, Mobility.STATIC); // on the layer, but no component
-        r.scene.setLayers(stray, SceneRig.INTERACTIVE.mask());
+        long plain = r.box(0, 0, -8, 1, Mobility.STATIC); // not pickable: never tested
+        long stray = r.box(0, 0, -9, 1, Mobility.STATIC); // pickable, but no interactive: not the UI's
+        r.scene.components().set(stray, Pickable.TYPE, Pickable.bounds());
         List<Long> hits = new ArrayList<>();
         r.picking.add(sphere, Interactive.of(EventType.PRESS, e -> hits.add(r.picking.node(e))).shape(
             (node, box, ox, oy, oz, dx, dy, dz, max) -> com.truesim.common.math.geometry.Intersections.raySphere(ox,
@@ -456,7 +458,8 @@ class ScenePickingTest {
         assertThat(r.picking.ui()).isSameAs(r.ui);
         assertThat(r.picking.scene()).isSameAs(r.scene);
         assertThat(r.picking.index()).isSameAs(r.index);
-        assertThat(r.picking.interactiveLayer()).isEqualTo(SceneRig.INTERACTIVE);
+        assertThat(r.picking.picker().scene()).isSameAs(r.scene);
+        assertThat(r.picking.pickLayers(1).pickLayers()).isOne();
         assertThat(r.ui.tunables()).contains(ScenePicking.SCENE_HITS, ScenePicking.RAY_LENGTH);
     }
 }

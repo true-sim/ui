@@ -3,7 +3,6 @@ package com.truesim.ui.scene;
 import com.truesim.common.state.ChangeClock;
 import com.truesim.scene.core.Mobility;
 import com.truesim.scene.core.SceneGraph;
-import com.truesim.scene.core.SceneLayer;
 import com.truesim.scene.core.SpatialIndex;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.input.Pointer;
@@ -19,9 +18,6 @@ import com.truesim.ui.text.TextSystem;
  * update.
  */
 public final class SceneRig {
-
-    /** The layer interactive nodes are on. */
-    public static final SceneLayer INTERACTIVE = SceneLayer.of("interactive", 5);
 
     public final Ui ui;
     public final ChangeClock clock = new ChangeClock();
@@ -47,7 +43,7 @@ public final class SceneRig {
         this.width = width;
         this.height = height;
         view.perspective(Math.toRadians(60), 0.1, 10_000).viewport(0, 0, width, height);
-        this.picking = new ScenePicking(ui, scene, index, INTERACTIVE).mainView(view);
+        this.picking = new ScenePicking(ui, scene, index).mainView(view);
     }
 
     /** A node with a box of half size {@code half} at {@code x, y, z}. */

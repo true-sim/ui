@@ -363,7 +363,7 @@ engine  (engine-input, engine-ui, …)  depends on ui and scene
 | `ui-props-processor` | (build time) | The annotation processor that generates metadata and lenses. |
 | `ui-console` | ui-controls | Console model and widget: commands, typed arguments, completion, history, log ring (fed through an interface). |
 | `ui-profiler` | ui-charts | The profiler's views over a recording the engine fills: the frame graph overlay, the timeline, flame graph, zone table and counters; exports to its own format and Chrome trace JSON. |
-| `ui-scene` | ui-core, scene-core | The bridge to scene graphs: the `Interactive` component (a scene-core component store, D46), scene picking through `SpatialIndex`, the mesh triangle BVH for the narrow phase, world-panel nodes. |
+| `ui-scene` | ui-core, scene-core | The bridge to scene graphs: the `Interactive` component, routing the scene's picking model (scene-core's `ScenePicker` over `Pickable` components, D46) into UI elements, world-panel nodes. |
 | `ui-testkit` | ui-core | Synthetic pointers and commands, draw-list golden helpers, a headless frame loop, allocation checks (test scope). |
 
 **Engine side** (native code, GPU, plugins, sync; depends on `ui`):
@@ -679,19 +679,25 @@ They are kept in a fixed-size array, and a pointer's events are reused objects.
    alpha mask optional). Cost: microseconds.
 2. **World UI panels**: the ray against each panel's plane (panels are few, kept in a list or in `SpatialIndex` on a
    `UI_PANEL` layer), then the local 2D point, then step 1 on that panel's tree.
-3. **Scene objects**: `SpatialIndex.raycast(..., INTERACTIVE.mask(), hit)` with the bounds BVH. Only nodes with an
-   `Interactive` component are on the interactive layer, so **objects without listeners cost nothing**.
-4. **Narrow phase**, chosen per `Interactive` component (UI5):
-   - `BOUNDS` (box or sphere): free;
-   - `MESH`: the ray against a per-mesh triangle BVH on the CPU, built lazily from mesh data and kept with the mesh
-     asset;
-   - `GPU`: pixel-precise through an ID buffer or a ray query against the TLAS, with one frame of delay, offered only
-     where CPU data does not exist (skinned, displaced, alpha-tested), and flagged.
-5. Results are merged by distance. Screen layers win by layer order, as in Lemur where GUI goes before the scene.
+3. **Scene objects** (changed 2026-11-04: picking moved out of the UI): the scene's engine-independent picking model,
+   scene-core's `ScenePicker` over `Pickable` components (D46), which the engine's scene interaction uses too. Only
+   pickable nodes are tested, so **objects that are not pickable cost nothing** beyond the index's box tests; a frame's
+   picks are kept per ray, so the UI and the engine picking one pointer cast its ray once.
+4. **Narrow phase**, chosen per `Pickable` (UI5; an `Interactive` sets one unless its node has one):
+   - `BOUNDS`: free;
+   - `MESH`: the ray against a per-mesh triangle BVH on the CPU (scene-core's `PickMesh`, built lazily, kept with the
+     mesh asset by scene-render's `PickMeshes`), or the node's renderable's mesh (`RenderablePicking`), skinned meshes
+     posed on the CPU against their joints as they are this frame (no delay);
+   - `CUSTOM`: a test of the game's own;
+   - GPU ID picking (`GpuPicking` in the engine) stays an opt-in with its frame of delay, never the default.
+5. Results are merged by distance. Screen layers win by layer order, as in Lemur where GUI goes before the scene; then
+   gizmo handles, then world panels and scene objects by distance.
 
 The pointer's target is the nearest hit with a listener, found by walking up the element tree or the scene-graph
-parents (Lemur's `findHitTarget`). Only nodes with an `Interactive` component take part, a sparse set in scene-core
-(D46).
+parents (Lemur's `findHitTarget`). A pickable node hit stands for its nearest scene-graph ancestor (or itself) with an
+`Interactive`, so a model's parts route to the model; one with none is not the UI's (the engine's scene interaction
+routes it to its own listeners). Tooltips, context menus and drag and drop between the UI and the world stay UI
+features of `Interactive`.
 
 **Events**: enter, exit, move, press, release, click (with count, so double-click), long press, context (right click,
 long press, or the context action), wheel and scroll, drag start, drag, drag end, drop enter, drop over, drop leave,
@@ -1367,7 +1373,7 @@ All measured in `engine-bench` (JMH and GPU timestamps) on the reference machine
 | `ListView` of 1,000,000 rows, sorted and filtered view, 100 changes per frame | **≤ 0.5 ms** |
 | `TableView` of 100,000 rows × 20 columns, scrolling | **≤ 0.3 ms** CPU |
 | Picking per pointer per frame, 100,000-node scene, 1% interactive, mixed static and dynamic | **≤ 20 µs** (bounds), **≤ 50 µs** (mesh narrow phase on the hit candidates) |
-| Picking cost of a node without an `Interactive` component | **0** (not in the interactive layer) |
+| Picking cost of a node that is not pickable | **0** beyond the index's box test (no narrow phase) |
 | Screen UI hit test per pointer | **≤ 5 µs** |
 | Line chart: 1,000,000 points streaming at 1,000 points per frame, 4K width: CPU (decimation) | **≤ 0.5 ms**; GPU **≤ 0.2 ms** |
 | Line chart: 10,000,000 points, zoom and pan at frame rate | **≤ 1 ms** CPU (pyramid) |
@@ -1760,6 +1766,15 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Scene picking out of the UI (2026-11-04): local branch `picking` (scene, ui, engine)
+
+Picking is scene data now: scene-core's `Pickable`, `Selected` and `Hovered` components and `ScenePicker` (the narrow
+phase and `PickMesh` moved there from ui-scene; `PickMeshes` from engine-ui to scene-render), and the engine's scene
+interaction service drives it each frame for every pointer. `ScenePicking` routes the picker's hits into its elements:
+`new ScenePicking(ui, picker)` (or `(ui, graph, index)`), the interactive layer is gone (`pickLayers(mask)` filters
+pick layers instead), `Interactive.mesh` takes any `PickGeometry`, and a pickable node routes to its nearest
+interactive ancestor. Behaviour kept: pick order, routing, pass-through, capture, hover, clicks, long presses, context
+menus, tooltips, drag and drop.
 ### Profiler (2026-11-04): local branches `profiler` (ui and engine), not yet in CI
 
 The in-game profiler's views as the new module `ui-profiler` (directory `profiler`, package `com.truesim.ui.profiler`,

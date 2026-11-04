@@ -6,6 +6,7 @@ import static org.assertj.core.data.Offset.offset;
 
 import com.truesim.common.state.ChangeClock;
 import com.truesim.scene.core.NodeHandle;
+import com.truesim.scene.core.PickMesh;
 import com.truesim.scene.core.SceneGraph;
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.style.tss.Tss;
