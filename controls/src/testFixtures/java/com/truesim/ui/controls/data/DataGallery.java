@@ -205,7 +205,8 @@ public final class DataGallery {
         Element canvas = ui.panel("box-canvas");
         canvas.semantics(com.truesim.ui.core.Role.GROUP, "Canvas");
         ui.styles().inline(canvas.slot(), InlineStyle.builder()
-            .set(Styles.LAYOUT, com.truesim.ui.style.value.LayoutKind.NONE).build());
+            .set(Styles.LAYOUT, com.truesim.ui.style.value.LayoutKind.NONE).set(Styles.WIDTH, Length.px(260))
+            .set(Styles.HEIGHT, Length.px(100)).build());
         boolean[] squares = new boolean[12];
         Element[] squareElements = new Element[squares.length];
         for (int i = 0; i < squares.length; i++) {
@@ -253,7 +254,7 @@ public final class DataGallery {
             squares[i] = true;
             squareElements[i].state(com.truesim.ui.core.UiState.SELECTED, true);
         }
-        root.add(sized(ui, canvas, 260, 100));
+        root.add(canvas);
 
         row.selection().select(1, cards.get(1));
         row.selection().toggle(2, cards.get(2));

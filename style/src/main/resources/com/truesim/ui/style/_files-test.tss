@@ -31,7 +31,8 @@ list-view.file-places { width: 190px; grow: 0; shrink: 0; align-self: stretch; }
 file-views { layout: flex; direction: column; grow: 1; shrink: 1; min-width: 0px; }
 table-view.file-table, list-view.file-list { grow: 1; shrink: 1; min-height: 0px; }
 file-name, file-place { layout: flex; direction: row-reverse; align-items: center; gap: 9px; }
-label#date { color: $hot; }
+label#date { color: #0000ff; font-size: 10px; }
+dialog.file-confirm { background: box(#003300); }
 file-footer { layout: flex; direction: row; align-items: center; gap: 13px; background: box($lime); padding: 3px; }
 label.file-name-label { color: #0000ff; }
 textfield.file-name-field { grow: 1; width: auto; }

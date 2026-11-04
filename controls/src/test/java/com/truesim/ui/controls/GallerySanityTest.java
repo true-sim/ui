@@ -115,6 +115,30 @@ class GallerySanityTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"default", "test"})
+    void filesGallery(String theme) {
+        check("files gallery", theme, ui -> {
+            com.truesim.ui.controls.files.FilesGallery.registerIcons(ui);
+            com.truesim.ui.controls.files.FilesGallery.build(ui);
+            settle(ui, 1280, 720);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
+    void filesGalleryWithItsDialogs(String theme) {
+        check("files gallery with dialogs", theme, ui -> {
+            com.truesim.ui.controls.files.FilesGallery.registerIcons(ui);
+            com.truesim.ui.controls.files.FilesGallery g = com.truesim.ui.controls.files.FilesGallery.build(ui);
+            settle(ui, 1280, 720);
+            g.openDialog();
+            settle(ui, 1280, 720);
+            g.confirmOverwrite();
+            settle(ui, 1280, 720);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
     void windowsScene(String theme) {
         check("windows scene", theme, ui -> WindowsScene.build(ui, 1280, 720).frames(60));
     }

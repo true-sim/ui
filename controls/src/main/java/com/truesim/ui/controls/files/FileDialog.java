@@ -151,6 +151,7 @@ public final class FileDialog {
             FileEntry existing = browser.model().stat(paths.get(0));
             confirm = Dialog.confirm(controls, "Replace " + existing.name() + "?",
                 existing.name() + " exists already. Replace it?", "Replace", "Cancel");
+            confirm.element().style("file-confirm");
             confirm.onClose(r -> {
                 if (r == 1) {
                     finish(paths);

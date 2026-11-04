@@ -248,7 +248,7 @@ tree-loading {
   > label#loading { @include text(caption); color: var(--fg-muted); font-style: italic; }
 }
 
-tree-loading-indicator { layout: flex; direction: row; align-items: center; gap: 3px; width: 8px; }
+tree-loading-indicator { layout: flex; direction: row; align-items: center; gap: 3px; }
 tree-loading-dot {
   size: 4px;
   radius: 999px;

@@ -164,7 +164,7 @@ public final class FileBrowser implements Ui.FrameListener, UiListener {
         nameColumn.editorInPlace(TextCellEditor.create("Name"), FileEntry::name, this::rename);
         table.add(nameColumn);
         table.add(Column.ofRow("Size", new FileCells.Size(), FileCells.BY_SIZE).width(90));
-        table.add(Column.ofRow("Modified", new FileCells.Modified(), FileCells.BY_MODIFIED).width(140));
+        table.add(Column.ofRow("Modified", new FileCells.Modified(), FileCells.BY_MODIFIED).width(150));
         table.add(Column.ofRow("Type", new FileCells.Type("Folder", "file"), FileCells.BY_TYPE).width(110));
         table.baseOrder(FileCells.FOLDERS_FIRST);
         table.sort(nameColumn, true, false);

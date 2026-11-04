@@ -20,6 +20,8 @@ image.icon#favourite { image: "icons/favourite" var(--fg) contain; }
 image.icon#recent { image: "icons/recent" var(--fg) contain; }
 
 dialog.file-dialog { max-width: 820px; width: 780px; }
+// the overwrite question shows over the file dialog's text: opaque, so the text under it does not show through
+dialog.file-confirm { background: box(#1d232b); }
 
 file-browser {
   layout: flex;
