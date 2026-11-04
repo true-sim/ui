@@ -2,10 +2,13 @@ package com.truesim.ui.scene;
 
 import com.truesim.annotations.AllowAllocation;
 import com.truesim.scene.core.ComponentStore;
+import com.truesim.scene.core.NodeEvent;
 import com.truesim.scene.core.NodeHandle;
 import com.truesim.scene.core.PickHits;
 import com.truesim.scene.core.Pickable;
+import com.truesim.scene.core.RoutedListener;
 import com.truesim.scene.core.SceneGraph;
+import com.truesim.scene.core.SceneEventType;
 import com.truesim.scene.core.ScenePicker;
 import com.truesim.scene.core.SpatialIndex;
 import com.truesim.ui.controls.Ui;
@@ -21,6 +24,7 @@ import com.truesim.ui.core.event.DataFormat;
 import com.truesim.ui.core.event.DragSession;
 import com.truesim.ui.core.event.EventType;
 import com.truesim.ui.core.event.Interaction;
+import com.truesim.ui.core.event.Phase;
 import com.truesim.ui.core.event.UiEvent;
 import com.truesim.ui.core.event.UiListener;
 import com.truesim.ui.core.event.WorldPicking;
@@ -92,6 +96,26 @@ public final class ScenePicking implements WorldPicking {
     private final ComponentStore<Pickable> pickables;
     private final Layer proxyLayer;
     private int pickLayers = -1;
+    private final ComponentStore<RoutedListener> routedStore;
+    private boolean routed; // the scene's router (the engine's scene interaction) routes nodes' events
+    private final RoutedListener.Listener routedListener = this::routed;
+    private NodeEvent routing; // the routed event being delivered, for hitPoint
+
+    /** The UI's event types by the scene's, and back: the same names. */
+    private static final EventType[] UI_TYPES = new EventType[SceneEventType.count()];
+    private static final int[] SCENE_BITS = new int[EventType.count()];
+
+    static {
+        for (int i = 0; i < UI_TYPES.length; i++) {
+            UI_TYPES[i] = EventType.valueOf(SceneEventType.of(i).name());
+            SCENE_BITS[UI_TYPES[i].ordinal()] = SceneEventType.of(i).bit();
+        }
+    }
+
+    private static final Phase[] PHASES = Phase.values();
+    /** The types whose routes keep the proxies' hover and pressed states. */
+    private static final int STATE_TYPES = SceneEventType.ENTER.bit() | SceneEventType.EXIT.bit()
+        | SceneEventType.PRESS.bit() | SceneEventType.RELEASE.bit();
 
     // the interactive nodes: a sparse set by node slot
     private int[] sparse = new int[0];
@@ -169,6 +193,7 @@ public final class ScenePicking implements WorldPicking {
         this.picker = scenePicker;
         this.scene = scenePicker.scene();
         this.pickables = scene.components().store(Pickable.TYPE);
+        this.routedStore = scene.components().store(RoutedListener.TYPE);
         Layer existing = ui.layerStack().find(LAYER);
         this.proxyLayer = existing != null ? existing : ui.layerStack().add(LAYER, -1000);
         proxyLayer.input(Layer.Input.NONE); // never hit on the screen: only through rays
@@ -233,6 +258,9 @@ public final class ScenePicking implements WorldPicking {
                 }
             }
         }
+        if (routed) {
+            route(d);
+        }
         Pickable shape = interactive.pickable();
         ownPickable[d] = shape != null || !pickables.has(node);
         if (shape != null || !pickables.has(node)) {
@@ -274,6 +302,102 @@ public final class ScenePicking implements WorldPicking {
         if (own && scene.contains(node)) {
             pickables.remove(node);
         }
+        if (scene.contains(node)) {
+            routedStore.remove(node);
+        }
+    }
+
+    // ================================================================ one route with the scene's router
+
+    /**
+     * Hands interactive nodes' events to the scene's router (the engine's scene interaction) from now on, or takes
+     * them back: while on, the scene's router routes pointers on scene nodes in one route with its own listeners
+     * (scene-core's {@link RoutedListener}), and each interactive node's UI listeners hear their part of it here (a
+     * consume on either side stops both, pass-through and capture are the router's); the UI keeps its screen layers,
+     * gizmo handles and world panels, and the drags of its own sessions (a node's payload dragged into the UI, a UI
+     * payload dropped on a node). Returns this.
+     */
+    @AllowAllocation("switched when the UI is set up")
+    public ScenePicking routedByScene(boolean on) {
+        routed = on;
+        for (int d = 0; d < count; d++) {
+            if (on) {
+                route(d);
+            } else if (scene.contains(nodes[d])) {
+                routedStore.remove(nodes[d]);
+            }
+        }
+        return this;
+    }
+
+    /** Whether the scene's router routes interactive nodes' events. */
+    public boolean routedByScene() {
+        return routed;
+    }
+
+    /** Registers entry {@code d}'s listeners with the scene's router, as one set. */
+    @AllowAllocation("interactive nodes are added when a scene is built")
+    private void route(int d) {
+        Interactive c = components[d];
+        int mask = STATE_TYPES;
+        int capture = 0;
+        for (int i = 0; i < c.count; i++) {
+            int bits = sceneBits(c.masks[i]);
+            if (c.capture[i]) {
+                capture |= bits;
+            } else {
+                mask |= bits;
+            }
+        }
+        if (c.tooltip != null || c.contextMenu != null || c.dragFormat != null || c.dropFormats.length > 0) {
+            mask |= sceneBits(HOOK_MASK);
+        }
+        routedStore.set(nodes[d], RoutedListener.of(mask, capture, routedListener));
+    }
+
+    private static int sceneBits(int uiMask) {
+        int bits = 0;
+        for (int i = 0; i < SCENE_BITS.length; i++) {
+            bits |= (uiMask & (1 << i)) != 0 ? SCENE_BITS[i] : 0;
+        }
+        return bits;
+    }
+
+    /** A routed event at an interactive node: its proxy's state kept, its UI listeners called for the phase. */
+    private void routed(NodeEvent e) {
+        int d = dense(e.currentNode());
+        if (d < 0) {
+            return;
+        }
+        int slot = proxies[d].slot();
+        int td = interactiveOf(e.target());
+        int target = td >= 0 ? proxies[td].slot() : slot;
+        if (e.phase() == NodeEvent.Phase.TARGET) {
+            switch (e.type()) {
+                case ENTER -> store.state(slot, UiState.HOVER, true);
+                case EXIT -> store.state(slot, UiState.HOVER, false);
+                case PRESS -> store.state(slot, UiState.PRESSED, true);
+                case RELEASE -> store.state(slot, UiState.PRESSED, false);
+                default -> {
+                }
+            }
+        }
+        NodeEvent outer = routing;
+        routing = e;
+        try {
+            if (interaction.deliver(UI_TYPES[e.type().ordinal()], PHASES[e.phase().ordinal()], target, slot,
+                e.pointerId(), e.button(), e.clickCount(), e.scrollX(), e.scrollY())) {
+                e.consume();
+            }
+        } finally {
+            routing = outer;
+        }
+    }
+
+    /** Whether pointer {@code pointerId} drags a session of the UI's (its drops are the UI's to route). */
+    private boolean uiDrag(int pointerId) {
+        DragSession s = interaction.dragSession(pointerId);
+        return s != null && s.active();
     }
 
     /** Whether {@code node} is interactive. */
@@ -613,10 +737,11 @@ public final class ScenePicking implements WorldPicking {
                 found++;
             }
         }
+        boolean nodes3d = !routed || uiDrag(pointer.id()); // routed by the scene, but for the UI's own drags
         int depth = Math.min((int) SCENE_HITS.get(), sceneHits.capacity());
         PickHits hits3d = depth == sceneHits.capacity() ? sceneHits : depthHits(depth);
         int picked = picker.pick(ray[0], ray[1], ray[2], ray[3], ray[4], ray[5], reach, pickLayers, hits3d);
-        for (int k = 0; k < picked && found < MAX; k++) {
+        for (int k = 0; nodes3d && k < picked && found < MAX; k++) {
             int d = interactiveOf(hits3d.node(k));
             if (d >= 0 && !candidate(proxies[d].slot(), found)) {
                 candidateSlots[found] = proxies[d].slot();
@@ -763,6 +888,9 @@ public final class ScenePicking implements WorldPicking {
      * it, a screen element).
      */
     public boolean hitPoint(UiEvent event, double[] out) {
+        if (routing != null && routing.pointerId() == event.pointerId()) {
+            return routing.hitPoint(out);
+        }
         int p = slotOf(event.pointerId());
         if (p < 0 || pickedFrame[p] != frame || !hasRay[p]) {
             return false;
@@ -783,6 +911,9 @@ public final class ScenePicking implements WorldPicking {
 
     /** The distance along the ray of {@code event}'s pointer to its target, or infinity (see {@link #hitPoint}). */
     public double hitDistance(UiEvent event) {
+        if (routing != null && routing.pointerId() == event.pointerId()) {
+            return routing.hitDistance();
+        }
         int p = slotOf(event.pointerId());
         if (p >= 0 && pickedFrame[p] == frame && hasRay[p]) {
             for (int i = 0; i < worldCounts[p]; i++) {
@@ -814,7 +945,7 @@ public final class ScenePicking implements WorldPicking {
      */
     public boolean claimed(int pointerId) {
         int p = slotOf(pointerId);
-        if (p < 0 || pickedFrame[p] != frame || !hasRay[p] || taken[p]) {
+        if (p < 0 || pickedFrame[p] != frame || !hasRay[p] || taken[p] || uiDrag(pointerId)) {
             return true;
         }
         Element captured = interaction.captured(pointerId);

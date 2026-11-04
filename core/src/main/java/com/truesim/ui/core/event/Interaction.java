@@ -1331,6 +1331,49 @@ public final class Interaction {
     }
 
     /**
+     * Delivers an event another router routed to the listeners of element {@code current} for {@code phase}: the
+     * engine's scene interaction routes scene nodes in one route with its own listeners, and the UI's scene bridge hands
+     * each of its nodes' events here, so a consume on either side stops both. The event is pointer {@code pointerId}'s
+     * as this interaction knows it (its place, buttons, modifiers), for {@code target}, with {@code button},
+     * {@code clickCount} and the scroll given. A drag session started by a {@link EventType#DRAG_START} listener makes
+     * this interaction take the pointer's drag over: captured to {@code current}, dragging, its drop targets found by
+     * picking from then on, as for a drag it routed itself. Returns whether a listener consumed it.
+     */
+    public boolean deliver(EventType type, Phase phase, int target, int current, int pointerId, int button,
+        int clicks, float scrollX, float scrollY) {
+        UiEvent e = begin(type, target);
+        try {
+            int p = indexOfPointer(pointerId);
+            if (p >= 0) {
+                pointerFields(e, p, lastX[p], lastY[p], lastButtons[p]);
+            }
+            e.button = button;
+            e.clickCount = clicks;
+            e.scrollX = scrollX;
+            e.scrollY = scrollY;
+            e.phase = phase;
+            e.current = current;
+            if (phase == Phase.TARGET) {
+                call(current, e, true);
+                if (!e.consumed) {
+                    call(current, e, false);
+                }
+            } else {
+                call(current, e, phase == Phase.CAPTURE);
+            }
+            if (type == EventType.DRAG_START && p >= 0 && sessions[p].active() && !dragging[p]) {
+                capture(p, current);
+                pressButton[p] = Pointer.PRIMARY;
+                dragging[p] = true;
+                store.state(current, UiState.DRAGGING, true);
+            }
+            return e.consumed;
+        } finally {
+            end();
+        }
+    }
+
+    /**
      * Sends a custom event of {@code type} to {@code element} along the usual route (a control raising CLICK for its
      * own reasons, a test); returns whether a listener consumed it.
      */
