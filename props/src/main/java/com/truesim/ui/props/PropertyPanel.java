@@ -274,7 +274,9 @@ public final class PropertyPanel<T> implements Ui.FrameListener {
     /** A row wrote {@code before}'s replacement into the root: an edit at {@code editPath}. */
     void edited(PropertyRow row, String operation, String editPath, Object before) {
         Object after = top.get();
-        Object rootBefore = row.fromRoot().with(after, before);
+        // A setter writes in place: rebuilding the root before the edit would write the old value back into the very
+        // object just edited. Such a root has no before of its own; its owner undoes it (the settings, a node).
+        Object rootBefore = row.property().inPlace() ? after : row.fromRoot().with(after, before);
         record(operation, editPath, rootBefore, after);
     }
 
