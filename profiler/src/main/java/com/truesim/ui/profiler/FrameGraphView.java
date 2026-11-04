@@ -241,7 +241,7 @@ public final class FrameGraphView implements Ui.FrameListener {
 
     /** {@code v} rounded up to 1, 2, 2.5 or 5 times a power of ten. */
     static double nice(double v) {
-        double p = Math.pow(10, Math.floor(Math.log10(v)));
+        double p = com.truesim.common.math.Maths.pow(10, Math.floor(com.truesim.common.math.Maths.log10(v)));
         double m = v / p;
         double n = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10;
         return n * p;

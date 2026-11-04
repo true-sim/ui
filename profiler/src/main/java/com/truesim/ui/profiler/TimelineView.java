@@ -356,7 +356,7 @@ public final class TimelineView extends PaintedView {
 
     /** A time step of 1, 2 or 5 times a power of ten nanoseconds, at least {@code ns}. */
     static double niceStep(double ns) {
-        double p = Math.pow(10, Math.floor(Math.log10(Math.max(1, ns))));
+        double p = com.truesim.common.math.Maths.pow(10, Math.floor(com.truesim.common.math.Maths.log10(Math.max(1, ns))));
         double m = ns / p;
         return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
     }
@@ -545,7 +545,7 @@ public final class TimelineView extends PaintedView {
                     repaint();
                     return;
                 }
-                zoom(time(Math.max(left, x), left, width), Math.pow(1 - ProfilerTunables.ZOOM_STEP.get(), notches));
+                zoom(time(Math.max(left, x), left, width), com.truesim.common.math.Maths.pow(1 - ProfilerTunables.ZOOM_STEP.get(), notches));
             }
             case PRESS -> {
                 if ((event.buttons() & Pointer.PRIMARY) == 0) {

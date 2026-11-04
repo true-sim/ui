@@ -30,10 +30,10 @@ public final class Units {
      */
     public static StringBuilder time(StringBuilder out, long nanos, double step) {
         if (step >= 1e9) {
-            int d = (int) Math.max(0, Math.min(3, -Math.floor(Math.log10(step / 1e9))));
+            int d = (int) Math.max(0, Math.min(3, -Math.floor(com.truesim.common.math.Maths.log10(step / 1e9))));
             return Format.append(out, nanos / 1e9, d).append(" s");
         }
-        int d = (int) Math.max(0, Math.min(6, -Math.floor(Math.log10(step / 1e6))));
+        int d = (int) Math.max(0, Math.min(6, -Math.floor(com.truesim.common.math.Maths.log10(step / 1e6))));
         return Format.append(out, nanos / 1e6, d).append(" ms");
     }
 
