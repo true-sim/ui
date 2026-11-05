@@ -284,6 +284,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         handlePart = ui.part(element, "selection-handle", null);
         ui.paint(element, this);
         element.semantics(Role.TEXT_FIELD, label);
+        element.accessibleValue(new FieldValue());
         interaction.textInput(element, true);
         interaction.textInputKind(element, multiLine ? TextInputHost.MULTILINE : TextInputHost.TEXT);
         int mask = EventType.COMMAND.bit() | EventType.TEXT.bit() | EventType.COMPOSITION.bit()
@@ -2370,5 +2371,35 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     /** The span index of the link under a pointer, or -1 (for tests and tooltips). */
     public int hoveredLink() {
         return hoveredLink;
+    }
+
+    /** The field's text for assistive technology: settable unless read only, never exposed while masked. */
+    private final class FieldValue implements com.truesim.ui.core.AccessibleValue {
+
+        @Override
+        @AllowAllocation("read when the semantics tree is taken, not per frame")
+        public String text() {
+            return mask != 0 ? "" : TextEditor.this.text().toString();
+        }
+
+        @Override
+        public boolean readOnly() {
+            return TextEditor.this.readOnly() || interaction.disabled(element.slot());
+        }
+
+        @Override
+        @AllowAllocation("an assistive tool setting a value, not per frame")
+        public boolean set(String value) {
+            if (readOnly()) {
+                return false;
+            }
+            TextEditor.this.text(value);
+            return true;
+        }
+
+        @Override
+        public boolean password() {
+            return mask != 0;
+        }
     }
 }

@@ -4,6 +4,7 @@ import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.state.VersionedDouble;
 import com.truesim.common.state.Watch;
 import com.truesim.ui.controls.anim.Visuals;
+import com.truesim.ui.core.AccessibleValue;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.UiState;
@@ -91,6 +92,7 @@ public final class Slider extends Control {
             watches[i] = models[i].watch();
             if (range) {
                 thumbs[i].semantics(Role.SLIDER, thumbNames[i]);
+                thumbs[i].accessibleValue(new ThumbValue(i));
                 focusable(thumbs[i]);
             }
         }
@@ -103,6 +105,7 @@ public final class Slider extends Control {
         }
         if (!range) {
             focusable(root);
+            root.accessibleValue(new ThumbValue(0));
         }
         listen(root, EventType.PRESS.bit() | EventType.MOVE.bit() | EventType.RELEASE.bit() | EventType.WHEEL.bit()
             | EventType.COMMAND.bit() | EventType.CLICK.bit());
@@ -456,5 +459,37 @@ public final class Slider extends Control {
         }
         event.consume();
         set(i, next);
+    }
+
+    /** A thumb's value for assistive technology: its number, settable (snapped and clamped as a drag is). */
+    private final class ThumbValue implements AccessibleValue {
+
+        private final int index;
+
+        ThumbValue(int index) {
+            this.index = index;
+        }
+
+        @Override
+        @AllowAllocation("read when the semantics tree is taken, not per frame")
+        public String text() {
+            return AccessibleValue.number(models[index].get());
+        }
+
+        @Override
+        public boolean readOnly() {
+            return ui.interaction().disabled(root.slot());
+        }
+
+        @Override
+        @AllowAllocation("an assistive tool setting a value, not per frame")
+        public boolean set(String text) {
+            double v = AccessibleValue.parse(text);
+            if (Double.isNaN(v) || readOnly()) {
+                return false;
+            }
+            Slider.this.set(index, v);
+            return true;
+        }
     }
 }
