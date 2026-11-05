@@ -1766,6 +1766,45 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Leftovers: turned text and custom chart scales (2026-11-05): local branches `leftovers-charts` (ui) and `ui-leftovers-charts` (engine)
+
+| Part | Built | Where |
+|---|---|---|
+| Rotating entries | A transform table entry may rotate (floats 4, 5: sine, cosine; `setRotation`, clockwise on the screen) and name a parent (float 6; `setTransformParent`): a *local* entry places its primitives (`scale * R * p + offset`), the clip's offset is added, then the parent places them, opacities multiplied. `DrawList.rotated(reuse, radians)` / `unrotated()` record the next primitives through a local entry under the entry in use, carrying the baked transform, about the origin of the recording space (a painter keeps the entry per list generation: recording again takes none). Readers: `drawnPoint`, `drawnBounds` (the bounds of the turned corners), `drawnRotated`, `drawnSin`/`drawnCos`; `drawnX`/`drawnY` read a rotated primitive's coordinate pairs; `drawnScale`/`drawnOpacity` compose the parent; `baked()` keeps a rotation as a rotation-only entry of its own, the coordinates turned back. Parents do not nest; clips are never rotated (a clip's rectangle is drawn by its entry's scale and offset); columns are not rotated | `ui-core` `DrawList` |
+| CPU and checks | `SoftwareGlyphRenderer` turns pixels back into a rotated glyph; `LayoutSanity` takes a turned glyph's ink (and a turned box) as the bounds of its turned rectangle | `ui-text`, `ui-testkit` |
+| Engine | `draw.slang`: `Transform` holds both stages (inner: a local entry's; outer: its parent or the entry itself), `place`/`ownCoordinates` turn and turn back; a rotated quad's corners are placed (grown in its own units), its clip cutting at the pixel; lines, paths and world panels go through the same placement; columns use the rotation-free `placeX`/`placeY`. `primitive.slang`: `TRANSFORM_SIN`, `TRANSFORM_COS`, `TRANSFORM_PARENT` (checked against `DrawList`) | engine `ui` |
+| Turned text | `text-angle` (`ChartStyles.TEXT_ANGLE`, a new `StyleTypes.angle()`: degrees, `deg`/`rad`/`turn`/`grad`, clockwise as CSS): on `chart-axis` the tick labels' angle, on `chart-axis-title` (now with the fact `side`) the title's. A turned Y title lies beside its labels, centred on the plot (no band above the plot); a turned title of an X axis below (above) its labels. Slanted labels of a horizontal axis turn about the end of their text nearest the axis line, under (over) the tick; turned labels of a vertical axis are centred on their tick; all kept within the chart. Their room across the axis is their turned boxes'; along it, the least of the turned width and the height over the sine (parallel slanted labels), which thins the ticks. A horizontal axis's turned labels' room depends on its ticks, which depend on the plot's width: the chart is laid out again in the same frame while it changes (at most three passes, then only growing). `Canvas.text(block, x, y, colour, radians, pivotX, pivotY)` records through one rotating entry per angle | `Chart`, `Canvas`, `Axis` |
+| Themes | default: Y titles `-90deg` (reading upwards), `chart.slanted` bottom labels `-40deg`; test: Y titles `90deg`, bottom labels `25deg` everywhere, `chart.slanted` `65deg` | `_charts.tss`, `_charts-test.tss` |
+| Scales | `Scale` is an interface (was an enum): `forward`, `inverse` (monotonic, increasing or decreasing), `identity`, `defaultMin/Max` (a new axis's range and the fallback for a range it cannot show), `ticks(axis, ticks, min, max, pixels, spacing, limit, minors)`, `format(axis, out, value)`. Built-ins as constants and factories: `LINEAR`, `LOG`, `SYMLOG`/`symlog(c)`, `TIME`, `CATEGORY`, `SQRT`, `power(e)` (signed), `reversed(scale)` (the maximum at the start; its scale's ticks and labels), `piecewise(values, positions)` (straight between and beyond). `Axis.scale(Scale)` changes it; `symlogConstant(c)` makes it `symlog(c)`. An axis maps the sorted transformed range, so a decreasing transform reverses it; zoom, pan, box and fit sort what it turns round | `Scale`, `BuiltinScales`, `Axis` |
+| Ticks | Public makers for a scale's own ticks: `addMajor(value)` (returns its label to append to), `addMinor`, `step(value)`, `full()`, `linear(...)`, and `adaptive(scale, ...)`, the default: nice numbers tried coarsest first (a power of ten at or above the range, then 5, 2, 1 times the next lower...), each kept where it lies the spacing from every tick kept, so a stretched part of the axis gets finer ticks and a squeezed one only the nicest; finer steps stop when a step offers more candidates than there is room for ticks; each labelled to its own step; allocation-free | `Ticks` |
+| Gallery | `ChartsGallery` (now 1600 x 1600): tile 17 "Custom scales" (X square root, Y pieces, a reversed log on the right, a game's own cube root on top), tile 18 "Turned labels and titles" (twelve month names slanted by the style name `slanted`, the Y title upwards) | `charts/src/testFixtures` |
+
+**Decisions**
+
+- *Rotation in the transform table*, not a glyph flag: glyph words are full, and arbitrary angles of any primitive come
+  for free (the shader already works out coverage in the primitive's own coordinates). A local entry under the
+  element's own keeps an animated chart's turned text moving and fading with it without the painter recording again.
+- *One entry per angle per painter*, the labels recorded where turning about the origin puts them, rather than one per
+  label (a table that would grow with every pan).
+- *Adaptive ticks by niceness first* rather than dividing the range by its average density: on a squeezed and a
+  stretched piece the nicest values win (0, 5, 10, 100 rather than 0, 20, 100).
+- *Taste*: Y titles upwards beside the labels in the default theme (as matplotlib's), the slanted label's end at its
+  tick (`rotation_mode='anchor'`), `-40deg` for the `slanted` style name.
+
+**Tests**: `DrawListTest.rotatedRecordingTurnsAboutTheOriginUnderTheEntryInUse` (placement under a parent with a baked
+shift and a clip offset, bounds, scale, opacity, baked, reuse without allocating, misuse), `StyleTypesTest` (angles),
+`ScaleTest` (every built-in and a game's own both ways; reversed: mapping, zoom, pan, box, fit, ticks, text; default
+ranges and fallbacks; adaptive ticks against what they promise over 200 random ranges of five scales: nice, ascending,
+the spacing kept, labelled; a scale's own ticks by the makers; allocation-free), `TurnedTextTest` (both themes: titles
+beside the plot and centred, slanted labels below it and inside the chart, thinned; the chart translated: its turned
+text follows; re-recording allocation-free), `ChartsGalleryTest` (LayoutSanity with the new tiles, both themes); engine
+`RotatedPrimitivesGpuTest` (a turned box and MTSDF glyph where `drawnBounds` says, the parent moving, fading and
+scaling them, a clip cutting a turned box at the pixel), `UiRendererTest` (the constants). CPU and GPU screenshots of
+the gallery in both themes agree.
+
+**Left**: clips drawn by a rotating entry, rotated columns and nested rotations are not supported (nothing records
+them); minor ticks of adaptive scales; picking does not follow drawn rotations (as with other drawn transforms).
+
 ### Scene picking out of the UI (2026-11-04): local branch `picking` (scene, ui, engine)
 
 Picking is scene data now: scene-core's `Pickable`, `Selected` and `Hovered` components and `ScenePicker` (the narrow
@@ -1863,7 +1902,8 @@ The seven areas below were built in parallel on their own branches from `a3-rema
 - Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
   and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
   in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
-  loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
+  loupe of touch selection handles, ~~rotated chart text~~ (built: leftovers); world panels drawn directly do not draw
+  paths and columns.
 - `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
 
 #### Follow-ups decided by the lead (2026-11-04)
@@ -2116,7 +2156,7 @@ is listed under Left.
 |---|---|---|
 | Model | `Chart`: any number of `Axis` objects (X at the bottom or top, Y left or right, stacked outwards), scales `LINEAR`, `LOG`, `SYMLOG` (constant per axis), `TIME` (seconds since 1970 UTC plus a zone offset), `CATEGORY` (names); ranges are versioned `AxisRange`s, so linking axes is sharing one (`Axis.link`), across charts too; a `Crosshair` (versioned) shared by charts shows the hovered X in all of them; axes can be hidden, inverted, auto-fitted (`autoFit`), kept out of fitting (`fits(false)`), followed (`follow`); series name their axes (`Series.axes`); every series, legend item, annotation and drag tool can be shown and hidden | `Chart`, `Axis`, `AxisRange`, `Crosshair` |
 | Ticks | nice numbers (1, 2, 5 times a power of ten, nearest the spacing asked for on a log scale) with minors; log decades (every n-th when narrow, 2 to 9 as minors, linear within a decade); symlog zero and signed powers thinned to the spacing; time by calendar (microseconds to seconds as nice numbers, then 1 s to 1 week, 1/2/3/6 months, nice years) with labels by the step (`mm:ss.fff`, `HH:mm:ss`, `HH:mm`, `MM-dd`, `yyyy-MM`, `yyyy`); categories within their names. Labels are text without allocation (`TickFormat`: decimals of the step, scientific beyond 1e7 or below 1e-6, Hinnant's civil dates); X labels wider than their room thin the ticks; label blocks are reused by their text, so a pan shapes only the labels coming into view | `Ticks`, `TickFormat` |
-| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it: no rotated text); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
+| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it, or turned beside its labels by `text-angle`: leftovers); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
 | New primitive | `Primitive.TRIANGLE` (kind 7): the bounding box in words 1-4, colour A, corners in words 9-14, per-edge anti-aliasing flags (`EDGE_AB`, `EDGE_BC`, `EDGE_CA`: a shape's outline anti-aliased, its shared inner edges hard); `DrawList.triangle`. Recorded through the public API only; `DrawList` changed by one method (`triangle`, using `start`/`emit` and the range transform), `Primitive` by the constants | `ui-core` |
 | Data | `Column`s by absolute index (`first`..`end`): `Columns.of` over `VersionedDoubleArray`, `VersionedFloatArray`, `VersionedDoubleRing`, `VersionedFloatRing` (appended samples visited by `changesSince`), plain `double[]`/`float[]` (`changed()`), getters with a `Versioned` trigger, and `Columns.index(start, step)` (implicit evenly spaced X) | `Column`, `Columns` |
 | Series | `line` (stairs `Step.POST/PRE/MID`, `area` to a baseline), `scatter`, `stems`, `digital` (lanes at the plot's bottom), `shaded` (band between two columns), `stackedArea`, `bars` (grouped, `stacked`, `horizontal`), `histogram` (bins, range, density, cumulative; binned on change), `histogram2d`, `heatmap` (`HeatTexture`: a `UiTextures` texture coloured by the `colormap`, cells several texels wide so linear filtering keeps them sharp), `pie` (a donut by `donut-hole`, share labels), `candlestick` (or `ohlc`), `errorBars` (vertical or horizontal), `infiniteLines`, `image`, `text`, `annotate` (callouts kept in the plot); `Subplots` (rows of charts, `linkColumns`, `linkRows`, `linkAllX`, one crosshair) | `*Series`, `InfiniteLines`, `Annotation`, `Subplots` |
@@ -2194,9 +2234,9 @@ and `UiTunablesTest` in `ui-controls`.
 - Engine-side line quality (design 7 GPU): instanced segments with miter joins and a bevel fallback, round caps and
   dashes by cumulative length in the shader would replace the CPU's discs and dash splitting; SDF markers instanced.
 - A nearest-sampled image flag would let heatmaps use one texel a cell.
-- Not built: rotated text (Y axis titles sit above their axes), axis tags, heatmap value labels, histogram binning on
-  the GPU, decimation of bars and candlesticks beyond `ui.chart.maxPoints`, a custom scale (ImPlot's transform
-  callbacks), ~~legends outside the plot~~ (built: chartfix).
+- Not built: ~~rotated text~~ (built: leftovers), axis tags, heatmap value labels, histogram binning on the GPU,
+  decimation of bars and candlesticks beyond `ui.chart.maxPoints`, ~~a custom scale (ImPlot's transform callbacks)~~
+  (built: leftovers, `Scale`), ~~legends outside the plot~~ (built: chartfix).
 - `common-state` with `VersionedDoubleRing`/`VersionedFloatRing` must be released (`ui-core` asks for 0.4.0; the build
   uses `-Ptruesim.common-state=../common-state-tree`).
 
