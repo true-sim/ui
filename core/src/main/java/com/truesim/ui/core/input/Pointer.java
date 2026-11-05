@@ -3,7 +3,9 @@ package com.truesim.ui.core.input;
 /**
  * One pointer (design 4.7): a mouse, a finger, a pen, a gamepad's virtual cursor, an XR ray. Reused: sources write it
  * every frame, so events are never allocated. Screen pointers have a position in UI pixels; XR pointers (and screen
- * pointers over a 3D view) also have a {@linkplain #ray world ray}, which scene picking and world panels test.
+ * pointers over a 3D view) also have a {@linkplain #ray world ray}, which scene picking and world panels test. A pen
+ * also has a {@linkplain #pressure() pressure}, a {@linkplain #tiltX() tilt} and a {@linkplain #twist() twist}, which
+ * pointer events carry ({@code UiEvent.pressure()}).
  */
 public final class Pointer {
 
@@ -32,6 +34,9 @@ public final class Pointer {
     /** The {@code ui.gizmo.snap} action held: gizmo drags snap to their increments (or stop snapping). */
     public static final int GIZMO_SNAP = 128;
 
+    /** {@link #rawPressure()} of a pointer whose device reports none. */
+    public static final float NO_PRESSURE = -1;
+
     private int id;
     private Kind kind = Kind.MOUSE;
     private int player;
@@ -41,6 +46,10 @@ public final class Pointer {
     private float scrollX;
     private float scrollY;
     private int modifiers;
+    private float pressure = NO_PRESSURE;
+    private float tiltX;
+    private float tiltY;
+    private float twist;
     private boolean hasRay;
     private double rayOriginX;
     private double rayOriginY;
@@ -59,6 +68,10 @@ public final class Pointer {
         scrollX = 0;
         scrollY = 0;
         modifiers = 0;
+        pressure = NO_PRESSURE;
+        tiltX = 0;
+        tiltY = 0;
+        twist = 0;
         hasRay = false;
     }
 
@@ -85,6 +98,40 @@ public final class Pointer {
     /** Sets the modifiers held ({@link #SHIFT} and the others); returns this. */
     public Pointer modifiers(int bits) {
         modifiers = bits;
+        return this;
+    }
+
+    /**
+     * Sets the pressure the device reports (a pen's tip), from 0 (none) to 1 (its most), clamped; returns this. A
+     * pointer whose device reports none keeps {@link #NO_PRESSURE} ({@link #noPressure()}), and {@link #pressure()}
+     * then follows its buttons.
+     */
+    public Pointer pressure(float value) {
+        pressure = value != value ? NO_PRESSURE : Math.max(0, Math.min(1, value));
+        return this;
+    }
+
+    /** Says the device reports no pressure ({@link #pressure()} follows the buttons); returns this. */
+    public Pointer noPressure() {
+        pressure = NO_PRESSURE;
+        return this;
+    }
+
+    /**
+     * Sets a pen's tilt in degrees, from -90 to 90 (clamped): {@code x} the angle in the plane of the screen's x axis
+     * and its normal between the normal and the pen, positive towards +x (right); {@code y} the same in the y axis's
+     * plane, positive towards +y (down). 0, 0: the pen stands upright. Returns this.
+     */
+    public Pointer tilt(float x, float y) {
+        tiltX = Math.max(-90, Math.min(90, x));
+        tiltY = Math.max(-90, Math.min(90, y));
+        return this;
+    }
+
+    /** Sets a pen's rotation about its own axis (barrel twist) in degrees, kept in [0, 360); returns this. */
+    public Pointer twist(float degrees) {
+        float t = degrees % 360;
+        twist = t < 0 ? t + 360 : t;
         return this;
     }
 
@@ -129,6 +176,40 @@ public final class Pointer {
     /** The modifiers held. */
     public int modifiers() {
         return modifiers;
+    }
+
+    /**
+     * How hard it presses, from 0 to 1: what the device reports (a pen), or for devices that report none (a mouse, most
+     * touch screens) 0.5 while a button is held and 0 otherwise, as the web's pointer events do, so code reading it
+     * (a brush's width, a stroke's opacity) works with any pointer.
+     */
+    public float pressure() {
+        return pressure >= 0 ? pressure : buttons != 0 ? 0.5f : 0;
+    }
+
+    /** The pressure the device reports, or {@link #NO_PRESSURE}. */
+    public float rawPressure() {
+        return pressure;
+    }
+
+    /** Whether the device reports pressure. */
+    public boolean reportsPressure() {
+        return pressure >= 0;
+    }
+
+    /** A pen's tilt along x in degrees (-90 to 90, 0 upright); 0 for other pointers. */
+    public float tiltX() {
+        return tiltX;
+    }
+
+    /** A pen's tilt along y in degrees (-90 to 90, 0 upright); 0 for other pointers. */
+    public float tiltY() {
+        return tiltY;
+    }
+
+    /** A pen's barrel rotation in degrees, [0, 360); 0 for other pointers. */
+    public float twist() {
+        return twist;
     }
 
     /**
