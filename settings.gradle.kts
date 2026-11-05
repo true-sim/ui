@@ -33,6 +33,8 @@ project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
 include("ui-fonts-emoji") // colour emoji, optional for its size
 project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
+include("ui-spell-en") // English spelling dictionaries (SCOWL), optional for their size
+project(":ui-spell-en").projectDir = file("spell-en")
 include("ui-charts") // charts over ui-controls
 project(":ui-charts").projectDir = file("charts")
 include("ui-props", "ui-props-processor") // property panels from metadata (design 5.11)
