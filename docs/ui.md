@@ -1830,6 +1830,47 @@ structure-changed or live-region events (alerts, toasts); no `IsOffscreen` from 
 elements are left out); one window (docking's OS windows are not exposed); player 0's focus only; no macOS
 (NSAccessibility) or Linux (AT-SPI) bridge (`ui-a11y` is their shared half).
 
+### VR stereo (2026-11-05): local branches `leftovers-xr` (ui) and `ui-leftovers-xr` (engine)
+
+Direct world panels drawn into both eyes in one multiview pass, and XR gizmos drawn as true 3D geometry, depth tested
+per eye.
+
+| Part | Built | Where |
+|---|---|---|
+| Gizmo geometry | `Gizmo.mesh(GizmoMesh)`: this frame's handles as a triangle list in world units about the gizmo's origin (kept in doubles): shafts and tube rings (`frustum`), arrow cones, scale and bounds cubes, two-sided plane squares, the centre ball and the translucent trackball; sized as the 2D handles (each part's style width over the `gizmo-size` height, times the world size: by angular size from the head in XR, else through the view), coloured by the same parts in the same states, ring backs (seen from the head) at the occluded opacity. Normals per vertex; colours as `Rgba` halves; triangles counter-clockwise from outside. `ui.gizmo.meshSides` (12) | ui-gizmo `GizmoMesh`, `Gizmo` |
+| Multiview passes | A pass attaching every layer of its images (all attachments with as many layers, at most `GraphBuilder.MAX_VIEWS` 6) renders them as views: the graph opens the rendering with a view mask of one bit per layer; barriers already covered the layers. `PassContext.clearDepth` (a depth rectangle, every view) | engine-graph |
+| Direct panels in stereo | `new WorldPanelRenderer(graph, leftEye, rightEye)` in a view whose scene colour and depth have a layer per eye: one pass, the pipeline's view mask set from the layers, a panel-to-clip matrix per eye (each relative to its camera, in doubles) picked by `SV_ViewID` in `worldVertexMain`; each eye tested against its own depth layer. One camera: as before. A layer count that does not match the cameras is refused at build | engine-ui `WorldPanelRenderer`, `ui/draw.slang` |
+| 3D gizmos | `GizmoRenderer` (a technique at `TRANSPARENT`, after the world panels): `submit()` builds each gizmo's mesh and uploads it; the pass draws it twice with complementary hardware depth tests against the scene's depth of the frame (read only): `LESS` (the scene in front) at the occluded opacity, then `GREATER_OR_EQUAL` at full, back faces culled, so each pixel shows one look and a closed part covers it once; a headlight shade (never below 0.65). Mono or multiview by its cameras; a matrix and the eye per view | engine-ui `GizmoRenderer`, `ui/gizmo.slang` |
+
+**Decisions**
+
+- *The frame graph does multiview* rather than the renderers opening their own rendering: barriers, region and
+  formats stay the graph's. A whole layered image is a multiview attachment; a single layer stays an attachment of
+  one view.
+- *The gizmo's depth test is the hardware's*, in two draws, not a sampled comparison: per eye for free in multiview,
+  exact per pixel, no depth texture binding per layer. The gizmo's own parts do not depth test each other (no depth
+  is written: the scene's depth stays the scene's); they draw in a fixed order (trackball, rings, planes, shafts and
+  tips, cubes, centre), and the axis rings' back halves take the occluded look, as on the screen.
+- *XR gizmos are drawn here, not in the UI overlay*: a gizmo with no view (`Gizmo(picking, null, ...)`, sized from the
+  head) paints nothing into the UI; `GizmoRenderer` draws it.
+- The engine's XR path still renders each eye as its own view (one layer each, `Headset`); these passes are ready for
+  a stereo view whose scene renders both eyes into layers, and work in each per-eye view with one camera meanwhile.
+
+**Tests**: ui-gizmo `GizmoMeshTest` (triangles about the origin; the X arrow's tip at the gizmo's size, sized by
+angular size; colours from the parts; every mode builds; ring backs at the occluded opacity behind the origin seen
+from the head; hidden or unselected: empty; every triangle counter-clockwise seen from outside; building each frame
+allocation-free). Engine `FrameGraphTest` (a pass over both layers of its images clears both; mixed layer counts and
+more than six views refused), `StereoGpuTest` (lavapipe-ready, validation on: a two-layer scene, a direct panel and an
+XR gizmo read back per eye: each eye sees the panel's edge and the gizmo's Y shaft where its own camera puts them,
+13 px apart, and nothing where the other eye sees them; an occluder in front hides the panel and fades the X arrow to
+the occluded opacity in both eyes, one behind leaves the panel drawn; a two-camera renderer refuses a one-layer view).
+Multiview is core Vulkan 1.1 and the device requires it, so nothing is skipped beyond the GPU rig's own checks.
+Screenshots: `xr/stereo-left.png`, `xr/stereo-right.png` (`TRUESIM_SCREENSHOTS=true`).
+
+**Left**: the engine's headset path rendering the scene itself as one multiview view (scene renderers, other agents'
+areas); the gizmo's parts testing each other's depth (a depth of their own would need the scene's depth copied per
+eye).
+
 ### Scene picking out of the UI (2026-11-04): local branch `picking` (scene, ui, engine)
 
 Picking is scene data now: scene-core's `Pickable`, `Selected` and `Hovered` components and `ScenePicker` (the narrow
@@ -1925,10 +1966,11 @@ The seven areas below were built in parallel on their own branches from `a3-rema
   below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
   0.13 ms p50, 0.21 ms p99; engine-bench `-Ponly=console` runs one part).
 - Not built: ~~the OS accessibility bridge (UI27, assessed in the tools section)~~ (built: Windows UI Automation,
-  section "OS accessibility bridge (2026-11-05)"), VR multiview for direct world panels
-  and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
-  in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
-  loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
+  "OS accessibility bridge (2026-11-05)"), ~~VR multiview for direct world panels and XR gizmos drawn in 3D~~ (built:
+  "VR stereo"), the TLAS ray-query pick, node inspectors (no D46 stores), ~~pen pressure and tilt~~ (built:
+  "Leftovers (2026-11-05)"), ~~a full spelling dictionary~~ (built: `ui-spell-en`, SCOWL), ~~the loupe of touch
+  selection handles~~ (built: "Leftovers"), ~~rotated chart text~~ (built: "turned text and custom chart scales");
+  world panels drawn directly do not draw paths and columns.
 - `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
 
 #### Follow-ups decided by the lead (2026-11-04)
