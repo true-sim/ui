@@ -1769,6 +1769,48 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Leftovers (2026-11-05): local branches `leftovers` (ui) and `ui-leftovers` (engine)
+
+Pen pressure and tilt, the touch handles' loupe, an English dictionary and an opaque frame graph. The accessibility
+bridge, VR stereo and turned chart text were built beside it (the sections around this one) and merged here.
+
+| Part | Built | Where |
+|---|---|---|
+| Pen axes | `Pointer.pressure()` (0 to 1: what the device reports, else 0.5 while a button is held and 0 otherwise, as the web's pointer events; `rawPressure()`, `reportsPressure()`, `pressure(v)`, `noPressure()`), `tiltX()`/`tiltY()` (-90 to 90 degrees, clamped), `twist()` ([0, 360)); every pointer event carries them (`UiEvent.pressure()`, `reportsPressure()`, `tiltX/Y()`, `twist()`); a pen pressing harder, tilting or turning in place sends MOVE (and DRAG while dragging) with no delta, so a brush follows its pressure; a mouse sends nothing for its resolved pressure. `SyntheticInput.pen(...)`, `pressure`, `twist` | ui-core `Pointer`, `UiEvent`, `Interaction`; testkit |
+| Pen feed | `PenPointer` takes SDL's pen axes (`penAxis`: pressure, tilt X/Y, rotation as twist), the newest per frame; a pen out of range forgets them (the next may report none) | engine-ui |
+| Loupe | While a touch selection handle is dragged, a `text-loupe` on the tooltip layer shows the editor's text and selection around the dragged end `loupe-zoom` times (1.5; `TextStyles.LOUPE_ZOOM`) its drawn size, in its own clipped box above the line at `loupe-gap` (below the line, clear of the handle, where the screen ends above), centred on the end and kept on the screen; placed after layout in the same frame through the editor's drawn transform (`Ui.drawnTransform`: a pressed look scaling the editor), recorded again under a baked scale (`DrawList.recordScale/OffsetX/OffsetY` to compose it), gone on release, on losing focus and with its editor. Themes: a raised opaque box (default), a garish 2.5x one (test) | controls `TextLoupe`, `TextEditor`, themes |
+| Hit tests | `TextBlock.graphemeStart` answers a boundary between two code points below U+0300 (but CR LF) itself: the JDK's grapheme `BreakIterator.setText` allocates, and a pointer dragging over text hit-tests each frame (found by the loupe's allocation test: 416 bytes a frame) | ui-text |
+| Dictionary | `ui-spell-en`: SCOWL's Hunspell `en_US` and `en_GB-ise` (release 2026.02.25, size 60) unmodified, from the official GitHub release (`CREDITS.md`: URLs, SHA-256s), their READMEs carrying the licences (SCOWL's MIT-like terms; Geoff Kuenning's BSD terms for the affix files); `EnglishDictionaries.american()`, `british()`, `checker()` (both, American selected). About 110,000 forms each after the affixes; both load in about 0.5 s under JaCoCo | `spell-en` |
+| Frame graph | The F3 overlay's panel (`frame-graph`) is opaque in the default theme (`box(var(--overlay))`, as every overlay); a theme may keep it translucent | `_profiler.tss` |
+
+**Decisions**
+
+- *Pressure as the web defines it* for devices without (0.5 pressed): code reading it works with a mouse too;
+  `reportsPressure()` tells the two apart. Tilt in degrees per axis (SDL's and the web's), twist as the web's.
+- *The loupe on the tooltip layer*, not in the editor: the editor clips its content; a box of its own clips the
+  magnified text. It records the same text blocks again (glyphs are distance fields), so nothing is rendered twice
+  to a texture and there is no frame of delay.
+- *en_GB-ise* as the British dictionary (-ise and -our, as most British publishers but Oxford); `en_GB-ize` and the
+  larger size-70 lists stay in the release for a game that wants them.
+
+**Tests**: `PenTest` (ui-core: the axes on the pointer, clamping and wrapping, pressure for devices without; events
+carry them; pressing harder in place moves, tilting while dragging drags, nothing changing sends nothing; a mouse
+sends no move for its pressure), engine `UiPointersTest.aPenPassesOnItsPressureTiltAndRotation` (SDL's axes to the
+pointer, the newest per frame, forgotten out of range, allocation-free); `TextLoupeTest` (both themes: shown only
+while a handle is dragged, on the tooltip layer, above the line, centred on the end and on the screen, its glyphs
+`loupe-zoom` times the editor's, `LayoutSanity`, following the drag, gone on release; below the line at the top of
+the screen; dragging allocation-free; destroyed with its editor), `TextBlockTest` (hit tests land on cluster starts
+past a combining mark; over plain text allocation-free), `GallerySanityTest.textGalleryWithTheTouchHandlesLoupe`
+(both themes, `TextGallery.holdTouchHandle`); `EnglishDictionariesTest` (real words and their forms, misspellings,
+British against American spellings both ways, suggestions from the full list, prose checked allocation-free, the
+licence in the jar); `ProfilerViewTest.theFrameGraphOverlayIsOpaqueInTheDefaultTheme`. CPU previews:
+`text-loupe-{default,test-theme}.png` (A3PreviewTest), `profiler-default.png`.
+
+**Left**: the loupe magnifies a dragged handle only (not a long press moving the caret); complex scripts still hit
+test through the JDK's break iterator (it allocates while dragging over them); `PenPointer` passes no eraser tip,
+distance, slider or tangential pressure; touch pointers report no pressure; the engine picks no dictionary by the
+game's language yet (`SpellChecker.locale`).
+
 ### OS accessibility bridge (2026-11-05): local branches `leftovers-a11y` (ui) and `ui-leftovers-a11y` (engine)
 
 Windows UI Automation (UI27), so Narrator and other screen readers read and drive the controls. Two new modules:
