@@ -84,6 +84,41 @@ class GizmoMeshTest {
         }
     }
 
+    @Test
+    void everyTriangleIsWoundCounterClockwiseSeenFromOutside() {
+        Rig rig = xr(null);
+        try (GizmoMesh mesh = new GizmoMesh()) {
+            for (GizmoMode mode : GizmoMode.values()) {
+                rig.g.mode(mode);
+                rig.r.frame();
+                rig.g.mesh(mesh);
+                MemorySegment m = mesh.vertices();
+                int checked = 0;
+                for (int t = 0; t < mesh.vertexCount(); t += 3) {
+                    double[] e1 = new double[3];
+                    double[] e2 = new double[3];
+                    for (int c = 0; c < 3; c++) {
+                        e1[c] = x(m, t + 1, c) - x(m, t, c);
+                        e2[c] = x(m, t + 2, c) - x(m, t, c);
+                    }
+                    double gx = e1[1] * e2[2] - e1[2] * e2[1];
+                    double gy = e1[2] * e2[0] - e1[0] * e2[2];
+                    double gz = e1[0] * e2[1] - e1[1] * e2[0];
+                    double area = Math.sqrt(gx * gx + gy * gy + gz * gz);
+                    if (area < 1e-12) {
+                        continue;
+                    }
+                    double along = (gx * (x(m, t, 3) + x(m, t + 1, 3) + x(m, t + 2, 3))
+                        + gy * (x(m, t, 4) + x(m, t + 1, 4) + x(m, t + 2, 4))
+                        + gz * (x(m, t, 5) + x(m, t + 1, 5) + x(m, t + 2, 5))) / area;
+                    assertThat(along).as(mode + " triangle " + t / 3 + " faces its normals").isPositive();
+                    checked++;
+                }
+                assertThat(checked).isGreaterThan(mesh.vertexCount() / 6);
+            }
+        }
+    }
+
     static int farthest(MemorySegment m, int count, int axis) {
         int best = 0;
         for (int v = 1; v < count; v++) {

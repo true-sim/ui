@@ -22,6 +22,8 @@ import java.nio.ByteOrder;
  *       24-31   colour     (ui-core's Rgba: four half floats, linear, straight alpha)
  * </pre>
  *
+ * Triangles are wound counter-clockwise seen from outside (right-handed), so a renderer culls back faces: a closed
+ * part covers each pixel once, which matters where parts draw translucent (hidden by the scene, or faded backs).
  * Grows to the largest frame and then allocates nothing.
  */
 public final class GizmoMesh implements AutoCloseable {
@@ -237,10 +239,7 @@ public final class GizmoMesh implements AutoCloseable {
     private static final double[] S1 = {-1, 1, 1, -1};
     private static final double[] S2 = {-1, -1, 1, 1};
 
-    /**
-     * A box of half size {@code half} about {@code c}, along the axes {@code axis[0..2]} (unit vectors); its faces are
-     * drawn from both sides, so their winding does not matter.
-     */
+    /** A box of half size {@code half} about {@code c}, along the right-handed axes {@code axis[0..2]}. */
     void box(double[] c, double half, double[][] axis, long color) {
         for (int f = 0; f < 6; f++) {
             int k = f / 2;
@@ -250,7 +249,7 @@ public final class GizmoMesh implements AutoCloseable {
             double[] e2 = axis[(k + 2) % 3];
             for (int corner : FACE) {
                 double s1 = S1[corner];
-                double s2 = S2[corner];
+                double s2 = sign * S2[corner]; // mirrored on the negative faces: still counter-clockwise outside
                 double x = c[0] + (n[0] * sign + e1[0] * s1 + e2[0] * s2) * half;
                 double y = c[1] + (n[1] * sign + e1[1] * s1 + e2[1] * s2) * half;
                 double z = c[2] + (n[2] * sign + e1[2] * s1 + e2[2] * s2) * half;
@@ -294,7 +293,10 @@ public final class GizmoMesh implements AutoCloseable {
         vertex(c[0] + n[0] * r, c[1] + n[1] * r, c[2] + n[2] * r, n[0], n[1], n[2], color);
     }
 
-    /** A flat quadrilateral of corners {@code p0..p3} (in order) facing {@code n}; drawn from both sides. */
+    /**
+     * A flat quadrilateral of corners {@code p0..p3} (in order, counter-clockwise about {@code n}): both sides, each
+     * wound to face its way, so a renderer culling back faces draws it once from either side.
+     */
     void quad(double[] p0, double[] p1, double[] p2, double[] p3, double[] n, long color) {
         vertex(p0[0], p0[1], p0[2], n[0], n[1], n[2], color);
         vertex(p1[0], p1[1], p1[2], n[0], n[1], n[2], color);
@@ -302,6 +304,12 @@ public final class GizmoMesh implements AutoCloseable {
         vertex(p0[0], p0[1], p0[2], n[0], n[1], n[2], color);
         vertex(p2[0], p2[1], p2[2], n[0], n[1], n[2], color);
         vertex(p3[0], p3[1], p3[2], n[0], n[1], n[2], color);
+        vertex(p0[0], p0[1], p0[2], -n[0], -n[1], -n[2], color);
+        vertex(p2[0], p2[1], p2[2], -n[0], -n[1], -n[2], color);
+        vertex(p1[0], p1[1], p1[2], -n[0], -n[1], -n[2], color);
+        vertex(p0[0], p0[1], p0[2], -n[0], -n[1], -n[2], color);
+        vertex(p3[0], p3[1], p3[2], -n[0], -n[1], -n[2], color);
+        vertex(p2[0], p2[1], p2[2], -n[0], -n[1], -n[2], color);
     }
 
     /** Frees its memory. */
