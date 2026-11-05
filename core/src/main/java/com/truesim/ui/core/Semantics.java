@@ -10,7 +10,7 @@ import java.util.List;
  * tree, elements without one ({@link Role#NONE}) passing their children up, each layer's tree in z-order. With an
  * {@link Interaction}, each node also says what can be done with it ({@link #ACTIVATE}, {@link #FOCUS} and the
  * others, from its listeners and flags), and interactive elements without a role show as {@link Role#NONE} nodes so
- * {@link #unnamed} finds them. Taken on demand, by an OS bridge (later) or a test, never per frame.
+ * {@link #unnamed} finds them. Taken on demand, by an OS bridge ({@code ui-a11y}) or a test, never per frame.
  */
 public final class Semantics {
 

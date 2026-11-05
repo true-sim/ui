@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Windows UI Automation for a UI drawn in a window (design UI27): screen readers (Narrator, NVDA, JAWS) and other
  * assistive tools read the controls' names, roles, values, states and focus, and invoke, toggle, focus and set them.
  *
- * <p>{@link #attach} subclasses the window's procedure (on the window's thread) to answer {@code WM_GETOBJECT} with
+ * <p>{@link #attach} subclasses the window's procedure to answer {@code WM_GETOBJECT} with
  * the root of a provider tree: COM objects written with FFM ({@link UiaElement}) over the {@link AccessibilityBridge}'s
  * snapshots. The UI thread calls {@link #update()} once a frame: the bridge runs what was asked and, while a client
  * listens, follows changes; this raises UI Automation's focus-changed event (what a screen reader follows) and
@@ -40,7 +40,7 @@ public final class WindowsAccessibility implements AutoCloseable {
 
     private final long hwnd;
     private final AccessibilityBridge bridge;
-    private final Thread windowThread;
+    private volatile Thread uiThread;
     private final Map<Long, UiaElement> elements = new ConcurrentHashMap<>();
     private final UiaElement rootElement;
     private final MemorySegment event = Arena.ofAuto().allocate(Native.VARIANT);
@@ -53,7 +53,6 @@ public final class WindowsAccessibility implements AutoCloseable {
     private WindowsAccessibility(long hwnd, AccessibilityBridge bridge) {
         this.hwnd = hwnd;
         this.bridge = bridge;
-        this.windowThread = Thread.currentThread();
         this.rootElement = new UiaElement(this, -1);
         bridge.listening(Native::clientsListening);
         bridge.events(new Events());
@@ -65,8 +64,9 @@ public final class WindowsAccessibility implements AutoCloseable {
     }
 
     /**
-     * Exposes {@code bridge}'s UI through window {@code hwnd}; called on the window's thread (the one pumping its
-     * messages), which should be the UI thread.
+     * Exposes {@code bridge}'s UI through window {@code hwnd} (of this process). The thread calling {@link #update()}
+     * is the UI's; when it also pumps the window's messages, the first request of a client is answered from the
+     * present state, else from the snapshot of the next frame.
      */
     @AllowAllocation("once per window")
     public static WindowsAccessibility attach(long hwnd, AccessibilityBridge bridge) {
@@ -103,6 +103,9 @@ public final class WindowsAccessibility implements AutoCloseable {
     public void update() {
         if (closed) {
             return;
+        }
+        if (uiThread == null) {
+            uiThread = Thread.currentThread();
         }
         boolean wanted = AccessibilityTunables.BRIDGE.index() == 0;
         if (wanted != on) {
@@ -250,8 +253,8 @@ public final class WindowsAccessibility implements AutoCloseable {
                     : (long) Native.CALL_WINDOW_PROC.invokeExact((long) previous, hwnd, message, wParam, lParam);
             }
             if (message == Native.WM_GETOBJECT && (int) lParam == Native.UIA_ROOT_OBJECT_ID && a.on && !a.closed) {
-                if (Thread.currentThread() == a.windowThread) {
-                    a.bridge.refresh(); // answer from the present state
+                if (Thread.currentThread() == a.uiThread) {
+                    a.bridge.refresh(); // the window's thread is the UI's: answer from the present state
                 }
                 return (long) Native.RETURN_RAW_ELEMENT_PROVIDER.invokeExact(hwnd, wParam, lParam,
                     MemorySegment.ofAddress(a.rootElement.pointer(UiaElement.SIMPLE)));

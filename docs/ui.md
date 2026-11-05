@@ -363,6 +363,8 @@ engine  (engine-input, engine-ui, …)  depends on ui and scene
 | `ui-props-processor` | (build time) | The annotation processor that generates metadata and lenses. |
 | `ui-console` | ui-controls | Console model and widget: commands, typed arguments, completion, history, log ring (fed through an interface). |
 | `ui-profiler` | ui-charts | The profiler's views over a recording the engine fills: the frame graph overlay, the timeline, flame graph, zone table and counters; exports to its own format and Chrome trace JSON. |
+| `ui-a11y` | ui-core | The platform-independent half of OS accessibility bridges: semantics snapshots (`AccessibleTree`), assistive technology's requests run on the UI thread, change events (`AccessibilityBridge`). |
+| `ui-a11y-windows` | ui-a11y (JDK FFM only) | Windows UI Automation: a COM provider written with FFM answering `WM_GETOBJECT` for a window (`WindowsAccessibility`). |
 | `ui-scene` | ui-core, scene-core | The bridge to scene graphs: the `Interactive` component, routing the scene's picking model (scene-core's `ScenePicker` over `Pickable` components, D46) into UI elements, world-panel nodes. |
 | `ui-testkit` | ui-core | Synthetic pointers and commands, draw-list golden helpers, a headless frame loop, allocation checks (test scope). |
 
@@ -1766,6 +1768,67 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### OS accessibility bridge (2026-11-05): local branches `leftovers-a11y` (ui) and `ui-leftovers-a11y` (engine)
+
+Windows UI Automation (UI27), so Narrator and other screen readers read and drive the controls. Two new modules:
+`ui-a11y` (platform-independent) and `ui-a11y-windows` (COM through FFM; nothing outside the JDK).
+
+| Part | Built | Where |
+|---|---|---|
+| Values | `AccessibleValue` (text, read only, `set` on the UI thread, password) kept per slot (`UiStore.accessibleValue`, `Element.accessibleValue`): text editors give their text (never a password's: empty, with `IsPassword`) and take a new one unless read only; sliders each thumb's number (set snapped and clamped as a drag is); progress bars their fraction | ui-core, `TextEditor`, `Slider`, `ProgressBar` |
+| Snapshot | `AccessibleTree`: the `Semantics` tree of the shown layers (hidden elements and what is under them left out) under a window node, numbered depth first: role, name, element id, state, actions, value, box in UI pixels; elements found by slot and generation (their identity across snapshots), the node at a point, the focused node (the nearest node at or above player 0's focus) | ui-a11y |
+| Bridge | `AccessibilityBridge.update()` on the UI thread each frame: runs what assistive technology asked from its threads (`request`: invoke and toggle as a click, focus, set value; refused when gone, disabled, read only or not a number), then, while a client listens or asked since the last frame, takes a new snapshot when the store's version or the focus moved and tells `Events` the focus, name, value, toggle state, enabled and structure changes. Nobody listening: two comparisons, no allocation | ui-a11y |
+| Provider | `WindowsAccessibility.attach(hwnd, bridge)` subclasses the window's procedure (`SetWindowLongPtrW`, `CallWindowProcW` for the rest, restored on `close` or `WM_NCDESTROY`) and answers `WM_GETOBJECT` (`UiaRootObjectId`) with `UiaReturnRawElementProvider`. `UiaElement`: a COM object per element identity, its interfaces cells of a vtable of upcall stubs and the object's id: `IRawElementProviderSimple` (server side; control type, name, automation id, framework `true-sim`, focus, focusable, enabled, password, dialog, a localized type for roles without a control type; patterns), `IRawElementProviderFragment` (navigation, runtime id `[UiaAppendRuntimeId, slot, generation]`, screen boxes from `ClientToScreen` and `scale`, focus), `IRawElementProviderFragmentRoot` (hit test, focus; the root's name and box from the window's host provider), `IInvokeProvider` (activatable nodes that do not toggle), `IToggleProvider` (checkboxes, toggle buttons, switches), `IValueProvider` (nodes with a value). Reference counted; an element that went answers `UIA_E_ELEMENTNOTAVAILABLE`, and its object goes with its last reference. `update()` raises `UIA_AutomationFocusChangedEventId` and property-changed events (name, value, toggle state, enabled) while `UiaClientsAreListening` | ui-a11y-windows |
+| Roles | `ControlTypes`: every `Role` to a control type (toggle buttons and switches are buttons with the Toggle pattern; dialogs windows; scroll views and tab panels panes; rows data items; cells and role-less interactive elements Custom with a localized type) | ui-a11y-windows |
+| Setting | `ui.a11y.bridge` (`on`/`off`, `AccessibilityTunables`, a `TunableSource`: an engine setting with the rest); off withdraws the provider (`UiaDisconnectProvider`) | ui-a11y |
+| Engine | `Window.nativeWindow()` (the `HWND` from `SDL_PROP_WINDOW_WIN32_HWND_POINTER`, 0 under other drivers); `UiPlugin` attaches on Windows with a window, updates it after each UI update (scale: the window's pixels over the view's), closes it on stop (`UiPlugin.accessibility()`) | engine-platform, engine-ui |
+
+**Decisions**
+
+- *Our own COM through FFM*, not AccessKit's C library: no dependency outside the JDK; about 1,100 lines.
+- *Snapshots, not live reads*: UI Automation calls on its own threads; the UI is read only on its thread, into an
+  immutable snapshot, and only while a client listens or asked (no cost for players without assistive technology).
+  Requests are queued to the next frame's update: no lock, no wait on the UI thread, at most a frame for the reader.
+- *Free-threaded provider* (no `ProviderOptions_UseComThreading`): every method reads the volatile snapshot.
+- *When the window's thread is the UI's* (it is in the engine), the first `WM_GETOBJECT` is answered from a snapshot
+  taken then; otherwise a reader may see an empty window for a frame.
+- *Invoke and toggle are a click* (`Interaction.dispatch(CLICK)`), so a control behaves as for a pointer or ACCEPT.
+- *A password's text is never exposed*, even while revealed.
+- *Coverage*: `ui-a11y` is held to 0.8 everywhere; `ui-a11y-windows` on Windows only (CI's Linux cannot run COM, as
+  engine-xr's headset code cannot run there), where its tests reach 0.87 of lines and 0.85 of branches.
+
+**Tests**: `AccessibilityBridgeTest` (ui-a11y, every platform; a rig of a text, buttons, a disabled button, a
+checkbox, a field, a password, a slider and a progress bar): the snapshot's roles, names, ids, values, read-only and
+password flags, links, boxes, hit tests, hidden elements; requests run on the next frame, and refused ones; events
+for focus, name, value, toggle, enabled and structure; a frame with nobody listening, and one listening with nothing
+changed, allocation-free. `WindowsAccessibilityTest` (Windows): a hidden Win32 window pumped on a UI thread and an
+`IUIAutomation` client on the test's thread, as a screen reader is one: names, control types, automation ids, the
+framework, enabled, focusable, password, values, toggle states, patterns only where they belong, runtime ids, boxes;
+invoke, toggle, set value (refused when read only), focus set by the client and read back, a name changing live, an
+element that went; the setting hiding the UI; an idle frame allocation-free. `ProviderCallsTest` (Windows): the
+vtables called directly, as UI Automation calls them: the root (host provider, navigation, focus), hit tests in
+screen pixels, unknown interfaces, patterns and properties, read-only and disabled refusals, elements that went,
+reference counts. Engine: `PlatformTest` (an `HWND` under the Windows driver only), `UiPluginTest` (the setting
+registered).
+
+**Manual check with Narrator** (not automatable here: Narrator's speech and its own navigation). Run an engine app
+with a window (the UI gallery) on Windows, start Narrator (Ctrl+Win+Enter) and check:
+
+- Tab through the controls: each is announced with its name and type ("OK, button", "Agree, check box, not
+  checked", "Name, edit, abc", "Volume, slider, 0.4"); a password field is announced as one, without its text.
+- Caps Lock+Enter (Narrator's primary action) on a button clicks it, on a checkbox toggles it, and the new state is
+  announced; a value set in a field by typing is read back.
+- Caps Lock+arrows (scan mode) walk the tree in a sensible order (layers bottom to top, controls in tree order).
+- Narrator's focus rectangle lands on the controls at their places, at 100 % and 150 % display scaling, and on a
+  second monitor.
+- With `ui.a11y.bridge` off, Narrator sees only the window.
+
+**Left**: no SelectionItem, ExpandCollapse, RangeValue, Scroll, Text or Grid patterns (radios, tabs and list items
+are invoked; sliders give their value as text; fields have no caret or selection for the reader); no
+structure-changed or live-region events (alerts, toasts); no `IsOffscreen` from scroll clipping (only hidden
+elements are left out); one window (docking's OS windows are not exposed); player 0's focus only; no macOS
+(NSAccessibility) or Linux (AT-SPI) bridge (`ui-a11y` is their shared half).
+
 ### Scene picking out of the UI (2026-11-04): local branch `picking` (scene, ui, engine)
 
 Picking is scene data now: scene-core's `Pickable`, `Selected` and `Hovered` components and `ScenePicker` (the narrow
@@ -1860,7 +1923,8 @@ The seven areas below were built in parallel on their own branches from `a3-rema
 - Every row of engine `docs/benchmarks-ui.md` is within budget on a quiet machine (2026-11-04, after the follow-ups
   below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
   0.13 ms p50, 0.21 ms p99; engine-bench `-Ponly=console` runs one part).
-- Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
+- Not built: ~~the OS accessibility bridge (UI27, assessed in the tools section)~~ (built: Windows UI Automation,
+  section "OS accessibility bridge (2026-11-05)"), VR multiview for direct world panels
   and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
   in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
   loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
@@ -2535,7 +2599,7 @@ with their lines, Java rules, the text scale, live font sizes).
 | Log flood: 100,000 lines from another thread shown in one frame | — | 1.4 ms median (the ring keeps 10,000; a burst hands over only those) |
 | Appending 1,000 lines to the ring | — | 0.047 to 0.058 ms median (about 50 ns a line) |
 
-#### OS accessibility bridge (UI27): assessed, not built
+#### OS accessibility bridge (UI27): assessed here, built since (section "OS accessibility bridge (2026-11-05)")
 
 The UI side is ready: `Semantics.of(store, interaction)` gives every layer's tree with roles, names (live text),
 states and actions, and every new control here is named (the galleries' `Semantics.unnamed` is empty). A Windows UI
@@ -2570,7 +2634,7 @@ interface above except the patterns. Not built in this group; nothing outside th
   shaped runs for repeated messages would help); to measure again on a quiet machine.
 - The controls gallery pseudo-localised shows truncation and overflow in other areas' controls (`TextSettingsTest`
   prints them); not fixed here.
-- The OS accessibility bridge (above).
+- ~~The OS accessibility bridge (above).~~ Built (section "OS accessibility bridge (2026-11-05)").
 
 ### Group A3, scene (2026-11-04): local branch a3-scene
 
