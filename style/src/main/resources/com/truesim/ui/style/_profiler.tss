@@ -23,7 +23,9 @@ frame-graph {
   width: 470px;
   padding: tokens.$space-s;
   radius: tokens.$radius-m;
-  background: box(rgba(#0d1117, 0.78));
+  // opaque, as every overlay (--overlay): the scene's busy pixels never show through the lines and numbers; a theme
+  // wanting the HUD look sets a translucent box here
+  background: box(var(--overlay));
   border: 1px var(--edge);
 }
 
