@@ -1,5 +1,6 @@
 package com.truesim.ui.core.draw;
 
+import com.truesim.common.math.Maths;
 import static com.truesim.ui.core.draw.Primitive.WORDS;
 
 import com.truesim.annotations.AllowAllocation;
@@ -30,6 +31,15 @@ import java.util.Arrays;
  * ({@link #setTransform}: 32 bytes, in dirty ranges of their own, {@link #transformRanges()}), not the primitives. A
  * clip names a transform too ({@link #setClipTransform}): it cuts where its owner draws, scaled and moved with it.
  *
+ * <p><b>Rotations.</b> An entry may also rotate ({@link #setRotation}: its sine and cosine; positive angles turn
+ * clockwise on the screen, y being down) and may name a parent entry ({@link #setTransformParent}): such a <i>local</i>
+ * entry places its primitives in its parent's space ({@code scale * R * p + offset}), the clip's offset is added there,
+ * then the parent's placement follows: {@code drawn = parent(local(p) + clip offset)}, the opacity times the parent's.
+ * A painter records rotated text this way ({@link #rotated}): through a local entry under its element's own, so an
+ * animated parent moves, scales and fades it alike. Parents do not nest (a parent names no parent), a clip's rectangle
+ * is drawn by its entry's scale and offset only (clips are never rotated), and {@link Primitive#COLUMNS} are not rotated
+ * (they are pixel columns).
+ *
  * <p><b>Clips and their offsets.</b> Each primitive names a clip of the clip table: a rounded rectangle it is cut to,
  * and an offset added to the primitive's own coordinates before its transform ({@link #setClipOffset}). A scrolled
  * region records its content once, unscrolled, under a clip of its own; scrolling moves that clip's offset instead of
@@ -53,8 +63,17 @@ public final class DrawList {
     public static final int CLIP_FLOATS = 8;
     /** The clip that clips nothing, always at index 0. */
     public static final int NO_CLIP = 0;
-    /** Floats per transform table entry (32 bytes): scale, offset x, offset y, opacity, then four reserved (0). */
+    /**
+     * Floats per transform table entry (32 bytes): scale, offset x, offset y, opacity, the rotation's sine and cosine,
+     * the parent entry's index (a float; 0: none), one reserved (0).
+     */
     public static final int TRANSFORM_FLOATS = 8;
+    /** Float of an entry: the sine of its rotation. */
+    public static final int TRANSFORM_SIN = 4;
+    /** Float of an entry: the cosine of its rotation (1: none). */
+    public static final int TRANSFORM_COS = 5;
+    /** Float of an entry: the index of its parent entry (0: none; a local entry's placement is followed by it). */
+    public static final int TRANSFORM_PARENT = 6;
     /** The identity transform (scale 1, no offset, opaque), always at index 0. */
     public static final int NO_TRANSFORM = 0;
     /**
@@ -88,6 +107,23 @@ public final class DrawList {
     private float offsetX;
     private float offsetY;
     private final int[] scratch = new int[WORDS];
+    // a rotated recording (rotated()): what it replaced
+    private int rotatedFrom = -1;
+    private float rotatedScale;
+    private float rotatedX;
+    private float rotatedY;
+    // the composed placement of an entry (place()): drawn = outer(inner(p) + clip offset)
+    private float inS;
+    private float inSin;
+    private float inCos;
+    private float inX;
+    private float inY;
+    private float outS;
+    private float outSin;
+    private float outCos;
+    private float outX;
+    private float outY;
+    private float placedOpacity;
 
     /** An empty list. */
     @AllowAllocation("created once per layer")
@@ -148,6 +184,7 @@ public final class DrawList {
         scale = 1;
         offsetX = 0;
         offsetY = 0;
+        rotatedFrom = -1;
     }
 
     /**
@@ -216,6 +253,7 @@ public final class DrawList {
         Arrays.fill(transforms, o, o + TRANSFORM_FLOATS, 0);
         transforms[o] = 1;
         transforms[o + 3] = 1;
+        transforms[o + TRANSFORM_COS] = 1;
     }
 
     /**
@@ -257,6 +295,104 @@ public final class DrawList {
     /** The opacity of transform entry {@code index}. */
     public float transformOpacity(int index) {
         return transforms[index * TRANSFORM_FLOATS + 3];
+    }
+
+    /**
+     * Rotates transform entry {@code index} by {@code radians} (clockwise on the screen: y is down) about its space's
+     * origin, before its offset: its primitives draw at {@code scale * R * p + offset}. Marks the entry dirty only when
+     * it changed.
+     */
+    public void setRotation(int index, float radians) {
+        if (index <= NO_TRANSFORM || index >= transformCount) {
+            throw new IllegalArgumentException("no transform " + index);
+        }
+        float sin = radians == 0 ? 0 : (float) Maths.sin(radians);
+        float cos = radians == 0 ? 1 : (float) Maths.cos(radians);
+        int o = index * TRANSFORM_FLOATS;
+        if (transforms[o + TRANSFORM_SIN] != sin || transforms[o + TRANSFORM_COS] != cos) {
+            transforms[o + TRANSFORM_SIN] = sin;
+            transforms[o + TRANSFORM_COS] = cos;
+            transformsDirty.add(index, index + 1);
+            version++;
+        }
+    }
+
+    /**
+     * Makes {@code index} a local entry of {@code parent} (0: none): its primitives are placed by it, their clip's
+     * offset is added, then the parent places them ({@code drawn = parent(local(p) + clip offset)}), their opacity
+     * times the parent's. The parent must name no parent itself.
+     */
+    public void setTransformParent(int index, int parent) {
+        if (index <= NO_TRANSFORM || index >= transformCount) {
+            throw new IllegalArgumentException("no transform " + index);
+        }
+        if (parent < 0 || parent >= transformCount || parent == index || transformParent(parent) != NO_TRANSFORM) {
+            throw new IllegalArgumentException("transform " + parent + " cannot be the parent of " + index);
+        }
+        int o = index * TRANSFORM_FLOATS + TRANSFORM_PARENT;
+        if (transforms[o] != parent) {
+            transforms[o] = parent;
+            transformsDirty.add(index, index + 1);
+            version++;
+        }
+    }
+
+    /** The sine of transform entry {@code index}'s rotation. */
+    public float transformSin(int index) {
+        return transforms[index * TRANSFORM_FLOATS + TRANSFORM_SIN];
+    }
+
+    /** The cosine of transform entry {@code index}'s rotation (1: none). */
+    public float transformCos(int index) {
+        return transforms[index * TRANSFORM_FLOATS + TRANSFORM_COS];
+    }
+
+    /** The parent of transform entry {@code index} (0: none). */
+    public int transformParent(int index) {
+        return (int) transforms[index * TRANSFORM_FLOATS + TRANSFORM_PARENT];
+    }
+
+    /**
+     * Records the next primitives of the range rotated by {@code radians} (clockwise on the screen) about the point
+     * {@code (0, 0)} of the space they are recorded in, until {@link #unrotated}: through a local entry under the entry
+     * in use ({@link #setTransformParent}), which carries the baked transform ({@link #transform}), so an animated
+     * element's rotated text moves, scales and fades with it. Primitives are recorded with the usual calls, in the same
+     * coordinates. A painter keeps the returned entry and passes it as {@code reuse} while {@link #generation()} is
+     * unchanged, so recording again takes no new entry ({@code reuse} 0: a new one). Rotations do not nest.
+     */
+    public int rotated(int reuse, float radians) {
+        if (cursor < 0) {
+            throw new IllegalStateException("no range is recording");
+        }
+        if (rotatedFrom >= 0 || transformParent(transform) != NO_TRANSFORM) {
+            throw new IllegalStateException("rotations do not nest");
+        }
+        int parent = transform;
+        int e = reuse > NO_TRANSFORM && reuse < transformCount && reuse != parent ? reuse : addTransform();
+        setTransform(e, scale, offsetX, offsetY, 1);
+        setRotation(e, radians);
+        setTransformParent(e, parent);
+        rotatedFrom = parent;
+        rotatedScale = scale;
+        rotatedX = offsetX;
+        rotatedY = offsetY;
+        transform = e;
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
+        return e;
+    }
+
+    /** Ends what {@link #rotated} started: the entry and baked transform in use before it again. */
+    public void unrotated() {
+        if (rotatedFrom < 0) {
+            return;
+        }
+        transform = rotatedFrom;
+        scale = rotatedScale;
+        offsetX = rotatedX;
+        offsetY = rotatedY;
+        rotatedFrom = -1;
     }
 
     /** The packed transform table: {@link #transformCount()} entries of {@link #TRANSFORM_FLOATS} floats. */
@@ -462,26 +598,136 @@ public final class DrawList {
 
     // ---------------------------------------------------------------- where primitives draw
 
-    /** Where primitive {@code index}'s word {@code word} (an x coordinate) draws: its clip's offset, then transform. */
+    /** Takes entry {@code t}'s composed placement into the place fields (a local entry and its parent). */
+    private void place(int t) {
+        int parent = transformParent(t);
+        int outer = parent != NO_TRANSFORM ? parent : t;
+        if (parent != NO_TRANSFORM) {
+            inS = transformScale(t);
+            inSin = transformSin(t);
+            inCos = transformCos(t);
+            inX = transformX(t);
+            inY = transformY(t);
+        } else {
+            inS = 1;
+            inSin = 0;
+            inCos = 1;
+            inX = 0;
+            inY = 0;
+        }
+        outS = transformScale(outer);
+        outSin = transformSin(outer);
+        outCos = transformCos(outer);
+        outX = transformX(outer);
+        outY = transformY(outer);
+        placedOpacity = transformOpacity(t) * (parent != NO_TRANSFORM ? transformOpacity(parent) : 1);
+    }
+
+    /** Whether the placement taken last turns (a rotation other than none). */
+    private boolean placedTurns() {
+        return inSin != 0 || inCos != 1 || outSin != 0 || outCos != 1;
+    }
+
+    /** Point {@code (x, y)} of a primitive placed last, its clip's offset {@code (cx, cy)}: where it draws, x. */
+    private float mapX(float x, float y, float cx, float cy) {
+        float ix = inS * (inCos * x - inSin * y) + inX + cx;
+        float iy = inS * (inSin * x + inCos * y) + inY + cy;
+        return outS * (outCos * ix - outSin * iy) + outX;
+    }
+
+    /** As {@link #mapX}, y. */
+    private float mapY(float x, float y, float cx, float cy) {
+        float ix = inS * (inCos * x - inSin * y) + inX + cx;
+        float iy = inS * (inSin * x + inCos * y) + inY + cy;
+        return outS * (outSin * ix + outCos * iy) + outY;
+    }
+
+    /**
+     * Where primitive {@code index}'s word {@code word} (an x coordinate) draws: its clip's offset, then transform. A
+     * rotated primitive's x depends on its y too: {@code word} is then the x of a pair whose y is word {@code word + 1}
+     * (as {@link Primitive#X0}, {@link Primitive#X1} and a triangle's corners are).
+     */
     public float drawnX(int index, int word) {
-        int t = transformOf(index);
-        return (floatAt(index, word) + clipOffsetX(Primitive.clip(header(index)))) * transformScale(t) + transformX(t);
+        place(transformOf(index));
+        int c = Primitive.clip(header(index));
+        if (!placedTurns()) {
+            return outS * (inS * floatAt(index, word) + inX + clipOffsetX(c)) + outX;
+        }
+        return mapX(floatAt(index, word), floatAt(index, word + 1), clipOffsetX(c), clipOffsetY(c));
     }
 
-    /** Where primitive {@code index}'s word {@code word} (a y coordinate) draws: its clip's offset, then transform. */
+    /**
+     * Where primitive {@code index}'s word {@code word} (a y coordinate) draws: its clip's offset, then transform. A
+     * rotated primitive's y depends on its x too: {@code word} is then the y of a pair whose x is word {@code word - 1}.
+     */
     public float drawnY(int index, int word) {
-        int t = transformOf(index);
-        return (floatAt(index, word) + clipOffsetY(Primitive.clip(header(index)))) * transformScale(t) + transformY(t);
+        place(transformOf(index));
+        int c = Primitive.clip(header(index));
+        if (!placedTurns()) {
+            return outS * (inS * floatAt(index, word) + inY + clipOffsetY(c)) + outY;
+        }
+        return mapY(floatAt(index, word - 1), floatAt(index, word), clipOffsetX(c), clipOffsetY(c));
     }
 
-    /** The scale primitive {@code index}'s sizes draw at: its transform's. */
+    /** Where point {@code (x, y)} of primitive {@code index}'s own coordinates draws, into {@code out[0], out[1]}. */
+    public void drawnPoint(int index, float x, float y, float[] out) {
+        place(transformOf(index));
+        int c = Primitive.clip(header(index));
+        out[0] = mapX(x, y, clipOffsetX(c), clipOffsetY(c));
+        out[1] = mapY(x, y, clipOffsetX(c), clipOffsetY(c));
+    }
+
+    /**
+     * The screen box rectangle {@code x0..y1} of primitive {@code index}'s own coordinates covers where it draws (the
+     * bounds of its four corners, so a rotated rectangle's), into {@code out}: x0, y0, x1, y1.
+     */
+    public void drawnBounds(int index, float x0, float y0, float x1, float y1, float[] out) {
+        place(transformOf(index));
+        int c = Primitive.clip(header(index));
+        float cx = clipOffsetX(c);
+        float cy = clipOffsetY(c);
+        float ax = mapX(x0, y0, cx, cy);
+        float ay = mapY(x0, y0, cx, cy);
+        float bx = mapX(x1, y0, cx, cy);
+        float by = mapY(x1, y0, cx, cy);
+        float dx = mapX(x0, y1, cx, cy);
+        float dy = mapY(x0, y1, cx, cy);
+        float ex = mapX(x1, y1, cx, cy);
+        float ey = mapY(x1, y1, cx, cy);
+        out[0] = Math.min(Math.min(ax, bx), Math.min(dx, ex));
+        out[1] = Math.min(Math.min(ay, by), Math.min(dy, ey));
+        out[2] = Math.max(Math.max(ax, bx), Math.max(dx, ex));
+        out[3] = Math.max(Math.max(ay, by), Math.max(dy, ey));
+    }
+
+    /** Whether primitive {@code index} draws turned (its entry, or its parent, rotates). */
+    public boolean drawnRotated(int index) {
+        place(transformOf(index));
+        return placedTurns();
+    }
+
+    /** The sine of the rotation primitive {@code index} draws at (its entry's and its parent's composed). */
+    public float drawnSin(int index) {
+        place(transformOf(index));
+        return inSin * outCos + inCos * outSin;
+    }
+
+    /** The cosine of the rotation primitive {@code index} draws at. */
+    public float drawnCos(int index) {
+        place(transformOf(index));
+        return inCos * outCos - inSin * outSin;
+    }
+
+    /** The scale primitive {@code index}'s sizes draw at: its transform's (times its parent's). */
     public float drawnScale(int index) {
-        return transformScale(transformOf(index));
+        place(transformOf(index));
+        return inS * outS;
     }
 
-    /** The opacity primitive {@code index}'s colours draw at: its transform's. */
+    /** The opacity primitive {@code index}'s colours draw at: its transform's (times its parent's). */
     public float drawnOpacity(int index) {
-        return transformOpacity(transformOf(index));
+        place(transformOf(index));
+        return placedOpacity;
     }
 
     /** The transform table entry primitive {@code index} names. */
@@ -1054,19 +1300,21 @@ public final class DrawList {
                 continue;
             }
             System.arraycopy(words, i * WORDS, p, 0, WORDS);
-            p[Primitive.X0] = Float.floatToRawIntBits(drawnX(i, Primitive.X0));
-            p[Primitive.Y0] = Float.floatToRawIntBits(drawnY(i, Primitive.Y0));
-            p[Primitive.X1] = Float.floatToRawIntBits(drawnX(i, Primitive.X1));
-            p[Primitive.Y1] = Float.floatToRawIntBits(drawnY(i, Primitive.Y1));
+            // a rotated primitive keeps its rotation (an entry of the baked list's own, turning about the origin):
+            // its coordinates are where it draws turned back, so the rotation of them is where it draws
+            boolean turned = drawnRotated(i) && kind != Primitive.COLUMNS;
+            float sin = turned ? drawnSin(i) : 0;
+            float cos = turned ? drawnCos(i) : 1;
+            bakePair(i, p, Primitive.X0, sin, cos);
+            bakePair(i, p, Primitive.X1, sin, cos);
             if (kind == Primitive.TRIANGLE) { // the corners draw as the box does
                 for (int w = Primitive.XA; w <= Primitive.YC; w += 2) {
-                    p[w] = Float.floatToRawIntBits(drawnX(i, w));
-                    p[w + 1] = Float.floatToRawIntBits(drawnY(i, w + 1));
+                    bakePair(i, p, w, sin, cos);
                 }
             }
             boolean overVertices = kind == Primitive.PATH || kind == Primitive.COLUMNS;
             if (overVertices) {
-                bakeVertices(b, i, kind, p, bakedVertex);
+                bakeVertices(b, i, kind, p, bakedVertex, sin, cos);
             }
             float s = drawnScale(i);
             if (s != 1) {
@@ -1082,7 +1330,7 @@ public final class DrawList {
                     fade(p, Primitive.BORDER_COLOR, opacity);
                 }
             }
-            p[Primitive.TRANSFORM] = NO_TRANSFORM;
+            p[Primitive.TRANSFORM] = turned ? b.rotation(sin, cos) : NO_TRANSFORM;
             System.arraycopy(p, 0, b.words, i * WORDS, WORDS);
         }
         float[] r = new float[5];
@@ -1097,15 +1345,41 @@ public final class DrawList {
         return b;
     }
 
-    /** Bakes primitive {@code i}'s coordinate words and its vertices (into {@code b}) as it draws. */
-    private void bakeVertices(DrawList b, int i, int kind, int[] p, boolean[] done) {
+    /**
+     * Bakes primitive {@code i}'s coordinate pair at words {@code x}, {@code x + 1} into {@code p}: where it draws,
+     * turned back by the rotation {@code sin, cos} it keeps.
+     */
+    private void bakePair(int i, int[] p, int x, float sin, float cos) {
+        float dx = drawnX(i, x);
+        float dy = drawnY(i, x + 1);
+        p[x] = Float.floatToRawIntBits(cos * dx + sin * dy);
+        p[x + 1] = Float.floatToRawIntBits(-sin * dx + cos * dy);
+    }
+
+    /** An entry of this (baked) list rotating by {@code sin, cos} about the origin and nothing else: its index. */
+    private int rotation(float sin, float cos) {
+        for (int e = 1; e < transformCount; e++) {
+            if (transformSin(e) == sin && transformCos(e) == cos && transformScale(e) == 1 && transformX(e) == 0
+                && transformY(e) == 0 && transformParent(e) == NO_TRANSFORM) {
+                return e;
+            }
+        }
+        int e = addTransform();
+        int o = e * TRANSFORM_FLOATS;
+        transforms[o + TRANSFORM_SIN] = sin;
+        transforms[o + TRANSFORM_COS] = cos;
+        return e;
+    }
+
+    /** Bakes primitive {@code i}'s vertices (into {@code b}) as it draws, turned back by {@code sin, cos}. */
+    private void bakeVertices(DrawList b, int i, int kind, int[] p, boolean[] done, float sin, float cos) {
         int t = transformOf(i);
+        place(t);
         int clip = Primitive.clip(header(i));
-        float s = transformScale(t);
+        float s = inS * outS;
         float ox = clipOffsetX(clip);
         float oy = clipOffsetY(clip);
-        float tx = transformX(t);
-        float ty = transformY(t);
+        float ty = outS * (inY + oy) + outY - s * oy;
         if (kind == Primitive.COLUMNS) {
             p[Primitive.BASELINE] = Float.floatToRawIntBits(drawnY(i, Primitive.BASELINE));
             p[Primitive.COLUMN_X] = Float.floatToRawIntBits(drawnX(i, Primitive.COLUMN_X));
@@ -1123,8 +1397,10 @@ public final class DrawList {
                     b.vertices[o + c] = (vertices[o + c] + oy) * s + ty;
                 }
             } else {
-                b.vertices[o] = (vertices[o] + ox) * s + tx;
-                b.vertices[o + 1] = (vertices[o + 1] + oy) * s + ty;
+                float dx = mapX(vertices[o], vertices[o + 1], ox, oy);
+                float dy = mapY(vertices[o], vertices[o + 1], ox, oy);
+                b.vertices[o] = cos * dx + sin * dy;
+                b.vertices[o + 1] = -sin * dx + cos * dy;
                 b.vertices[o + 2] = vertices[o + 2] * s;
             }
         }
