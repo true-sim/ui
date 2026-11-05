@@ -57,6 +57,7 @@ public final class UiStore implements Versioned {
     private int[] rangeCapacity;
     private Role[] role;
     private CharSequence[] label;
+    private AccessibleValue[] value;
     private Element[] facades;
 
     private int[] dirtyQueue;
@@ -144,6 +145,7 @@ public final class UiStore implements Versioned {
         rangeCapacity = grow(rangeCapacity, newCapacity);
         role = role == null ? new Role[newCapacity] : Arrays.copyOf(role, newCapacity);
         label = label == null ? new CharSequence[newCapacity] : Arrays.copyOf(label, newCapacity);
+        value = value == null ? new AccessibleValue[newCapacity] : Arrays.copyOf(value, newCapacity);
         facades = facades == null ? new Element[newCapacity] : Arrays.copyOf(facades, newCapacity);
         dirtyQueue = grow(dirtyQueue, newCapacity); // each slot is queued at most once
         capacity = newCapacity;
@@ -194,6 +196,7 @@ public final class UiStore implements Versioned {
         rangeCapacity[slot] = 0;
         role[slot] = Role.NONE;
         label[slot] = null;
+        value[slot] = null;
         count++;
         Element element = new Element(this, slot, generation[slot]);
         facades[slot] = element;
@@ -284,6 +287,7 @@ public final class UiStore implements Versioned {
         id[slot] = null;
         style[slot] = null;
         label[slot] = null;
+        value[slot] = null;
         nextSibling[slot] = freeHead;
         freeHead = slot;
         count--;
@@ -478,6 +482,18 @@ public final class UiStore implements Versioned {
         check(slot);
         role[slot] = newRole;
         label[slot] = newLabel;
+        version = clock.stamp();
+    }
+
+    /** The element's value for assistive technology, or null (it has none). */
+    public AccessibleValue accessibleValue(int slot) {
+        return value[slot];
+    }
+
+    /** Gives the element a value for assistive technology ({@link AccessibleValue}; null: none). */
+    public void accessibleValue(int slot, AccessibleValue newValue) {
+        check(slot);
+        value[slot] = newValue;
         version = clock.stamp();
     }
 
