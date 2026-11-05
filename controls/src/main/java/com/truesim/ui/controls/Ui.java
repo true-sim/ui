@@ -385,6 +385,30 @@ public final class Ui {
         store.markDirty(element.slot(), UiStore.DIRTY_DRAW);
     }
 
+    /**
+     * How {@code element} draws as last recorded: the scale and offset of the transform table entry its subtree uses
+     * (an animated scale or drawn offset of it or an ancestor; the identity when none), so a point of its layout
+     * draws at {@code out[0] * p + (out[1], out[2])}. Picking reads the layout; this is for what must line up with
+     * the pixels (a magnifier over them).
+     */
+    public void drawnTransform(Element element, float[] out) {
+        int slot = element.slot();
+        out[0] = 1;
+        out[1] = 0;
+        out[2] = 0;
+        int li = layerStack.indexOf(slot);
+        if (li < 0) {
+            return;
+        }
+        DrawList list = layerStack.at(li).drawList();
+        int e = entryOf(slot, list);
+        if (e != DrawList.NO_TRANSFORM) {
+            out[0] = list.transformScale(e);
+            out[1] = list.transformX(e);
+            out[2] = list.transformY(e);
+        }
+    }
+
     /** Measures and records {@code element} again this frame (its painter's content changed size). */
     public void remeasure(Element element) {
         store.markDirty(element.slot(), UiStore.DIRTY_LAYOUT | UiStore.DIRTY_DRAW);

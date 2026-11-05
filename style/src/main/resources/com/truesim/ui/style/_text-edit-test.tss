@@ -52,3 +52,15 @@ button.chip-remove { size: 25px; background: box(#ff0000); }
 textfield.cell { background: box(#00ffff); border: 5px #ff1493; radius: 10px 0 10px 0; }
 textfield.column-filter { background: box(#ffef00); color: #0000ff; font-size: 23px; }
 textfield.hex { background: box(#39ff14); color: #ff00ff; width: 150px; }
+
+text-loupe {
+  width: 200px;
+  height: 90px;
+  background: box(#200020);
+  border: 4px #ff00ff;
+  radius: 0;
+  clip: true;
+  pointer-events: none;
+  loupe-zoom: 2.5;
+  loupe-gap: 30;
+}

@@ -165,3 +165,18 @@ textfield.column-filter {
   font-size: map-get(tokens.$text-sizes, caption);
 }
 textfield.hex { width: 104px; font-family: tokens.$font-numbers; font-size: map-get(tokens.$text-sizes, caption); padding: 2px tokens.$space-s; }
+
+// the magnifier over a dragged touch selection handle (TextEditor's TextLoupe, on the tooltip layer)
+text-loupe {
+  width: 132px;
+  height: 52px;
+  padding: 0;
+  background: box(var(--overlay));
+  border: 1px var(--edge);
+  radius: tokens.$radius-m;
+  shadow: 0 2px 8px rgba(black, 0.5);
+  clip: true;
+  pointer-events: none;
+  loupe-zoom: 1.5;
+  loupe-gap: 10;
+}

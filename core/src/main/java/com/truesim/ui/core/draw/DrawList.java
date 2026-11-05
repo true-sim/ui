@@ -197,6 +197,21 @@ public final class DrawList {
         this.offsetY = offsetY;
     }
 
+    /** The scale {@link #transform} bakes into what is recorded now (1 after {@link #begin}). */
+    public float recordScale() {
+        return scale;
+    }
+
+    /** The x offset {@link #transform} bakes into what is recorded now. */
+    public float recordOffsetX() {
+        return offsetX;
+    }
+
+    /** The y offset {@link #transform} bakes into what is recorded now. */
+    public float recordOffsetY() {
+        return offsetY;
+    }
+
     // ---------------------------------------------------------------- the transform table
 
     /** A new transform table entry, the identity: its index. */

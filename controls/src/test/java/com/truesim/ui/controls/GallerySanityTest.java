@@ -159,6 +159,17 @@ class GallerySanityTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"default", "test"})
+    void textGalleryWithTheTouchHandlesLoupe(String theme) {
+        check("text gallery, a touch handle held", theme, ui -> {
+            TextGallery g = TextGallery.build(ui, 1280, 720).holdTouchHandle();
+            if (!g.selected.loupeShown()) {
+                throw new AssertionError("the loupe does not show");
+            }
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "test"})
     void chartsGallery(String theme) {
         check("charts gallery", theme, ui -> {
             ChartsGallery g = ChartsGallery.build(ui);

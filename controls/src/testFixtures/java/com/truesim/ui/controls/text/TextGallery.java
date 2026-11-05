@@ -2,6 +2,7 @@ package com.truesim.ui.controls.text;
 
 import com.truesim.ui.controls.Ui;
 import com.truesim.ui.core.Element;
+import com.truesim.ui.core.input.Pointer;
 import com.truesim.ui.core.input.UiCommand;
 import com.truesim.ui.core.input.UiInput;
 import com.truesim.ui.style.InlineStyle;
@@ -36,6 +37,8 @@ public final class TextGallery {
     public final TextEditor area;
     /** The rich text. */
     public final TextEditor rich;
+    /** The field with a selection ("select some words"). */
+    public TextEditor selected;
     private final UiInput input = new UiInput(16);
     private final SyntheticInput synthetic = new SyntheticInput();
     private final float width;
@@ -102,7 +105,7 @@ public final class TextGallery {
         ui.root().add(columns);
         columns.add(fields).add(right);
         TextEditor empty = TextEditor.field(ui, null, "Empty").placeholder("Your name");
-        TextEditor selected = TextEditor.field(ui, null, "Selected");
+        selected = TextEditor.field(ui, null, "Selected");
         TextEditor ime = TextEditor.field(ui, null, "Composing");
         PasswordField pw = PasswordField.create(ui, null, "Password", "Show");
         PasswordField shown = PasswordField.create(ui, null, "Password", "Show");
@@ -171,6 +174,29 @@ public final class TextGallery {
         frames(1);
         synthetic.command(UiCommand.WORD_LEFT, 0, UiInput.EXTEND_SELECTION);
         frames(60); // the glyphs (and colour emoji) reach the atlas
+    }
+
+    /**
+     * Poses a finger dragging the end handle of a touch selection in the {@link #selected} field: a long press selects
+     * a word, the finger lifts, then takes the end handle and holds it a little to the right, so the handles' loupe
+     * shows the text magnified above the line. Runs frames until the glyphs settle.
+     */
+    public TextGallery holdTouchHandle() {
+        int finger = 9;
+        float x = ui.layout().x(selected.element().slot()) + 24;
+        float y = ui.layout().y(selected.element().slot()) + ui.layout().height(selected.element().slot()) / 2;
+        synthetic.pointer(finger, Pointer.Kind.TOUCH, x, y, Pointer.PRIMARY);
+        frames(1);
+        nanos += 800_000_000L; // a long press selects the word
+        frames(1);
+        synthetic.pointer(finger, Pointer.Kind.TOUCH, x, y, 0);
+        frames(2);
+        float hx = selected.handle(2);
+        float hy = selected.handle(3);
+        synthetic.pointer(finger, Pointer.Kind.TOUCH, hx, hy, Pointer.PRIMARY);
+        frames(1);
+        synthetic.pointer(finger, Pointer.Kind.TOUCH, hx + 14, hy, Pointer.PRIMARY);
+        return frames(60);
     }
 
     private void row(Element column, String caption, Element control) {
