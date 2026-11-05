@@ -524,4 +524,97 @@ class DrawListTest {
         }
         AllocationAssertions.assertAllocationFree(frame);
     }
+
+    @Test
+    void rotatedRecordingTurnsAboutTheOriginUnderTheEntryInUse() {
+        DrawList list = new DrawList();
+        int start = list.allocate(4);
+        int parent = list.addTransform();
+        list.setTransform(parent, 2, 100, 50, 0.5f);
+        int clip = list.addClip(-1000, -1000, 1000, 1000, 0);
+        list.setClipOffset(clip, 3, 4);
+        list.begin(start, 4);
+        list.clip(clip);
+        list.useTransform(parent);
+        list.transform(1, 10, 20); // a baked shift (a clip's content space): carried by the local entry
+        list.box(0, 0, 4, 2, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        int e = list.rotated(0, (float) (Math.PI / 2)); // a quarter turn clockwise on the screen
+        list.box(0, 0, 4, 2, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.glyph(1, 0, 3, 2, 0, 0, 1, 1, 1, 4, Rgba.WHITE, 0, 0, 0);
+        list.unrotated();
+        list.box(0, 0, 4, 2, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        assertThat(list.end()).isTrue();
+        assertThat(list.transformOf(start + 1)).isEqualTo(e);
+        assertThat(list.transformOf(start + 3)).as("back to the entry before").isEqualTo(parent);
+        assertThat(list.transformParent(e)).isEqualTo(parent);
+        assertThat(list.transformX(e)).as("the baked shift").isEqualTo(10);
+        // unrotated: 2 * ((0 + 10, 0 + 20) + (3, 4)) + (100, 50)
+        assertThat(list.drawnX(start, Primitive.X0)).isEqualTo(126);
+        assertThat(list.drawnY(start, Primitive.Y0)).isEqualTo(98);
+        assertThat(list.drawnRotated(start)).isFalse();
+        // rotated: (x, y) turns to (-y, x), then the shift, the clip's offset and the parent
+        float[] at = new float[4];
+        list.drawnPoint(start + 1, 4, 2, at);
+        assertThat(at[0]).isCloseTo(2 * (-2 + 10 + 3) + 100, Offset.offset(1e-4f));
+        assertThat(at[1]).isCloseTo(2 * (4 + 20 + 4) + 50, Offset.offset(1e-4f));
+        assertThat(list.drawnX(start + 1, Primitive.X1)).isCloseTo(at[0], Offset.offset(1e-4f));
+        assertThat(list.drawnY(start + 1, Primitive.Y1)).isCloseTo(at[1], Offset.offset(1e-4f));
+        list.drawnBounds(start + 1, 0, 0, 4, 2, at);
+        assertThat(at[0]).isCloseTo(122, Offset.offset(1e-4f));
+        assertThat(at[1]).isCloseTo(98, Offset.offset(1e-4f));
+        assertThat(at[2]).isCloseTo(126, Offset.offset(1e-4f));
+        assertThat(at[3]).isCloseTo(106, Offset.offset(1e-4f));
+        assertThat(list.drawnScale(start + 1)).isEqualTo(2);
+        assertThat(list.drawnOpacity(start + 1)).isEqualTo(0.5f);
+        assertThat(list.drawnSin(start + 1)).isCloseTo(1, Offset.offset(1e-6f));
+        assertThat(list.drawnCos(start + 1)).isCloseTo(0, Offset.offset(1e-6f));
+
+        // baked: the rotation kept by an entry of its own, the coordinates where it draws turned back
+        DrawList baked = list.baked();
+        int r = baked.transformOf(start + 1);
+        assertThat(r).isNotZero();
+        assertThat(baked.transformOf(start + 2)).as("one entry per rotation").isEqualTo(r);
+        assertThat(baked.transformOf(start)).isZero();
+        assertThat(baked.transformParent(r)).isZero();
+        baked.drawnPoint(start + 1, baked.floatAt(start + 1, Primitive.X1), baked.floatAt(start + 1, Primitive.Y1), at);
+        assertThat(at[0]).isCloseTo(2 * (-2 + 10 + 3) + 100, Offset.offset(1e-3f));
+        assertThat(at[1]).isCloseTo(2 * (4 + 20 + 4) + 50, Offset.offset(1e-3f));
+        assertThat(baked.floatAt(start + 2, Primitive.PIXEL_RANGE)).as("sizes scaled").isEqualTo(8);
+        assertThat(Rgba.a(baked.colorAt(start + 2, Primitive.COLOR_A))).as("faded").isEqualTo(0.5f);
+
+        // recording again reuses the entry and dirties nothing; the parent moving moves the rotated primitives
+        list.clean();
+        list.begin(start, 4);
+        list.clip(clip);
+        list.useTransform(parent);
+        list.transform(1, 10, 20);
+        list.box(0, 0, 4, 2, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        int count = list.transformCount();
+        AllocationAssertions.assertAllocationFree(() -> {
+            list.rotated(e, (float) (Math.PI / 2));
+            list.unrotated();
+        });
+        assertThat(list.transformCount()).isEqualTo(count);
+        assertThat(list.transformRanges().isEmpty()).isTrue();
+        list.rotated(e, (float) (Math.PI / 2));
+        list.box(0, 0, 4, 2, Rgba.WHITE, 0, 0, 0, 0, 0, 0);
+        list.unrotated();
+        list.end();
+        list.setTransform(parent, 2, 110, 50, 0.5f);
+        list.drawnPoint(start + 1, 4, 2, at);
+        assertThat(at[0]).isCloseTo(2 * (-2 + 10 + 3) + 110, Offset.offset(1e-4f));
+        // misuse
+        list.begin(start, 4);
+        list.useTransform(parent);
+        list.rotated(e, 1);
+        assertThatThrownBy(() -> list.rotated(0, 1)).isInstanceOf(IllegalStateException.class);
+        list.unrotated();
+        list.unrotated(); // nothing to end
+        list.end();
+        assertThatThrownBy(() -> list.rotated(0, 1)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> list.setTransformParent(parent, e)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setTransformParent(0, parent)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> list.setRotation(0, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(list.transformCos(0)).isEqualTo(1);
+    }
 }

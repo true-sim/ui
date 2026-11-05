@@ -79,6 +79,17 @@ class StyleTypesTest {
         fails(f, ident("x"), "a fraction");
         assertThatThrownBy(() -> f.check(-1f)).isInstanceOf(IllegalArgumentException.class);
 
+        StyleType<Float> angle = StyleTypes.angle();
+        assertThat(angle.parse(num(-90, "deg"))).isEqualTo(-90f);
+        assertThat(angle.parse(num(45))).isEqualTo(45f);
+        assertThat(angle.parse(num(-0.25, "turn"))).isEqualTo(-90f);
+        assertThat(angle.parse(num(Math.PI, "rad"))).isCloseTo(180f, org.assertj.core.data.Offset.offset(1e-4f));
+        fails(angle, num(400, "deg"), "an angle");
+        fails(angle, num(4, "px"), "an angle");
+        fails(angle, ident("up"), "an angle");
+        assertThat(angle.check(30f)).isEqualTo(30f);
+        assertThatThrownBy(() -> angle.check(-361f)).isInstanceOf(IllegalArgumentException.class);
+
         StyleType<Float> d = StyleTypes.duration();
         assertThat(d.parse(num(120, "ms"))).isEqualTo(0.12f);
         assertThat(d.parse(num(2, "s"))).isEqualTo(2f);

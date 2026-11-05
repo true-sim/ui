@@ -286,8 +286,7 @@ public final class Decimator {
     }
 
     private static double t(Axis axis, double v) {
-        Scale s = axis.scale();
-        return s == Scale.LOG || s == Scale.SYMLOG ? axis.forward(v) : v;
+        return axis.scale().identity() ? v : axis.forward(v);
     }
 
     @AllowAllocation("the buffer grows to the plot's width, rarely")

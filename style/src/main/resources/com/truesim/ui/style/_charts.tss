@@ -2,11 +2,11 @@
 // grid, the seaborn "deep" palette and viridis. The chart's own keys (stroke, line-width, line-dash, line-join, fill,
 // fill-opacity, marker, marker-size, marker-fill, marker-outline, palette, colormap, bar-width, cap-width, donut-hole,
 // digital-height, up-color, down-color, tick-length, minor-tick-length, tick-spacing, minor-ticks, fit-padding,
-// legend-position, swatch-size, chart-tooltips, tooltip-offset, plot-background) are declared by ChartStyles.
+// legend-position, swatch-size, chart-tooltips, tooltip-offset, plot-background, text-angle) are declared by ChartStyles.
 //
 // Element types: chart (the axes' frame: palette, colormap, tooltips, plot-background under the grid), chart-plot
 // (the plot area; it clips the series; its own background is drawn over the grid), chart-overlay; style parts chart-axis (#<axis id>, [side=bottom|top|left|right], :hover, :selected),
-// chart-axis-title, chart-title, chart-grid, chart-grid-minor, chart-legend, chart-legend-entry (:hover, :disabled
+// chart-axis-title ([side=...]), chart-title, chart-grid, chart-grid-minor, chart-legend, chart-legend-entry (:hover, :disabled
 // when its item is hidden), chart-tooltip, chart-tooltip-title, chart-crosshair, chart-highlight, chart-zoom-box,
 // chart-selection, chart-text, chart-annotation, chart-pie-label, chart-drag-point, chart-drag-line, chart-drag-rect
 // (:hover, :pressed); series parts by kind with the series' style name: chart-line, chart-stairs, chart-area,
@@ -71,6 +71,10 @@ chart-axis-title {
   @include text(caption, 600);
   color: var(--fg-muted);
 }
+
+// Y axis titles read upwards beside their labels; a chart styled "slanted" slants its bottom tick labels (long names)
+chart-axis-title[side=left], chart-axis-title[side=right] { text-angle: -90deg; }
+chart.slanted chart-axis[side=bottom] { text-angle: -40deg; }
 
 chart-grid { stroke: rgba(#8b949e, 0.11); line-width: 1px; }
 chart-grid-minor { stroke: rgba(#8b949e, 0.04); line-width: 1px; }

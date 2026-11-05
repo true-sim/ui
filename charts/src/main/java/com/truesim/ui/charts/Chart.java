@@ -1,5 +1,6 @@
 package com.truesim.ui.charts;
 
+import com.truesim.common.math.Maths;
 import com.truesim.ui.controls.charts.ChartStyles;
 import com.truesim.ui.controls.charts.Marker;
 import com.truesim.ui.controls.charts.LegendPosition;
@@ -313,8 +314,12 @@ public final class Chart implements Ui.FrameListener, UiListener {
         Element part = ui.part(root, "chart-axis", null).id(id);
         ui.styles().facts(part.slot(), Facts.of("side", side.name().toLowerCase(java.util.Locale.ROOT)));
         Element titleP = ui.part(root, "chart-axis-title", null).id(id);
-        AxisRange range = scale == Scale.LOG ? new AxisRange(ui.store().clock(), 1, 10)
-            : new AxisRange(ui.store().clock(), 0, 1);
+        ui.styles().facts(titleP.slot(), Facts.of("side", side.name().toLowerCase(java.util.Locale.ROOT)));
+        if (scale == null) {
+            throw new IllegalArgumentException("no scale");
+        }
+        AxisRange range = new AxisRange(ui.store().clock(), Math.min(scale.defaultMin(), scale.defaultMax()),
+            Math.max(scale.defaultMin(), scale.defaultMax()));
         Axis a = new Axis(this, id, side, scale, range, part, titleP);
         axes.add(a);
         changed();
@@ -1130,9 +1135,23 @@ public final class Chart implements Ui.FrameListener, UiListener {
 
     /**
      * Lays the chart out: the title and the axes' room (their labels' sizes, so ticks first), the plot rectangle,
-     * the axes' pixel mappings, then the plot child's offsets.
+     * the axes' pixel mappings, then the plot child's offsets. Turned labels of a horizontal axis take a room across it
+     * that their ticks decide, which are made for the plot's width, which depends on the rest: laid out again, in the
+     * same frame, while that room changed (at most three times; then the largest room is kept).
      */
     private void arrange(boolean restyled) {
+        for (int pass = 0; pass < 3; pass++) {
+            if (!arrangeOnce(restyled && pass == 0, pass > 0)) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * One layout of {@link #arrange}; whether a horizontal axis's turned labels need another room than they were
+     * given ({@code grow}: only more, so the passes end).
+     */
+    private boolean arrangeOnce(boolean restyled, boolean grow) {
         float gapTitle = 0;
         float top = 0;
         if (!title.isEmpty() && titleBlock == null) {
@@ -1163,7 +1182,8 @@ public final class Chart implements Ui.FrameListener, UiListener {
             float tick = as.getFloat(ChartStyles.TICK_LENGTH) * scale;
             float titleH = axisTitle(a);
             if (!a.vertical()) {
-                float label = lineHeight(as);
+                a.labelTurn = angle(as);
+                float label = a.labelTurn != 0 ? a.labelRoom : lineHeight(as);
                 a.thickness = tick + gap + label + (titleH > 0 ? gap + titleH : 0);
                 if (a.side() == Axis.Side.BOTTOM) {
                     a.offset = bottom;
@@ -1193,8 +1213,9 @@ public final class Chart implements Ui.FrameListener, UiListener {
             float gap = as.getFloat(Styles.GAP) * scale;
             float tick = as.getFloat(ChartStyles.TICK_LENGTH) * scale;
             a.map(top + plotH, top);
+            a.labelTurn = angle(as);
             ticks(a, plotH, as, restyled);
-            a.thickness = tick + gap + a.maxLabel;
+            a.thickness = tick + gap + a.maxLabel + (a.titleDepth > 0 ? gap + a.titleDepth : 0);
             if (a.side() == Axis.Side.LEFT) {
                 a.offset = left;
                 left += a.thickness + gap;
@@ -1229,10 +1250,32 @@ public final class Chart implements Ui.FrameListener, UiListener {
         Layout l = ui.layout();
         float u = 1 / scale;
         l.offsets(plot.slot(), plotX0 * u, plotY0 * u, -(width - plotX1) * u, -(height - plotY1) * u);
+        // turned labels of horizontal axes: the room their ticks' labels take
+        boolean again = false;
+        for (int i = 0; i < axes.size(); i++) {
+            Axis a = axes.get(i);
+            if (a.vertical() || !a.enabled() || a.labelTurn == 0) {
+                continue;
+            }
+            if (a.maxLabel > a.labelRoom + 0.5f || !grow && a.maxLabel < a.labelRoom - 0.5f) {
+                a.labelRoom = a.maxLabel;
+                again = true;
+            }
+        }
+        return again;
     }
 
-    /** Shapes the axis's title; its height (0 without one). */
+    /** The {@code text-angle} of a style, in radians (clockwise on the screen). */
+    private static float angle(ResolvedStyle s) {
+        return (float) Maths.toRadians(s.getFloat(ChartStyles.TEXT_ANGLE));
+    }
+
+    /**
+     * Shapes the axis's title; the room it takes in a horizontal axis's thickness, or, for a vertical axis, above the
+     * plot (0 when turned: it then lies beside the labels, {@code titleDepth} wide; 0 without a title).
+     */
     private float axisTitle(Axis a) {
+        a.titleDepth = 0;
         if (a.title().isEmpty()) {
             return 0;
         }
@@ -1242,8 +1285,22 @@ public final class Chart implements Ui.FrameListener, UiListener {
         if (a.titleBlock == null) {
             return 0;
         }
-        shape(a.titleBlock, a.title(), styleOf(a.titlePart));
-        return a.titleBlock.height();
+        ResolvedStyle ts = styleOf(a.titlePart);
+        shape(a.titleBlock, a.title(), ts);
+        a.titleTurn = angle(ts);
+        float w = a.titleBlock.width();
+        float h = a.titleBlock.height();
+        if (a.titleTurn == 0) {
+            return h;
+        }
+        float c = Math.abs((float) Maths.cos(a.titleTurn));
+        float s = Math.abs((float) Maths.sin(a.titleTurn));
+        if (a.vertical()) {
+            a.titleDepth = w * c + h * s; // across the axis: the turned box's width
+            return 0;
+        }
+        a.titleDepth = w * s + h * c;
+        return a.titleDepth;
     }
 
     private float lineHeight(ResolvedStyle s) {
@@ -1266,12 +1323,12 @@ public final class Chart implements Ui.FrameListener, UiListener {
         boolean minors = as.get(ChartStyles.MINOR_TICKS);
         a.ticks.generate(a, pixels, spacing, limit, minors);
         labels(a, as, restyled);
-        if (!a.vertical() && a.ticks.majors() > 1) {
-            // labels wider than the room between ticks: fewer ticks
+        if ((!a.vertical() || a.labelTurn != 0) && a.ticks.majors() > 1) {
+            // labels taking more than the room between ticks along the axis: fewer ticks
             float gap = as.getFloat(Styles.GAP) * scale * 2;
             float room = pixels / a.ticks.majors();
-            if (a.maxLabel + gap > room) {
-                a.ticks.generate(a, pixels, Math.max(spacing, (a.maxLabel + gap) * 1.5f), limit, minors);
+            if (a.labelAlong + gap > room) {
+                a.ticks.generate(a, pixels, Math.max(spacing, (a.labelAlong + gap) * 1.5f), limit, minors);
                 labels(a, as, false);
             }
         }
@@ -1348,14 +1405,24 @@ public final class Chart implements Ui.FrameListener, UiListener {
         StringBuilder[] texts = a.labelText;
         a.labelText = a.spareText;
         a.spareText = texts;
+        // the room labels take as drawn: turned, across the axis and along it (parallel slanted labels need their
+        // height over the sine between their anchors, less than their turned width)
+        float c = Math.abs((float) Maths.cos(a.labelTurn));
+        float s = Math.abs((float) Maths.sin(a.labelTurn));
         float max = 0;
+        float along = 0;
         for (int i = 0; i < n; i++) {
             TextBlock b = a.labelBlocks[i];
             if (b != null && t.major(i)) {
-                max = Math.max(max, a.vertical() ? b.width() : b.height());
+                float w = b.width() * c + b.height() * s;
+                float h = b.width() * s + b.height() * c;
+                float slanted = s > 0.05f && c > 0.05f ? b.height() / (a.vertical() ? c : s) : Float.MAX_VALUE;
+                max = Math.max(max, a.vertical() ? w : h);
+                along = Math.max(along, Math.min(a.vertical() ? h : w, slanted));
             }
         }
         a.maxLabel = max;
+        a.labelAlong = along;
     }
 
     private static boolean same(CharSequence a, CharSequence b) {
@@ -2282,6 +2349,10 @@ public final class Chart implements Ui.FrameListener, UiListener {
                     continue;
                 }
                 TextBlock b = a.labelBlocks[i];
+                if (a.labelTurn != 0) {
+                    turnedLabel(c, a, b, p, base, out, tick + gap, text);
+                    continue;
+                }
                 float lx;
                 float ly;
                 if (a.vertical()) {
@@ -2298,7 +2369,18 @@ public final class Chart implements Ui.FrameListener, UiListener {
             if (a.titleBlock != null && !a.title().isEmpty()) {
                 TextBlock b = a.titleBlock;
                 long tc = c.fade(styleOf(a.titlePart).rgba(Styles.COLOR));
-                if (a.vertical()) {
+                if (a.titleTurn != 0) {
+                    // beside the labels (below or above a horizontal axis's), centred on the plot, turned about its
+                    // centre
+                    float labels = a.vertical() || a.labelTurn == 0 ? a.maxLabel : a.labelRoom;
+                    float across = base + out * (tick + gap + labels + gap + a.titleDepth * 0.5f);
+                    float tx = a.vertical() ? across : (plotX0 + plotX1) * 0.5f;
+                    float ty = a.vertical() ? (plotY0 + plotY1) * 0.5f : across;
+                    turned(b, a.titleTurn, 0.5f, 0.5f);
+                    tx = Math.max(-turnMinX, Math.min(width - turnMaxX, tx));
+                    ty = Math.max(-turnMinY, Math.min(height - turnMaxY, ty));
+                    c.text(b, tx, ty, tc, a.titleTurn, 0.5f, 0.5f);
+                } else if (a.vertical()) {
                     // above the axis, beside the plot's top edge
                     float tx = out < 0 ? Math.max(0, base - b.width()) : Math.min(width - b.width(), base);
                     c.text(b, tx, Math.max(0, plotY0 - b.height() - gap), tc);
@@ -2310,6 +2392,63 @@ public final class Chart implements Ui.FrameListener, UiListener {
                 }
             }
         }
+    }
+
+    // the box a turned block covers around its pivot (turned())
+    private float turnMinX;
+    private float turnMinY;
+    private float turnMaxX;
+    private float turnMaxY;
+
+    /**
+     * The box block {@code b} covers turned by {@code radians} about its point {@code (px, py)} (shares of its width
+     * and height), relative to that point, into the turn fields.
+     */
+    private void turned(TextBlock b, float radians, float px, float py) {
+        float c = (float) Maths.cos(radians);
+        float s = (float) Maths.sin(radians);
+        float x0 = -px * b.width();
+        float y0 = -py * b.height();
+        float x1 = x0 + b.width();
+        float y1 = y0 + b.height();
+        float ax = c * x0 - s * y0;
+        float ay = s * x0 + c * y0;
+        float bx = c * x1 - s * y0;
+        float by = s * x1 + c * y0;
+        float dx = c * x0 - s * y1;
+        float dy = s * x0 + c * y1;
+        float ex = c * x1 - s * y1;
+        float ey = s * x1 + c * y1;
+        turnMinX = Math.min(Math.min(ax, bx), Math.min(dx, ex));
+        turnMinY = Math.min(Math.min(ay, by), Math.min(dy, ey));
+        turnMaxX = Math.max(Math.max(ax, bx), Math.max(dx, ex));
+        turnMaxY = Math.max(Math.max(ay, by), Math.max(dy, ey));
+    }
+
+    /**
+     * Tick label {@code b} at pixel {@code p} of axis {@code a}, turned by its {@code text-angle}: a horizontal axis's
+     * label turns about the end of its text nearest the axis line (its middle line's end), which lies under or over
+     * the tick, its turned box's edge {@code reach} from the axis line; a vertical axis's is centred on its tick. Kept
+     * within the chart.
+     */
+    private void turnedLabel(Canvas c, Axis a, TextBlock b, float p, float base, float out, float reach, long color) {
+        float angle = a.labelTurn;
+        float px;
+        float ax;
+        float ay;
+        if (a.vertical()) {
+            px = 0.5f;
+            turned(b, angle, px, 0.5f);
+            ax = out < 0 ? base - reach - turnMaxX : base + reach - turnMinX;
+            ay = Math.max(-turnMinY, Math.min(height - turnMaxY, p));
+        } else {
+            boolean endNearest = angle < 0 == out > 0; // the text's end, not its start, is nearest the axis line
+            px = endNearest ? 1 : 0;
+            turned(b, angle, px, 0.5f);
+            ay = out > 0 ? base + reach - turnMinY : base - reach - turnMaxY;
+            ax = Math.max(-turnMinX, Math.min(width - turnMaxX, p));
+        }
+        c.text(b, ax, ay, color, angle, px, 0.5f);
     }
 
     /** The plot's content: the series. */
