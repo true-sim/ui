@@ -241,6 +241,21 @@ class TextBlockTest {
     }
 
     @Test
+    void hitTestsLandOnClusterStartsAndAllocateNothingOverPlainText() {
+        // a combining acute after e: the caret never stops inside the cluster (the break iterator's answer)
+        TextBlock marks = block("aéb", INF);
+        for (float x = -2; x < 40; x += 0.5f) {
+            assertThat(marks.hitTest(x, 5)).as("at %s", x).isNotEqualTo(2);
+        }
+        TextBlock plain = block("plain text, (ASCII) and Latin-1: café", INF);
+        float[] x = {0};
+        AllocationAssertions.assertAllocationFree(() -> {
+            x[0] = (x[0] + 3.7f) % plain.width();
+            plain.hitTest(x[0], 5);
+        });
+    }
+
+    @Test
     void caretsStayAtGraphemeBoundaries() {
         TextBlock accent = block("éx", INF);
         assertThat(accent.glyphCount()).isEqualTo(3);

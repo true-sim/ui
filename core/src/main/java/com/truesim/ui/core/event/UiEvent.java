@@ -38,6 +38,10 @@ public final class UiEvent {
     float deltaY;
     float pressX;
     float pressY;
+    float pressure = Pointer.NO_PRESSURE;
+    float tiltX;
+    float tiltY;
+    float twist;
 
     // commands and text
     UiCommand command;
@@ -78,6 +82,10 @@ public final class UiEvent {
         deltaY = 0;
         pressX = 0;
         pressY = 0;
+        pressure = Pointer.NO_PRESSURE;
+        tiltX = 0;
+        tiltY = 0;
+        twist = 0;
         command = null;
         commandFlags = 0;
         text = null;
@@ -234,6 +242,35 @@ public final class UiEvent {
     }
 
     // ---------------------------------------------------------------- commands, text, focus
+
+    /**
+     * How hard the pointer presses, from 0 to 1 ({@link Pointer#pressure()}): a pen's reported pressure, else 0.5
+     * while a button is held and 0 otherwise. A pen pressing harder or tilting without moving sends MOVE (and DRAG
+     * while dragging) with no delta, so a brush follows its pressure.
+     */
+    public float pressure() {
+        return pressure >= 0 ? pressure : buttons != 0 ? 0.5f : 0;
+    }
+
+    /** Whether the pointer's device reports pressure (a pen), rather than {@link #pressure()} following the buttons. */
+    public boolean reportsPressure() {
+        return pressure >= 0;
+    }
+
+    /** A pen's tilt along x in degrees ({@link Pointer#tiltX()}); 0 for other pointers and events. */
+    public float tiltX() {
+        return tiltX;
+    }
+
+    /** A pen's tilt along y in degrees ({@link Pointer#tiltY()}); 0 for other pointers and events. */
+    public float tiltY() {
+        return tiltY;
+    }
+
+    /** A pen's barrel rotation in degrees ({@link Pointer#twist()}); 0 for other pointers and events. */
+    public float twist() {
+        return twist;
+    }
 
     /** For COMMAND: the command. */
     public UiCommand command() {

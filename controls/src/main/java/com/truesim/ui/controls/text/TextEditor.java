@@ -258,6 +258,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     private float grabX;
     private float grabY;
     private final float[] handles = new float[4]; // the two handles' centres where last painted
+    private TextLoupe loupe; // the magnifier over a dragged handle, made when first needed
     private int hoveredLink = NONE;
     private int pressedLink = NONE;
 
@@ -284,6 +285,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         handlePart = ui.part(element, "selection-handle", null);
         ui.paint(element, this);
         element.semantics(Role.TEXT_FIELD, label);
+        element.accessibleValue(new FieldValue());
         interaction.textInput(element, true);
         interaction.textInputKind(element, multiLine ? TextInputHost.MULTILINE : TextInputHost.TEXT);
         int mask = EventType.COMMAND.bit() | EventType.TEXT.bit() | EventType.COMPOSITION.bit()
@@ -1125,6 +1127,89 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         }
         paintCaret(list, ox, opacity);
         paintHandles(list, ox, opacity);
+        if (loupe != null && loupe.shown()) {
+            ui.repaint(loupe.element()); // the magnified text follows what the editor drew
+        }
+    }
+
+    // ---------------------------------------------------------------- the touch handles' loupe
+
+    /** The loupe over a dragged touch selection handle, or null before one was dragged. */
+    public Element loupe() {
+        return loupe == null ? null : loupe.element();
+    }
+
+    /** Whether the loupe shows: a touch selection handle is being dragged. */
+    public boolean loupeShown() {
+        return loupe != null && loupe.shown();
+    }
+
+    private void showLoupe() {
+        if (loupe == null) {
+            loupe = new TextLoupe(ui, this);
+        }
+        loupe.show();
+    }
+
+    private void hideLoupe() {
+        if (loupe != null) {
+            loupe.hide();
+        }
+    }
+
+    /**
+     * Where the dragged end is, in the editor's pixels: {@code out} gets its x, its line's middle, top and bottom;
+     * false when no handle is dragged or its line is out of view.
+     */
+    boolean loupeFocus(float[] out) {
+        if (draggedHandle == 0 || !element.alive()) {
+            return false;
+        }
+        int at = draggedHandle == 1 ? text.selectionStart() : text.selectionEnd();
+        int p = text.lineOf(at);
+        if (p < visibleFrom || p >= visibleTo) {
+            return false;
+        }
+        TextBlock b = shaped(p);
+        int local = at - text.lineStart(p);
+        int line = b.caretLine(local);
+        float top = paraTop(p) + b.lineTop(line);
+        out[0] = textX0 - scrollX + alignShift() + b.caretX(local);
+        out[1] = top + b.lineHeight(line) * 0.5f;
+        out[2] = top;
+        out[3] = top + b.lineHeight(line);
+        return true;
+    }
+
+    /** How far a handle reaches below its line (half its height), so the loupe below a line clears it. */
+    float handleExtent() {
+        return handleSize(partStyle(handlePart).get(Styles.HEIGHT)) * 0.5f;
+    }
+
+    /**
+     * Records the selection and the text of the visible lines between {@code top} and {@code bottom} (the editor's
+     * pixels) again, into the loupe's range: the list's baked transform magnifies them, its clip cuts them.
+     */
+    void recordMagnified(DrawList list, float top, float bottom, float opacity) {
+        float ox = textX0 - scrollX + alignShift();
+        paintSelection(list, ox, opacity);
+        long c = Rgba.fade(color, opacity);
+        float y = paraTop(visibleFrom);
+        for (int p = visibleFrom; p < visibleTo && y < bottom; p++) {
+            float h = heights.get(p);
+            if (y + h > top) {
+                TextBlock b = shaped(p);
+                b.recordLines(list, ox, y, c, opacity, b.lineAt(top - y), b.lineAt(bottom - y) + 1);
+            }
+            y += h;
+        }
+    }
+
+    @Override
+    public void afterLayout() {
+        if (loupe != null && loupe.shown()) {
+            loupe.place(); // the loupe's own size is known now; placed in this frame
+        }
     }
 
     /** Whether the touch selection handles show: a touch made the selection, and the editor has the focus. */
@@ -1607,6 +1692,9 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
      */
     public void dispose() {
         ui.removeFrameListener(this);
+        if (loupe != null && loupe.element().alive()) {
+            loupe.element().destroy();
+        }
     }
 
     /** The caret's blink, from the frame's clock. */
@@ -1617,6 +1705,10 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
             return;
         }
         now = nanos;
+        if (loupe != null && loupe.shown() && (draggedHandle == 0 || !focused())) {
+            draggedHandle = 0; // the drag ended without a release (focus lost, capture taken)
+            hideLoupe();
+        }
         if (glyphsArrived()) {
             ui.repaint(element);
         }
@@ -2160,6 +2252,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
                 int k = draggedHandle - 1;
                 grabX = e.x() - handles[k * 2];
                 grabY = e.y() - handles[k * 2 + 1] + lineHeightPx() * 0.5f;
+                showLoupe(); // magnifies what the finger covers
                 return;
             }
             touchPress = true;
@@ -2211,6 +2304,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
                     draggedHandle = at < other ? 1 : 2; // dragged past the other end: it is the start now
                     changed(false);
                 }
+                showLoupe();
                 e.consume();
             }
             return;
@@ -2283,6 +2377,7 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
         e.consume();
         if (draggedHandle != 0) {
             draggedHandle = 0;
+            hideLoupe();
             return;
         }
         if (touchPress && !touchMoved) {
@@ -2370,5 +2465,35 @@ public final class TextEditor implements Painter, UiListener, Ui.FrameListener {
     /** The span index of the link under a pointer, or -1 (for tests and tooltips). */
     public int hoveredLink() {
         return hoveredLink;
+    }
+
+    /** The field's text for assistive technology: settable unless read only, never exposed while masked. */
+    private final class FieldValue implements com.truesim.ui.core.AccessibleValue {
+
+        @Override
+        @AllowAllocation("read when the semantics tree is taken, not per frame")
+        public String text() {
+            return mask != 0 ? "" : TextEditor.this.text().toString();
+        }
+
+        @Override
+        public boolean readOnly() {
+            return TextEditor.this.readOnly() || interaction.disabled(element.slot());
+        }
+
+        @Override
+        @AllowAllocation("an assistive tool setting a value, not per frame")
+        public boolean set(String value) {
+            if (readOnly()) {
+                return false;
+            }
+            TextEditor.this.text(value);
+            return true;
+        }
+
+        @Override
+        public boolean password() {
+            return mask != 0;
+        }
     }
 }

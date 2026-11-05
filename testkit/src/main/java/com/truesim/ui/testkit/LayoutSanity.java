@@ -285,6 +285,14 @@ public final class LayoutSanity {
         float x1 = list.drawnX(i, Primitive.X1);
         float y1 = list.drawnY(i, Primitive.Y1);
         int kind = Primitive.kind(header);
+        if (kind != Primitive.LINE && list.drawnRotated(i)) { // a rotated box: the bounds of its corners
+            list.drawnBounds(i, list.floatAt(i, Primitive.X0), list.floatAt(i, Primitive.Y0),
+                list.floatAt(i, Primitive.X1), list.floatAt(i, Primitive.Y1), r);
+            x0 = r[0];
+            y0 = r[1];
+            x1 = r[2];
+            y1 = r[3];
+        }
         if (kind == Primitive.LINE) {
             float w = list.floatAt(i, Primitive.WIDTH) * 0.5f;
             float ax = Math.min(x0, x1);
@@ -327,10 +335,11 @@ public final class LayoutSanity {
      */
     private boolean ink(DrawList list, int i, float[] r) {
         int header = list.header(i);
-        float x0 = list.drawnX(i, Primitive.X0);
-        float y0 = list.drawnY(i, Primitive.Y0);
-        float x1 = list.drawnX(i, Primitive.X1);
-        float y1 = list.drawnY(i, Primitive.Y1);
+        boolean turned = list.drawnRotated(i); // rotated text: the ink in its own coordinates, then where that draws
+        float x0 = turned ? list.floatAt(i, Primitive.X0) : list.drawnX(i, Primitive.X0);
+        float y0 = turned ? list.floatAt(i, Primitive.Y0) : list.drawnY(i, Primitive.Y0);
+        float x1 = turned ? list.floatAt(i, Primitive.X1) : list.drawnX(i, Primitive.X1);
+        float y1 = turned ? list.floatAt(i, Primitive.Y1) : list.drawnY(i, Primitive.Y1);
         int texture = list.intAt(i, Primitive.TEXTURE);
         if (x1 <= x0 || y1 <= y0 || texture <= 0 || texture >= ui.textures().count()) {
             return false;
@@ -372,6 +381,9 @@ public final class LayoutSanity {
         r[1] = y0 + (ay - v0 * t.height()) * sy;
         r[2] = x0 + (bx - u0 * w) * sx;
         r[3] = y0 + (by - v0 * t.height()) * sy;
+        if (turned) {
+            list.drawnBounds(i, r[0], r[1], r[2], r[3], r);
+        }
         return true;
     }
 

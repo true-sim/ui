@@ -129,6 +129,10 @@ public final class Interaction {
     private final float[] lastY = new float[UiInput.MAX_POINTERS];
     private final int[] lastButtons = new int[UiInput.MAX_POINTERS];
     private final int[] lastModifiers = new int[UiInput.MAX_POINTERS];
+    private final float[] pressures = new float[UiInput.MAX_POINTERS]; // raw: Pointer.NO_PRESSURE when not reported
+    private final float[] tiltsX = new float[UiInput.MAX_POINTERS];
+    private final float[] tiltsY = new float[UiInput.MAX_POINTERS];
+    private final float[] twists = new float[UiInput.MAX_POINTERS];
     private final int[][] hits = new int[UiInput.MAX_POINTERS][MAX_HITS];
     private final int[] hitCount = new int[UiInput.MAX_POINTERS];
     private final boolean[] blocked = new boolean[UiInput.MAX_POINTERS];
@@ -618,6 +622,10 @@ public final class Interaction {
         kinds[free] = pointer.kind();
         lastX[free] = pointer.x();
         lastY[free] = pointer.y();
+        pressures[free] = pointer.rawPressure();
+        tiltsX[free] = pointer.tiltX();
+        tiltsY[free] = pointer.tiltY();
+        twists[free] = pointer.twist();
         lastButtons[free] = 0;
         hitCount[free] = 0;
         hoverLength[free] = 0;
@@ -638,6 +646,13 @@ public final class Interaction {
         players[p] = pointer.player();
         kinds[p] = pointer.kind();
         lastModifiers[p] = pointer.modifiers();
+        // a pen pressing harder, tilting or turning in place moves too (no delta): brushes follow it
+        boolean axes = pressures[p] != pointer.rawPressure() || tiltsX[p] != pointer.tiltX()
+            || tiltsY[p] != pointer.tiltY() || twists[p] != pointer.twist();
+        pressures[p] = pointer.rawPressure();
+        tiltsX[p] = pointer.tiltX();
+        tiltsY[p] = pointer.tiltY();
+        twists[p] = pointer.twist();
         int n = picking.pick(x, y, hits[p]);
         blocked[p] = picking.blockedBy() >= 0;
         if (world != null && !blocked[p] && n < MAX_HITS) {
@@ -652,7 +667,7 @@ public final class Interaction {
 
         float dx = x - lastX[p];
         float dy = y - lastY[p];
-        if (dx != 0 || dy != 0) {
+        if (dx != 0 || dy != 0 || axes) {
             restTime[p] = now;
             int c = captured[p];
             int to = c != UiStore.NONE ? c : top;
@@ -713,6 +728,10 @@ public final class Interaction {
         e.modifiers = lastModifiers[p];
         e.pressX = pressX[p];
         e.pressY = pressY[p];
+        e.pressure = pressures[p];
+        e.tiltX = tiltsX[p];
+        e.tiltY = tiltsY[p];
+        e.twist = twists[p];
     }
 
     /** Updates pointer {@code p}'s hover chain for its new front-most hit; true if that hit changed. */

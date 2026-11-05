@@ -77,10 +77,17 @@ public final class SoftwareGlyphRenderer {
         boolean raster = (Primitive.flags(list.header(i)) & Primitive.FLAG_RASTER) != 0;
         boolean colorGlyph = (Primitive.flags(list.header(i)) & Primitive.FLAG_COLOR) != 0;
         float[] s = new float[4];
-        int px0 = Math.max(0, (int) Math.floor(x0));
-        int py0 = Math.max(0, (int) Math.floor(y0));
-        int px1 = Math.min(width, (int) Math.ceil(x1));
-        int py1 = Math.min(height, (int) Math.ceil(y1));
+        // a rotated glyph (rotated text): its coordinates turned back by its entry's rotation; pixels are turned back
+        // into them
+        boolean turned = list.drawnRotated(i);
+        float sin = turned ? list.drawnSin(i) : 0;
+        float cos = turned ? list.drawnCos(i) : 1;
+        float[] bounds = new float[4];
+        list.drawnBounds(i, x0, y0, x1, y1, bounds);
+        int px0 = Math.max(0, (int) Math.floor(bounds[0]));
+        int py0 = Math.max(0, (int) Math.floor(bounds[1]));
+        int px1 = Math.min(width, (int) Math.ceil(bounds[2]));
+        int py1 = Math.min(height, (int) Math.ceil(bounds[3]));
         int clip = Primitive.clip(list.header(i));
         if (clip != DrawList.NO_CLIP) { // the clip's rectangle (its rounded corners are left out here)
             float[] c = list.clips();
@@ -91,9 +98,14 @@ public final class SoftwareGlyphRenderer {
             py1 = Math.min(py1, (int) Math.ceil(c[o + 3]));
         }
         for (int py = py0; py < py1; py++) {
-            float v = v0 + (py + 0.5f - y0) / (y1 - y0) * (v1 - v0);
             for (int px = px0; px < px1; px++) {
-                float u = u0 + (px + 0.5f - x0) / (x1 - x0) * (u1 - u0);
+                float qx = cos * (px + 0.5f) + sin * (py + 0.5f);
+                float qy = -sin * (px + 0.5f) + cos * (py + 0.5f);
+                if (turned && (qx < x0 || qx > x1 || qy < y0 || qy > y1)) {
+                    continue;
+                }
+                float u = u0 + (qx - x0) / (x1 - x0) * (u1 - u0);
+                float v = v0 + (qy - y0) / (y1 - y0) * (v1 - v0);
                 sample(page, u, v, s);
                 if (colorGlyph) {
                     blend(rgb, (py * width + px) * 3, s[0] * Rgba.r(color), s[1] * Rgba.g(color),

@@ -97,6 +97,10 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     public static final Tunable XR_PICK_ANGLE = Tunable.of("ui.gizmo.xrPickAngle", 1.5f, 0, 10,
         "Degrees from a gizmo handle (seen from the controller) an XR ray still grabs it.");
 
+    /** Sides of a 3D gizmo's tubes, cones and spheres ({@link #mesh}). */
+    public static final Tunable MESH_SIDES = Tunable.of("ui.gizmo.meshSides", 12, 3, 48,
+        "Sides of a 3D (XR) gizmo's shafts, rings, tips and balls.");
+
     private static final ValueLayout.OfDouble DOUBLE = ValueLayout.JAVA_DOUBLE;
     private static final int LISTENED = EventType.PRESS.bit() | EventType.RELEASE.bit() | EventType.CONTEXT.bit();
 
@@ -208,7 +212,7 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     @AllowAllocation("asked once")
     public static List<Tunable> tunables() {
         return List.of(PICK_TOLERANCE, SNAP_TRANSLATE, SNAP_ROTATE, SNAP_SCALE, SNAP_BY_DEFAULT, XR_ANGULAR_SIZE,
-            XR_PICK_ANGLE);
+            XR_PICK_ANGLE, MESH_SIDES);
     }
 
     // ================================================================ configuration
@@ -1246,6 +1250,156 @@ public final class Gizmo implements Painter, Ui.FrameListener, HandlePicker {
     /** A filled triangle with its point at {@code a} and base {@code b..c}, its edges anti-aliased. */
     static void triangle(DrawList list, float ax, float ay, float bx, float by, float cx, float cy, long color) {
         list.triangle(ax, ay, bx, by, cx, cy, color, Primitive.EDGE_AB | Primitive.EDGE_BC | Primitive.EDGE_CA);
+    }
+
+    // ================================================================ 3D geometry (XR)
+
+    private final double[] m0 = new double[3];
+    private final double[] m1 = new double[3];
+    private final double[] m2 = new double[3];
+    private final double[] m3 = new double[3];
+
+    /**
+     * Builds this frame's handles into {@code out} as true 3D geometry (design 8, XR): what {@link #paint} projects
+     * into a UI layer, as shafts, cones, cubes, tube rings, plane squares and balls in world units, sized as the 2D
+     * handles are (each style width over the {@code gizmo-size} height, times the gizmo's world size) and coloured by
+     * the same parts in the same states. Sized by angular size from the {@link #head} when it has one (XR), else
+     * through its {@link #view}. The back halves of axis rings (seen from the head or the view) take the occluded
+     * opacity, as on the screen; a renderer draws what the scene hides at {@link GizmoMesh#occludedOpacity()}. Empty
+     * when hidden or without a selection. Returns whether it holds anything. Allocates nothing once {@code out} grew.
+     */
+    public boolean mesh(GizmoMesh out) {
+        boolean placed = visible && (hasHead ? layout(null, head[0], head[1], head[2])
+            : view != null && layout(view, view.x(), view.y(), view.z()));
+        if (!placed) {
+            out.clear();
+            return false;
+        }
+        out.begin(shapes.origin[0], shapes.origin[1], shapes.origin[2]);
+        float fade = style(occludedPart).getFloat(Styles.OPACITY);
+        out.occluded(fade);
+        double perPx = shapes.size / sizePx(); // world units per style pixel
+        int sides = Math.round(MESH_SIDES.get());
+        if (mode == GizmoMode.BOUNDS) {
+            meshBounds(out, perPx, sides);
+            return out.vertexCount() > 0;
+        }
+        double[] o = shapes.origin;
+        if (shapes.shows(GizmoHandle.ROTATE_TRACKBALL)) {
+            out.sphere(o, shapes.ringRadius() * shapes.size, sides * 2, color(trackballPart, 1));
+        }
+        for (int a = 0; a < 3; a++) {
+            GizmoHandle ring = GizmoShapes.ringHandle(a);
+            if (shapes.shows(ring)) {
+                meshRing(out, ring, ringParts[a], shapes.ringRadius(), perPx, sides, fade);
+            }
+        }
+        if (shapes.shows(GizmoHandle.ROTATE_VIEW)) {
+            meshRing(out, GizmoHandle.ROTATE_VIEW, ringParts[3], shapes.viewRingRadius(), perPx, sides, fade);
+        }
+        for (int a = 0; a < 3; a++) {
+            GizmoHandle plane = a == 0 ? GizmoHandle.TRANSLATE_YZ : a == 1 ? GizmoHandle.TRANSLATE_ZX
+                : GizmoHandle.TRANSLATE_XY;
+            if (shapes.shows(plane)) {
+                meshPlane(out, plane, planeParts[a]);
+            }
+        }
+        double tip = length(style(tipPart).get(Styles.WIDTH), 12) * perPx;
+        for (int a = 0; a < 3; a++) {
+            Element part = axisParts[a];
+            double r = length(style(part).get(Styles.WIDTH), 3) * perPx / 2;
+            long c = color(part, 1);
+            if (shapes.shows(GizmoShapes.translateHandle(a))) {
+                shapes.segment(a, shapes.arrowStart(), shapes.tipStart(), p, q);
+                out.frustum(p, q, r, r, sides, c, true);
+                shapes.segment(a, shapes.tipStart(), shapes.arrowEnd(), p, q);
+                out.frustum(p, q, tip / 2, 0, sides, c, true);
+            }
+            if (shapes.shows(GizmoShapes.scaleHandle(a))) {
+                if (mode == GizmoMode.SCALE) {
+                    shapes.segment(a, shapes.arrowStart(), shapes.cubeAt(), p, q);
+                    out.frustum(p, q, r, r, sides, c, true);
+                }
+                shapes.segment(a, shapes.cubeAt(), shapes.cubeAt(), p, q);
+                out.box(p, tip / 2, shapes.axis, c);
+            }
+        }
+        if (shapes.shows(GizmoHandle.TRANSLATE_SCREEN) || shapes.shows(GizmoHandle.SCALE_UNIFORM)) {
+            double d = length(style(centerPart).get(Styles.WIDTH), 14) * perPx;
+            out.sphere(o, d / 2, sides, color(centerPart, 1));
+        }
+        return out.vertexCount() > 0;
+    }
+
+    private void meshRing(GizmoMesh out, GizmoHandle ring, Element part, double radius, double perPx, int sides,
+        float fade) {
+        double[] normal = shapes.ringNormal(ring, n);
+        double r = length(style(part).get(Styles.WIDTH), 2.5f) * perPx / 2;
+        long front = color(part, 1);
+        long back = color(part, fade);
+        double[] f = shapes.forward;
+        double[] o = shapes.origin;
+        shapes.ringPoint(normal, 0, radius, p);
+        for (int i = 1; i <= GizmoShapes.RING_SEGMENTS; i++) {
+            shapes.ringPoint(normal, i % GizmoShapes.RING_SEGMENTS, radius, q);
+            // the back half of an axis ring lies behind the gizmo's ball, seen from the head: the occluded look
+            double along = ((p[0] + q[0]) / 2 - o[0]) * f[0] + ((p[1] + q[1]) / 2 - o[1]) * f[1]
+                + ((p[2] + q[2]) / 2 - o[2]) * f[2];
+            boolean behind = ring != GizmoHandle.ROTATE_VIEW && along > 1e-9 * shapes.size;
+            // a tube a little longer than the chord, so neighbouring segments overlap at their joints
+            double chord = Math.max(GizmoMath.length(q[0] - p[0], q[1] - p[1], q[2] - p[2]), 1e-12);
+            double k = 0.5 * r / chord;
+            for (int c = 0; c < 3; c++) {
+                m0[c] = p[c] - (q[c] - p[c]) * k;
+                m1[c] = q[c] + (q[c] - p[c]) * k;
+            }
+            out.frustum(m0, m1, r, r, Math.max(3, sides / 2), behind ? back : front, false);
+            p[0] = q[0];
+            p[1] = q[1];
+            p[2] = q[2];
+        }
+    }
+
+    private void meshPlane(GizmoMesh out, GizmoHandle plane, Element part) {
+        double[] au = shapes.axis[GizmoShapes.planeU(plane)];
+        double[] av = shapes.axis[GizmoShapes.planeV(plane)];
+        double lo = shapes.planeMin() * shapes.size;
+        double hi = shapes.planeMax() * shapes.size;
+        for (int c = 0; c < 3; c++) {
+            m0[c] = shapes.origin[c] + au[c] * lo + av[c] * lo;
+            m1[c] = shapes.origin[c] + au[c] * hi + av[c] * lo;
+            m2[c] = shapes.origin[c] + au[c] * hi + av[c] * hi;
+            m3[c] = shapes.origin[c] + au[c] * lo + av[c] * hi;
+        }
+        out.quad(m0, m1, m2, m3, shapes.axis[plane.axis()], color(part, 1));
+    }
+
+    private void meshBounds(GizmoMesh out, double perPx, int sides) {
+        double r = length(style(boundsPart).get(Styles.WIDTH), 1.5f) * perPx / 2;
+        long edge = color(boundsPart, 1);
+        for (int c = 0; c < 8; c++) {
+            for (int a = 0; a < 3; a++) {
+                int other = c | 1 << a;
+                if (other != c) {
+                    shapes.corner(c, p);
+                    shapes.corner(other, q);
+                    out.frustum(p, q, r, r, Math.max(3, sides / 2), edge, false);
+                }
+            }
+        }
+        double half = shapes.boundsHandle;
+        GizmoHandle h = hovered();
+        int part = handlePart();
+        for (int c = 0; c < 8; c++) {
+            shapes.corner(c, p);
+            boolean on = h == GizmoHandle.BOUNDS_CORNER && part == c;
+            out.box(p, half, shapes.axis, color(on ? boundsActivePart : boundsHandlePart, 1));
+        }
+        for (int f = 0; f < 6; f++) {
+            shapes.face(f, p);
+            boolean on = h == GizmoHandle.BOUNDS_FACE && part == f;
+            out.box(p, half * 0.8, shapes.axis, color(on ? boundsActivePart : boundsHandlePart, 1));
+        }
     }
 
     /** Takes the gizmo off its UI and picking; the element is destroyed. */

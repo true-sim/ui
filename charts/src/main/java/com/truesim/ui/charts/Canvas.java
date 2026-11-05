@@ -76,6 +76,12 @@ public final class Canvas {
     private double pathLength; // along the polyline since its moveTo: dashes carry on across clipped-away parts
     private double subPathStart;
     private Vertices block = new Vertices();
+    // the rotating entries of the list's transform table this canvas turned text by, per angle (text(..., radians))
+    private DrawList rotationList;
+    private long rotationGeneration;
+    private float[] rotationAngles = new float[4];
+    private int[] rotationEntries = new int[4];
+    private int rotationCount;
 
     /**
      * Starts drawing into {@code target}: content-box pixels plus {@code ox, oy}; culled to {@code x0..y1}; vertices
@@ -727,6 +733,66 @@ public final class Canvas {
         flushPath();
         text.record(list, x + ox, y + oy, textColor, 0, 0, 0);
         primitives += text.glyphCount();
+    }
+
+    /**
+     * Text turned by {@code radians} (clockwise on the screen) about its block's point {@code (pivotX, pivotY)} (shares
+     * of its width and height from its top left), that point at {@code (x, y)} (content-box pixels). Drawn through a
+     * rotating entry of the draw list's transform table ({@link DrawList#rotated}), one per angle, kept while the list
+     * is not rebuilt: the glyphs keep their shapes and pixel ranges, the renderer turns them.
+     */
+    public void text(TextBlock text, float x, float y, long textColor, float radians, float pivotX, float pivotY) {
+        float px = pivotX * text.width();
+        float py = pivotY * text.height();
+        if (radians == 0) {
+            text(text, x - px, y - py, textColor);
+            return;
+        }
+        flushPath();
+        int entry = list.rotated(rotationEntry(radians), radians);
+        rememberRotation(radians, entry);
+        // the list turns about the origin of the recording space: the block is recorded where turning puts it right
+        float c = (float) Maths.cos(radians);
+        float s = (float) Maths.sin(radians);
+        float ax = x + ox;
+        float ay = y + oy;
+        text.record(list, c * ax + s * ay - px, -s * ax + c * ay - py, textColor, 0, 0, 0);
+        list.unrotated();
+        primitives += text.glyphCount();
+    }
+
+    /** The entry this canvas turned {@code radians} by in its list's current generation (0: none yet). */
+    private int rotationEntry(float radians) {
+        if (rotationList != list || rotationGeneration != list.generation()) {
+            rotationList = list;
+            rotationGeneration = list.generation();
+            rotationCount = 0;
+        }
+        for (int i = 0; i < rotationCount; i++) {
+            if (rotationAngles[i] == radians) {
+                return rotationEntries[i];
+            }
+        }
+        return 0;
+    }
+
+    private void rememberRotation(float radians, int entry) {
+        for (int i = 0; i < rotationCount; i++) {
+            if (rotationAngles[i] == radians) {
+                return;
+            }
+        }
+        if (rotationCount == rotationAngles.length) {
+            growRotations();
+        }
+        rotationAngles[rotationCount] = radians;
+        rotationEntries[rotationCount++] = entry;
+    }
+
+    @AllowAllocation("more angles than a chart usually turns text by, once")
+    private void growRotations() {
+        rotationAngles = Arrays.copyOf(rotationAngles, rotationAngles.length * 2);
+        rotationEntries = Arrays.copyOf(rotationEntries, rotationEntries.length * 2);
     }
 
     /** An image of texture {@code texture}'s region {@code u0..v1} over the box (content-box pixels). */

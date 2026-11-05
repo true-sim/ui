@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
  * CPU previews of group A3's control additions in both themes ({@code TRUESIM_SCREENSHOTS=true}, into
  * {@code TRUESIM_SCREENSHOT_DIR}): the gallery with mnemonics shown, the File menu open by its mnemonic and the
  * eyedropper's magnifier over the screen; the text gallery (a password masked per cluster, spelling squiggles) and
- * its spelling menu.
+ * its spelling menu; a touch selection handle held, its loupe magnifying the text.
  */
 class A3PreviewTest {
 
@@ -47,6 +47,11 @@ class A3PreviewTest {
             t.settle();
             new CpuPreview(1280, 720, bg).draw(t.ui.layers(), t.ui.layerCount(), t.ui.textures())
                 .save(Path.of(dir, "a3-spell-menu-" + theme + ".png"));
+
+            Fixture h = new Fixture(garish ? Fixture.GARISH : Fixture.DEFAULT, Fixture.newJdkText());
+            TextGallery.build(h.ui, 1280, 720).holdTouchHandle();
+            new CpuPreview(1280, 720, bg).draw(h.ui.layers(), h.ui.layerCount(), h.ui.textures())
+                .save(Path.of(dir, "text-loupe-" + theme + ".png"));
         }
     }
 }

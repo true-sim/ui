@@ -117,6 +117,13 @@ public final class Element {
         return this;
     }
 
+    /** Gives the element a value for assistive technology ({@link UiStore#accessibleValue}); returns this. */
+    public Element accessibleValue(AccessibleValue value) {
+        check();
+        store.accessibleValue(slot, value);
+        return this;
+    }
+
     /** Marks the element dirty with {@code bits} ({@link UiStore#DIRTY_LAYOUT} and the others). */
     public void markDirty(int bits) {
         check();

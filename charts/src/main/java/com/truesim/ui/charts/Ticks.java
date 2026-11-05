@@ -5,7 +5,9 @@ import com.truesim.annotations.AllowAllocation;
 /**
  * The ticks of one axis for its current range and length: values in data units, which are major (labelled, with a
  * grid line) and which minor, and the majors' labels as text. Generated again only when the range, the length or the
- * spacing changed; generating allocates nothing once the buffers have grown to the tick limit.
+ * spacing changed, by the axis's {@link Scale} ({@link Scale#ticks}); generating allocates nothing once the buffers
+ * have grown to the tick limit. A scale of a game's own makes its ticks with {@link #addMajor}, {@link #addMinor} and
+ * {@link #step(double)}, or with the makers here: {@link #linear} and {@link #adaptive}.
  *
  * <ul>
  * <li>{@link Scale#LINEAR}: majors at multiples of a nice step (1, 2 or 5 times a power of ten) chosen so that majors
@@ -17,6 +19,8 @@ import com.truesim.annotations.AllowAllocation;
  * <li>{@link Scale#TIME}: calendar steps (microseconds to seconds as nice numbers, then 1, 2, 5, 10, 15 and 30 seconds,
  * minutes and hours, days, weeks, 1, 2, 3 and 6 months, nice numbers of years), aligned to local time.
  * <li>{@link Scale#CATEGORY}: whole numbers in nice steps, labelled by their names.
+ * <li>Any other scale ({@link Scale#power}, {@link Scale#piecewise}, a game's): {@link #adaptive}, nice numbers about
+ * the spacing apart where they lie on the screen, each stretch of the axis with a step of its own.
  * </ul>
  */
 public final class Ticks {
@@ -34,6 +38,9 @@ public final class Ticks {
     private int majors;
     private double step;
     private int capacity;
+    private final StringBuilder scratch = new StringBuilder(16);
+    private double[] pixel = new double[0]; // the adaptive maker's: each tick's pixel and step
+    private double[] tickStep = new double[0];
 
     /** How many ticks there are, majors and minors. */
     public int count() {
@@ -65,6 +72,34 @@ public final class Ticks {
         return step;
     }
 
+    /** Sets the step between majors (what tooltips write values finer than; 0 when irregular). */
+    public void step(double value) {
+        step = value;
+    }
+
+    /** Whether the buffers are full (later ticks are dropped). */
+    public boolean full() {
+        return count == values.length;
+    }
+
+    /**
+     * Adds a major tick at {@code value} (data units; ticks in ascending order); returns its label to append to, empty
+     * (a scratch buffer, kept nowhere, when the buffers are full).
+     */
+    public StringBuilder addMajor(double value) {
+        if (count == values.length) {
+            scratch.setLength(0);
+            return scratch;
+        }
+        add(value, true);
+        return labels[count - 1];
+    }
+
+    /** Adds a minor tick at {@code value}. */
+    public void addMinor(double value) {
+        add(value, false);
+    }
+
     /** Room for {@code limit} majors and their minors; returns whether the buffers changed. */
     @AllowAllocation("the buffers grow when the tick limit is raised")
     void reserve(int limit) {
@@ -74,6 +109,8 @@ public final class Ticks {
             values = new double[n];
             major = new boolean[n];
             labels = new StringBuilder[n];
+            pixel = new double[n];
+            tickStep = new double[n];
             for (int i = 0; i < n; i++) {
                 labels[i] = new StringBuilder(16);
             }
@@ -99,15 +136,108 @@ public final class Ticks {
         if (!(pixels > 0) || !(max > min)) {
             return;
         }
-        double target = Math.max(1, Math.min(limit, pixels / Math.max(1, spacing)));
-        switch (axis.scale()) {
-            case LINEAR -> linear(min, max, target, minors, false);
-            case CATEGORY -> category(axis, min, max, target);
-            case LOG -> log(axis, min, max, pixels, spacing, minors);
-            case SYMLOG -> symlog(axis, min, max, pixels, spacing, minors);
-            case TIME -> time(axis, min, max, target);
-            default -> throw new IllegalStateException();
+        axis.scale().ticks(axis, this, min, max, pixels, spacing, limit, minors);
+    }
+
+    /** How many majors about {@code spacing} apart fit in {@code pixels}, from 1 to {@code limit}. */
+    private static double target(float pixels, float spacing, int limit) {
+        return Math.max(1, Math.min(limit, pixels / Math.max(1, spacing)));
+    }
+
+    /**
+     * Linear ticks over {@code min..max} in data units: majors at multiples of a nice step about {@code spacing} of
+     * the {@code pixels} apart (at most {@code limit}), labelled to the step's decimals; four or five minors between
+     * them if {@code minors}.
+     */
+    public void linear(double min, double max, float pixels, float spacing, int limit, boolean minors) {
+        nice(min, max, target(pixels, spacing, limit), minors, false);
+    }
+
+    /**
+     * Ticks for any monotonic {@code scale} over {@code min..max}: nice numbers at least {@code spacing} pixels apart
+     * on the screen, the nicest first. The multiples of each nice step are tried in turn, coarsest first (a power of
+     * ten at or above the range, then 5, 2 and 1 times the next lower one...): each is kept where it lies the spacing
+     * from every tick kept so far. So a stretched part of the axis (the start of a square root) gets finer ticks and a
+     * squeezed part only the nicest ones, at most {@code limit}; finer steps stop when a step would offer more
+     * candidates than there is room for ticks. Labels are written to each tick's own step; no minors; the step is 0
+     * (irregular). Allocates nothing.
+     */
+    public void adaptive(Scale scale, double min, double max, float pixels, float spacing, int limit) {
+        step = 0;
+        double a = scale.forward(min);
+        double b = scale.forward(max);
+        if (!(pixels > 0) || !(max > min) || a != a || b != b || a == b || Double.isInfinite(a)
+            || Double.isInfinite(b) || Double.isInfinite(max - min)) {
+            return;
         }
+        double perUnit = pixels / Math.abs(b - a);
+        double room = Math.max(1, spacing);
+        int cap = Math.min(values.length, Math.max(1, limit));
+        int candidates = values.length * 2;
+        double s = niceStepUp(max - min);
+        for (int level = 0; level < 200 && count < cap && s > 0; level++) {
+            double first = Math.ceil(min / s - 1e-9);
+            double last = Math.floor(max / s + 1e-9);
+            if (!(last - first < candidates) || first + 1 == first) {
+                break; // finer steps offer more candidates than there is room for ticks, or doubles run out
+            }
+            int d = TickFormat.decimals(s);
+            double scaleBack = d <= 15 ? TickFormat.pow10(d) : 0;
+            for (double k = first; k <= last && count < cap; k++) {
+                double v = round(k * s, scaleBack);
+                if (Math.abs(v) < s * 1e-9) {
+                    v = 0;
+                }
+                if (v < min || v > max) {
+                    continue;
+                }
+                double p = (scale.forward(v) - a) * perUnit;
+                if (p != p) {
+                    continue;
+                }
+                int at = insertionPoint(v);
+                if (at < count && values[at] == v || at > 0 && Math.abs(p - pixel[at - 1]) < room
+                    || at < count && Math.abs(pixel[at] - p) < room) {
+                    continue; // kept already, or too near a kept tick
+                }
+                System.arraycopy(values, at, values, at + 1, count - at);
+                System.arraycopy(pixel, at, pixel, at + 1, count - at);
+                System.arraycopy(tickStep, at, tickStep, at + 1, count - at);
+                values[at] = v;
+                pixel[at] = p;
+                tickStep[at] = s;
+                count++;
+            }
+            s = finer(s);
+        }
+        for (int i = 0; i < count; i++) {
+            major[i] = true;
+            labels[i].setLength(0);
+            TickFormat.number(labels[i], values[i], tickStep[i]);
+        }
+        majors = count;
+    }
+
+    /** Where {@code v} goes among the ticks (ascending values). */
+    private int insertionPoint(double v) {
+        int lo = 0;
+        int hi = count;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (values[mid] < v) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /** The next finer nice step: 10 to 5, 5 to 2, 2 to 1. */
+    private static double finer(double s) {
+        double p = TickFormat.pow10(TickFormat.exponent(s));
+        double mantissa = Math.rint(s / p);
+        return mantissa >= 5 ? 2 * p : mantissa >= 2 ? p : 0.5 * p;
     }
 
     /**
@@ -166,7 +296,7 @@ public final class Ticks {
         count++;
     }
 
-    private void linear(double min, double max, double target, boolean minors, boolean whole) {
+    private void nice(double min, double max, double target, boolean minors, boolean whole) {
         double s = niceStep((max - min) / target);
         if (whole) {
             s = Math.max(1, Math.rint(s));
@@ -218,7 +348,8 @@ public final class Ticks {
         return Math.abs(mantissa - 2) < 1e-9 ? 4 : 5;
     }
 
-    private void category(Axis axis, double min, double max, double target) {
+    void category(Axis axis, double min, double max, float pixels, float spacing, int limit) {
+        double target = target(pixels, spacing, limit);
         int n = axis.categories().size();
         if (n > 0) { // ticks at the categories only
             min = Math.max(min, 0);
@@ -227,18 +358,18 @@ public final class Ticks {
                 return;
             }
         }
-        linear(min, max, target, false, true);
+        nice(min, max, target, false, true);
         for (int i = 0; i < count; i++) {
             labels[i].setLength(0);
             axis.categoryName(labels[i], values[i]);
         }
     }
 
-    private void log(Axis axis, double min, double max, float pixels, float spacing, boolean minors) {
-        double lo = axis.forward(min);
-        double hi = axis.forward(max);
+    void log(Scale scale, double min, double max, float pixels, float spacing, boolean minors) {
+        double lo = scale.forward(min);
+        double hi = scale.forward(max);
         if (hi - lo < 1.2 || lo != lo) { // within a decade: plain numbers read better
-            linear(Math.max(min, Double.MIN_NORMAL), max, Math.max(1, pixels / spacing), false, false);
+            nice(Math.max(min, Double.MIN_NORMAL), max, Math.max(1, pixels / spacing), false, false);
             step = 0;
             return;
         }
@@ -267,12 +398,11 @@ public final class Ticks {
         }
     }
 
-    private void symlog(Axis axis, double min, double max, float pixels, float spacing, boolean minors) {
-        double lo = axis.forward(min);
-        double hi = axis.forward(max);
-        double c = axis.symlogConstant();
+    void symlog(Scale scale, double c, double min, double max, float pixels, float spacing, boolean minors) {
+        double lo = scale.forward(min);
+        double hi = scale.forward(max);
         if (hi - lo < 1.5) {
-            linear(min, max, Math.max(1, pixels / spacing), minors, false);
+            nice(min, max, Math.max(1, pixels / spacing), minors, false);
             step = 0;
             return;
         }
@@ -290,7 +420,7 @@ public final class Ticks {
                 if (Double.isInfinite(v)) {
                     break;
                 }
-                double t = axis.forward(v);
+                double t = scale.forward(v);
                 if (v > max || v < min) {
                     if (sign > 0 ? v > max : v < min) {
                         break;
@@ -310,11 +440,11 @@ public final class Ticks {
         }
     }
 
-    private void time(Axis axis, double min, double max, double target) {
-        double offset = axis.timeOffset();
+    void time(double offset, double min, double max, float pixels, float spacing, int limit) {
+        double target = target(pixels, spacing, limit);
         double raw = (max - min) / target;
         if (raw < 1) {
-            linear(min + offset, max + offset, target, false, false);
+            nice(min + offset, max + offset, target, false, false);
             for (int i = 0; i < count; i++) {
                 values[i] -= offset;
                 labels[i].setLength(0);

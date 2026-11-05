@@ -33,6 +33,8 @@ project(":ui-controls").projectDir = file("controls")
 project(":ui-testkit").projectDir = file("testkit")
 include("ui-fonts-emoji") // colour emoji, optional for its size
 project(":ui-fonts-emoji").projectDir = file("fonts-emoji")
+include("ui-spell-en") // English spelling dictionaries (SCOWL), optional for their size
+project(":ui-spell-en").projectDir = file("spell-en")
 include("ui-charts") // charts over ui-controls
 project(":ui-charts").projectDir = file("charts")
 include("ui-props", "ui-props-processor") // property panels from metadata (design 5.11)
@@ -42,6 +44,9 @@ include("ui-console") // the developer console: commands, completion, settings a
 project(":ui-console").projectDir = file("console")
 include("ui-profiler") // the profiler's views: the frame graph overlay, the timeline, flame graph, zone table, counters
 project(":ui-profiler").projectDir = file("profiler")
+include("ui-a11y", "ui-a11y-windows") // OS accessibility bridges: semantics snapshots and actions; Windows UI Automation
+project(":ui-a11y").projectDir = file("a11y")
+project(":ui-a11y-windows").projectDir = file("a11y-windows")
 include("ui-scene", "ui-gizmo") // the scene bridge (picking, world panels, camera views) and 3D gizmos: need scene-core
 project(":ui-scene").projectDir = file("scene")
 project(":ui-gizmo").projectDir = file("gizmo")

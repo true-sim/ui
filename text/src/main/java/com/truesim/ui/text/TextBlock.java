@@ -2285,6 +2285,14 @@ public final class TextBlock {
         if (index <= start || index >= end) {
             return index;
         }
+        char before = chars[index - 1];
+        char after = chars[index];
+        if (before < 0x300 && after < 0x300 && (before != '\r' || after != '\n')) {
+            // no grapheme rule joins two code points below the combining marks but CR LF (UAX #29): a boundary, found
+            // without the JDK's break iterator, whose setText allocates (a pointer dragging over text hit-tests every
+            // frame)
+            return index;
+        }
         BreakIterator graphemes = system.characterBreaks(chars, start, end);
         return graphemes.isBoundary(index) ? index : graphemes.preceding(index);
     }

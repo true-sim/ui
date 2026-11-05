@@ -356,6 +356,7 @@ engine  (engine-input, engine-ui, …)  depends on ui and scene
 | `ui-layout` | ui-core | Measure and arrange; stack, flex, grid, border, anchors, overlay, virtualizing (fixed and Fenwick heights); pixel snapping; RTL mirroring. |
 | `ui-text` | ui-core, common-jobs | Interfaces `FontSource`, `TextShaper`, `GlyphRasterizer`, `MsdfGenerator`; itemisation (scripts, `java.text.Bidi`, fallback chains); line breaking and grapheme clusters by `java.text.BreakIterator`; text layout, caret and selection; glyph cache and atlas bookkeeping; the editing engine (undo, IME composition model); a small JDK-only fallback (cmap, advances, `kern`, coverage raster) for headless tests. |
 | `ui-text-native` | ui-text, LWJGL 3.4.3 (freetype, harfbuzz, msdfgen, stb, nanovg for NanoSVG) | FreeType fonts and outlines, HarfBuzz shaping, msdfgen MTSDF generation, stb rect packing, SVG icons; a `tools` source set and Gradle task that pre-bakes atlases at build time. |
+| `ui-spell-en` | ui-text | SCOWL's Hunspell en_US and en_GB-ise dictionaries, unmodified with their licences (SCOWL's MIT-like terms, Kuenning's BSD for the affix files; `CREDITS.md`): `EnglishDictionaries.american()`, `british()`, `checker()`. Optional for its size (1 MB). |
 | `ui-controls` | ui-core, ui-style, ui-layout, ui-text | Every control of section 5.2 to 5.7, including collections and virtualization, data views (sorted, filtered), selection models, menus, pop-ups, dialogs, dock space. |
 | `ui-charts` | ui-controls | Chart model, axes, series, ring buffers, decimation (min-max pyramid, LTTB), hit queries, interaction, chart drawing as primitives. |
 | `ui-gizmo` | ui-core, scene-core, common-math | Gizmo shapes, ray tests, drag solving in doubles, snapping, pivots, undo events, view cube. |
@@ -363,6 +364,8 @@ engine  (engine-input, engine-ui, …)  depends on ui and scene
 | `ui-props-processor` | (build time) | The annotation processor that generates metadata and lenses. |
 | `ui-console` | ui-controls | Console model and widget: commands, typed arguments, completion, history, log ring (fed through an interface). |
 | `ui-profiler` | ui-charts | The profiler's views over a recording the engine fills: the frame graph overlay, the timeline, flame graph, zone table and counters; exports to its own format and Chrome trace JSON. |
+| `ui-a11y` | ui-core | The platform-independent half of OS accessibility bridges: semantics snapshots (`AccessibleTree`), assistive technology's requests run on the UI thread, change events (`AccessibilityBridge`). |
+| `ui-a11y-windows` | ui-a11y (JDK FFM only) | Windows UI Automation: a COM provider written with FFM answering `WM_GETOBJECT` for a window (`WindowsAccessibility`). |
 | `ui-scene` | ui-core, scene-core | The bridge to scene graphs: the `Interactive` component, routing the scene's picking model (scene-core's `ScenePicker` over `Pickable` components, D46) into UI elements, world-panel nodes. |
 | `ui-testkit` | ui-core | Synthetic pointers and commands, draw-list golden helpers, a headless frame loop, allocation checks (test scope). |
 
@@ -1766,6 +1769,189 @@ one PR per repository per group, CI and release once per group.
 
 ## Build status
 
+### Leftovers (2026-11-05): local branches `leftovers` (ui) and `ui-leftovers` (engine)
+
+Pen pressure and tilt, the touch handles' loupe, an English dictionary and an opaque frame graph. The accessibility
+bridge, VR stereo and turned chart text were built beside it (the sections around this one) and merged here.
+
+| Part | Built | Where |
+|---|---|---|
+| Pen axes | `Pointer.pressure()` (0 to 1: what the device reports, else 0.5 while a button is held and 0 otherwise, as the web's pointer events; `rawPressure()`, `reportsPressure()`, `pressure(v)`, `noPressure()`), `tiltX()`/`tiltY()` (-90 to 90 degrees, clamped), `twist()` ([0, 360)); every pointer event carries them (`UiEvent.pressure()`, `reportsPressure()`, `tiltX/Y()`, `twist()`); a pen pressing harder, tilting or turning in place sends MOVE (and DRAG while dragging) with no delta, so a brush follows its pressure; a mouse sends nothing for its resolved pressure. `SyntheticInput.pen(...)`, `pressure`, `twist` | ui-core `Pointer`, `UiEvent`, `Interaction`; testkit |
+| Pen feed | `PenPointer` takes SDL's pen axes (`penAxis`: pressure, tilt X/Y, rotation as twist), the newest per frame; a pen out of range forgets them (the next may report none) | engine-ui |
+| Loupe | While a touch selection handle is dragged, a `text-loupe` on the tooltip layer shows the editor's text and selection around the dragged end `loupe-zoom` times (1.5; `TextStyles.LOUPE_ZOOM`) its drawn size, in its own clipped box above the line at `loupe-gap` (below the line, clear of the handle, where the screen ends above), centred on the end and kept on the screen; placed after layout in the same frame through the editor's drawn transform (`Ui.drawnTransform`: a pressed look scaling the editor), recorded again under a baked scale (`DrawList.recordScale/OffsetX/OffsetY` to compose it), gone on release, on losing focus and with its editor. Themes: a raised opaque box (default), a garish 2.5x one (test) | controls `TextLoupe`, `TextEditor`, themes |
+| Hit tests | `TextBlock.graphemeStart` answers a boundary between two code points below U+0300 (but CR LF) itself: the JDK's grapheme `BreakIterator.setText` allocates, and a pointer dragging over text hit-tests each frame (found by the loupe's allocation test: 416 bytes a frame) | ui-text |
+| Dictionary | `ui-spell-en`: SCOWL's Hunspell `en_US` and `en_GB-ise` (release 2026.02.25, size 60) unmodified, from the official GitHub release (`CREDITS.md`: URLs, SHA-256s), their READMEs carrying the licences (SCOWL's MIT-like terms; Geoff Kuenning's BSD terms for the affix files); `EnglishDictionaries.american()`, `british()`, `checker()` (both, American selected). About 110,000 forms each after the affixes; both load in about 0.5 s under JaCoCo | `spell-en` |
+| Frame graph | The F3 overlay's panel (`frame-graph`) is opaque in the default theme (`box(var(--overlay))`, as every overlay); a theme may keep it translucent | `_profiler.tss` |
+
+**Decisions**
+
+- *Pressure as the web defines it* for devices without (0.5 pressed): code reading it works with a mouse too;
+  `reportsPressure()` tells the two apart. Tilt in degrees per axis (SDL's and the web's), twist as the web's.
+- *The loupe on the tooltip layer*, not in the editor: the editor clips its content; a box of its own clips the
+  magnified text. It records the same text blocks again (glyphs are distance fields), so nothing is rendered twice
+  to a texture and there is no frame of delay.
+- *en_GB-ise* as the British dictionary (-ise and -our, as most British publishers but Oxford); `en_GB-ize` and the
+  larger size-70 lists stay in the release for a game that wants them.
+
+**Tests**: `PenTest` (ui-core: the axes on the pointer, clamping and wrapping, pressure for devices without; events
+carry them; pressing harder in place moves, tilting while dragging drags, nothing changing sends nothing; a mouse
+sends no move for its pressure), engine `UiPointersTest.aPenPassesOnItsPressureTiltAndRotation` (SDL's axes to the
+pointer, the newest per frame, forgotten out of range, allocation-free); `TextLoupeTest` (both themes: shown only
+while a handle is dragged, on the tooltip layer, above the line, centred on the end and on the screen, its glyphs
+`loupe-zoom` times the editor's, `LayoutSanity`, following the drag, gone on release; below the line at the top of
+the screen; dragging allocation-free; destroyed with its editor), `TextBlockTest` (hit tests land on cluster starts
+past a combining mark; over plain text allocation-free), `GallerySanityTest.textGalleryWithTheTouchHandlesLoupe`
+(both themes, `TextGallery.holdTouchHandle`); `EnglishDictionariesTest` (real words and their forms, misspellings,
+British against American spellings both ways, suggestions from the full list, prose checked allocation-free, the
+licence in the jar); `ProfilerViewTest.theFrameGraphOverlayIsOpaqueInTheDefaultTheme`. CPU previews:
+`text-loupe-{default,test-theme}.png` (A3PreviewTest), `profiler-default.png`.
+
+**Left**: the loupe magnifies a dragged handle only (not a long press moving the caret); complex scripts still hit
+test through the JDK's break iterator (it allocates while dragging over them); `PenPointer` passes no eraser tip,
+distance, slider or tangential pressure; touch pointers report no pressure; the engine picks no dictionary by the
+game's language yet (`SpellChecker.locale`).
+
+### OS accessibility bridge (2026-11-05): local branches `leftovers-a11y` (ui) and `ui-leftovers-a11y` (engine)
+
+Windows UI Automation (UI27), so Narrator and other screen readers read and drive the controls. Two new modules:
+`ui-a11y` (platform-independent) and `ui-a11y-windows` (COM through FFM; nothing outside the JDK).
+
+| Part | Built | Where |
+|---|---|---|
+| Values | `AccessibleValue` (text, read only, `set` on the UI thread, password) kept per slot (`UiStore.accessibleValue`, `Element.accessibleValue`): text editors give their text (never a password's: empty, with `IsPassword`) and take a new one unless read only; sliders each thumb's number (set snapped and clamped as a drag is); progress bars their fraction | ui-core, `TextEditor`, `Slider`, `ProgressBar` |
+| Snapshot | `AccessibleTree`: the `Semantics` tree of the shown layers (hidden elements and what is under them left out) under a window node, numbered depth first: role, name, element id, state, actions, value, box in UI pixels; elements found by slot and generation (their identity across snapshots), the node at a point, the focused node (the nearest node at or above player 0's focus) | ui-a11y |
+| Bridge | `AccessibilityBridge.update()` on the UI thread each frame: runs what assistive technology asked from its threads (`request`: invoke and toggle as a click, focus, set value; refused when gone, disabled, read only or not a number), then, while a client listens or asked since the last frame, takes a new snapshot when the store's version or the focus moved and tells `Events` the focus, name, value, toggle state, enabled and structure changes. Nobody listening: two comparisons, no allocation | ui-a11y |
+| Provider | `WindowsAccessibility.attach(hwnd, bridge)` subclasses the window's procedure (`SetWindowLongPtrW`, `CallWindowProcW` for the rest, restored on `close` or `WM_NCDESTROY`) and answers `WM_GETOBJECT` (`UiaRootObjectId`) with `UiaReturnRawElementProvider`. `UiaElement`: a COM object per element identity, its interfaces cells of a vtable of upcall stubs and the object's id: `IRawElementProviderSimple` (server side; control type, name, automation id, framework `true-sim`, focus, focusable, enabled, password, dialog, a localized type for roles without a control type; patterns), `IRawElementProviderFragment` (navigation, runtime id `[UiaAppendRuntimeId, slot, generation]`, screen boxes from `ClientToScreen` and `scale`, focus), `IRawElementProviderFragmentRoot` (hit test, focus; the root's name and box from the window's host provider), `IInvokeProvider` (activatable nodes that do not toggle), `IToggleProvider` (checkboxes, toggle buttons, switches), `IValueProvider` (nodes with a value). Reference counted; an element that went answers `UIA_E_ELEMENTNOTAVAILABLE`, and its object goes with its last reference. `update()` raises `UIA_AutomationFocusChangedEventId` and property-changed events (name, value, toggle state, enabled) while `UiaClientsAreListening` | ui-a11y-windows |
+| Roles | `ControlTypes`: every `Role` to a control type (toggle buttons and switches are buttons with the Toggle pattern; dialogs windows; scroll views and tab panels panes; rows data items; cells and role-less interactive elements Custom with a localized type) | ui-a11y-windows |
+| Setting | `ui.a11y.bridge` (`on`/`off`, `AccessibilityTunables`, a `TunableSource`: an engine setting with the rest); off withdraws the provider (`UiaDisconnectProvider`) | ui-a11y |
+| Engine | `Window.nativeWindow()` (the `HWND` from `SDL_PROP_WINDOW_WIN32_HWND_POINTER`, 0 under other drivers); `UiPlugin` attaches on Windows with a window, updates it after each UI update (scale: the window's pixels over the view's), closes it on stop (`UiPlugin.accessibility()`) | engine-platform, engine-ui |
+
+**Decisions**
+
+- *Our own COM through FFM*, not AccessKit's C library: no dependency outside the JDK; about 1,100 lines.
+- *Snapshots, not live reads*: UI Automation calls on its own threads; the UI is read only on its thread, into an
+  immutable snapshot, and only while a client listens or asked (no cost for players without assistive technology).
+  Requests are queued to the next frame's update: no lock, no wait on the UI thread, at most a frame for the reader.
+- *Free-threaded provider* (no `ProviderOptions_UseComThreading`): every method reads the volatile snapshot.
+- *When the window's thread is the UI's* (it is in the engine), the first `WM_GETOBJECT` is answered from a snapshot
+  taken then; otherwise a reader may see an empty window for a frame.
+- *Invoke and toggle are a click* (`Interaction.dispatch(CLICK)`), so a control behaves as for a pointer or ACCEPT.
+- *A password's text is never exposed*, even while revealed.
+- *Coverage*: `ui-a11y` is held to 0.8 everywhere; `ui-a11y-windows` on Windows only (CI's Linux cannot run COM, as
+  engine-xr's headset code cannot run there), where its tests reach 0.87 of lines and 0.85 of branches.
+
+**Tests**: `AccessibilityBridgeTest` (ui-a11y, every platform; a rig of a text, buttons, a disabled button, a
+checkbox, a field, a password, a slider and a progress bar): the snapshot's roles, names, ids, values, read-only and
+password flags, links, boxes, hit tests, hidden elements; requests run on the next frame, and refused ones; events
+for focus, name, value, toggle, enabled and structure; a frame with nobody listening, and one listening with nothing
+changed, allocation-free. `WindowsAccessibilityTest` (Windows): a hidden Win32 window pumped on a UI thread and an
+`IUIAutomation` client on the test's thread, as a screen reader is one: names, control types, automation ids, the
+framework, enabled, focusable, password, values, toggle states, patterns only where they belong, runtime ids, boxes;
+invoke, toggle, set value (refused when read only), focus set by the client and read back, a name changing live, an
+element that went; the setting hiding the UI; an idle frame allocation-free. `ProviderCallsTest` (Windows): the
+vtables called directly, as UI Automation calls them: the root (host provider, navigation, focus), hit tests in
+screen pixels, unknown interfaces, patterns and properties, read-only and disabled refusals, elements that went,
+reference counts. Engine: `PlatformTest` (an `HWND` under the Windows driver only), `UiPluginTest` (the setting
+registered).
+
+**Manual check with Narrator** (not automatable here: Narrator's speech and its own navigation). Run an engine app
+with a window (the UI gallery) on Windows, start Narrator (Ctrl+Win+Enter) and check:
+
+- Tab through the controls: each is announced with its name and type ("OK, button", "Agree, check box, not
+  checked", "Name, edit, abc", "Volume, slider, 0.4"); a password field is announced as one, without its text.
+- Caps Lock+Enter (Narrator's primary action) on a button clicks it, on a checkbox toggles it, and the new state is
+  announced; a value set in a field by typing is read back.
+- Caps Lock+arrows (scan mode) walk the tree in a sensible order (layers bottom to top, controls in tree order).
+- Narrator's focus rectangle lands on the controls at their places, at 100 % and 150 % display scaling, and on a
+  second monitor.
+- With `ui.a11y.bridge` off, Narrator sees only the window.
+
+**Left**: no SelectionItem, ExpandCollapse, RangeValue, Scroll, Text or Grid patterns (radios, tabs and list items
+are invoked; sliders give their value as text; fields have no caret or selection for the reader); no
+structure-changed or live-region events (alerts, toasts); no `IsOffscreen` from scroll clipping (only hidden
+elements are left out); one window (docking's OS windows are not exposed); player 0's focus only; no macOS
+(NSAccessibility) or Linux (AT-SPI) bridge (`ui-a11y` is their shared half).
+
+### VR stereo (2026-11-05): local branches `leftovers-xr` (ui) and `ui-leftovers-xr` (engine)
+
+Direct world panels drawn into both eyes in one multiview pass, and XR gizmos drawn as true 3D geometry, depth tested
+per eye.
+
+| Part | Built | Where |
+|---|---|---|
+| Gizmo geometry | `Gizmo.mesh(GizmoMesh)`: this frame's handles as a triangle list in world units about the gizmo's origin (kept in doubles): shafts and tube rings (`frustum`), arrow cones, scale and bounds cubes, two-sided plane squares, the centre ball and the translucent trackball; sized as the 2D handles (each part's style width over the `gizmo-size` height, times the world size: by angular size from the head in XR, else through the view), coloured by the same parts in the same states, ring backs (seen from the head) at the occluded opacity. Normals per vertex; colours as `Rgba` halves; triangles counter-clockwise from outside. `ui.gizmo.meshSides` (12) | ui-gizmo `GizmoMesh`, `Gizmo` |
+| Multiview passes | A pass attaching every layer of its images (all attachments with as many layers, at most `GraphBuilder.MAX_VIEWS` 6) renders them as views: the graph opens the rendering with a view mask of one bit per layer; barriers already covered the layers. `PassContext.clearDepth` (a depth rectangle, every view) | engine-graph |
+| Direct panels in stereo | `new WorldPanelRenderer(graph, leftEye, rightEye)` in a view whose scene colour and depth have a layer per eye: one pass, the pipeline's view mask set from the layers, a panel-to-clip matrix per eye (each relative to its camera, in doubles) picked by `SV_ViewID` in `worldVertexMain`; each eye tested against its own depth layer. One camera: as before. A layer count that does not match the cameras is refused at build | engine-ui `WorldPanelRenderer`, `ui/draw.slang` |
+| 3D gizmos | `GizmoRenderer` (a technique at `TRANSPARENT`, after the world panels): `submit()` builds each gizmo's mesh and uploads it; the pass draws it twice with complementary hardware depth tests against the scene's depth of the frame (read only): `LESS` (the scene in front) at the occluded opacity, then `GREATER_OR_EQUAL` at full, back faces culled, so each pixel shows one look and a closed part covers it once; a headlight shade (never below 0.65). Mono or multiview by its cameras; a matrix and the eye per view | engine-ui `GizmoRenderer`, `ui/gizmo.slang` |
+
+**Decisions**
+
+- *The frame graph does multiview* rather than the renderers opening their own rendering: barriers, region and
+  formats stay the graph's. A whole layered image is a multiview attachment; a single layer stays an attachment of
+  one view.
+- *The gizmo's depth test is the hardware's*, in two draws, not a sampled comparison: per eye for free in multiview,
+  exact per pixel, no depth texture binding per layer. The gizmo's own parts do not depth test each other (no depth
+  is written: the scene's depth stays the scene's); they draw in a fixed order (trackball, rings, planes, shafts and
+  tips, cubes, centre), and the axis rings' back halves take the occluded look, as on the screen.
+- *XR gizmos are drawn here, not in the UI overlay*: a gizmo with no view (`Gizmo(picking, null, ...)`, sized from the
+  head) paints nothing into the UI; `GizmoRenderer` draws it.
+- The engine's XR path still renders each eye as its own view (one layer each, `Headset`); these passes are ready for
+  a stereo view whose scene renders both eyes into layers, and work in each per-eye view with one camera meanwhile.
+
+**Tests**: ui-gizmo `GizmoMeshTest` (triangles about the origin; the X arrow's tip at the gizmo's size, sized by
+angular size; colours from the parts; every mode builds; ring backs at the occluded opacity behind the origin seen
+from the head; hidden or unselected: empty; every triangle counter-clockwise seen from outside; building each frame
+allocation-free). Engine `FrameGraphTest` (a pass over both layers of its images clears both; mixed layer counts and
+more than six views refused), `StereoGpuTest` (lavapipe-ready, validation on: a two-layer scene, a direct panel and an
+XR gizmo read back per eye: each eye sees the panel's edge and the gizmo's Y shaft where its own camera puts them,
+13 px apart, and nothing where the other eye sees them; an occluder in front hides the panel and fades the X arrow to
+the occluded opacity in both eyes, one behind leaves the panel drawn; a two-camera renderer refuses a one-layer view).
+Multiview is core Vulkan 1.1 and the device requires it, so nothing is skipped beyond the GPU rig's own checks.
+Screenshots: `xr/stereo-left.png`, `xr/stereo-right.png` (`TRUESIM_SCREENSHOTS=true`).
+
+**Left**: the engine's headset path rendering the scene itself as one multiview view (scene renderers, other agents'
+areas); the gizmo's parts testing each other's depth (a depth of their own would need the scene's depth copied per
+eye).
+
+### Leftovers: turned text and custom chart scales (2026-11-05): local branches `leftovers-charts` (ui) and `ui-leftovers-charts` (engine)
+
+| Part | Built | Where |
+|---|---|---|
+| Rotating entries | A transform table entry may rotate (floats 4, 5: sine, cosine; `setRotation`, clockwise on the screen) and name a parent (float 6; `setTransformParent`): a *local* entry places its primitives (`scale * R * p + offset`), the clip's offset is added, then the parent places them, opacities multiplied. `DrawList.rotated(reuse, radians)` / `unrotated()` record the next primitives through a local entry under the entry in use, carrying the baked transform, about the origin of the recording space (a painter keeps the entry per list generation: recording again takes none). Readers: `drawnPoint`, `drawnBounds` (the bounds of the turned corners), `drawnRotated`, `drawnSin`/`drawnCos`; `drawnX`/`drawnY` read a rotated primitive's coordinate pairs; `drawnScale`/`drawnOpacity` compose the parent; `baked()` keeps a rotation as a rotation-only entry of its own, the coordinates turned back. Parents do not nest; clips are never rotated (a clip's rectangle is drawn by its entry's scale and offset); columns are not rotated | `ui-core` `DrawList` |
+| CPU and checks | `SoftwareGlyphRenderer` turns pixels back into a rotated glyph; `LayoutSanity` takes a turned glyph's ink (and a turned box) as the bounds of its turned rectangle | `ui-text`, `ui-testkit` |
+| Engine | `draw.slang`: `Transform` holds both stages (inner: a local entry's; outer: its parent or the entry itself), `place`/`ownCoordinates` turn and turn back; a rotated quad's corners are placed (grown in its own units), its clip cutting at the pixel; lines, paths and world panels go through the same placement; columns use the rotation-free `placeX`/`placeY`. `primitive.slang`: `TRANSFORM_SIN`, `TRANSFORM_COS`, `TRANSFORM_PARENT` (checked against `DrawList`) | engine `ui` |
+| Turned text | `text-angle` (`ChartStyles.TEXT_ANGLE`, a new `StyleTypes.angle()`: degrees, `deg`/`rad`/`turn`/`grad`, clockwise as CSS): on `chart-axis` the tick labels' angle, on `chart-axis-title` (now with the fact `side`) the title's. A turned Y title lies beside its labels, centred on the plot (no band above the plot); a turned title of an X axis below (above) its labels. Slanted labels of a horizontal axis turn about the end of their text nearest the axis line, under (over) the tick; turned labels of a vertical axis are centred on their tick; all kept within the chart. Their room across the axis is their turned boxes'; along it, the least of the turned width and the height over the sine (parallel slanted labels), which thins the ticks. A horizontal axis's turned labels' room depends on its ticks, which depend on the plot's width: the chart is laid out again in the same frame while it changes (at most three passes, then only growing). `Canvas.text(block, x, y, colour, radians, pivotX, pivotY)` records through one rotating entry per angle | `Chart`, `Canvas`, `Axis` |
+| Themes | default: Y titles `-90deg` (reading upwards), `chart.slanted` bottom labels `-40deg`; test: Y titles `90deg`, bottom labels `25deg` everywhere, `chart.slanted` `65deg` | `_charts.tss`, `_charts-test.tss` |
+| Scales | `Scale` is an interface (was an enum): `forward`, `inverse` (monotonic, increasing or decreasing), `identity`, `defaultMin/Max` (a new axis's range and the fallback for a range it cannot show), `ticks(axis, ticks, min, max, pixels, spacing, limit, minors)`, `format(axis, out, value)`. Built-ins as constants and factories: `LINEAR`, `LOG`, `SYMLOG`/`symlog(c)`, `TIME`, `CATEGORY`, `SQRT`, `power(e)` (signed), `reversed(scale)` (the maximum at the start; its scale's ticks and labels), `piecewise(values, positions)` (straight between and beyond). `Axis.scale(Scale)` changes it; `symlogConstant(c)` makes it `symlog(c)`. An axis maps the sorted transformed range, so a decreasing transform reverses it; zoom, pan, box and fit sort what it turns round | `Scale`, `BuiltinScales`, `Axis` |
+| Ticks | Public makers for a scale's own ticks: `addMajor(value)` (returns its label to append to), `addMinor`, `step(value)`, `full()`, `linear(...)`, and `adaptive(scale, ...)`, the default: nice numbers tried coarsest first (a power of ten at or above the range, then 5, 2, 1 times the next lower...), each kept where it lies the spacing from every tick kept, so a stretched part of the axis gets finer ticks and a squeezed one only the nicest; finer steps stop when a step offers more candidates than there is room for ticks; each labelled to its own step; allocation-free | `Ticks` |
+| Gallery | `ChartsGallery` (now 1600 x 1600): tile 17 "Custom scales" (X square root, Y pieces, a reversed log on the right, a game's own cube root on top), tile 18 "Turned labels and titles" (twelve month names slanted by the style name `slanted`, the Y title upwards) | `charts/src/testFixtures` |
+
+**Decisions**
+
+- *Rotation in the transform table*, not a glyph flag: glyph words are full, and arbitrary angles of any primitive come
+  for free (the shader already works out coverage in the primitive's own coordinates). A local entry under the
+  element's own keeps an animated chart's turned text moving and fading with it without the painter recording again.
+- *One entry per angle per painter*, the labels recorded where turning about the origin puts them, rather than one per
+  label (a table that would grow with every pan).
+- *Adaptive ticks by niceness first* rather than dividing the range by its average density: on a squeezed and a
+  stretched piece the nicest values win (0, 5, 10, 100 rather than 0, 20, 100).
+- *Taste*: Y titles upwards beside the labels in the default theme (as matplotlib's), the slanted label's end at its
+  tick (`rotation_mode='anchor'`), `-40deg` for the `slanted` style name.
+
+**Tests**: `DrawListTest.rotatedRecordingTurnsAboutTheOriginUnderTheEntryInUse` (placement under a parent with a baked
+shift and a clip offset, bounds, scale, opacity, baked, reuse without allocating, misuse), `StyleTypesTest` (angles),
+`ScaleTest` (every built-in and a game's own both ways; reversed: mapping, zoom, pan, box, fit, ticks, text; default
+ranges and fallbacks; adaptive ticks against what they promise over 200 random ranges of five scales: nice, ascending,
+the spacing kept, labelled; a scale's own ticks by the makers; allocation-free), `TurnedTextTest` (both themes: titles
+beside the plot and centred, slanted labels below it and inside the chart, thinned; the chart translated: its turned
+text follows; re-recording allocation-free), `ChartsGalleryTest` (LayoutSanity with the new tiles, both themes); engine
+`RotatedPrimitivesGpuTest` (a turned box and MTSDF glyph where `drawnBounds` says, the parent moving, fading and
+scaling them, a clip cutting a turned box at the pixel), `UiRendererTest` (the constants). CPU and GPU screenshots of
+the gallery in both themes agree.
+
+**Left**: clips drawn by a rotating entry, rotated columns and nested rotations are not supported (nothing records
+them); minor ticks of adaptive scales; picking does not follow drawn rotations (as with other drawn transforms).
+
 ### Scene picking out of the UI (2026-11-04): local branch `picking` (scene, ui, engine)
 
 Picking is scene data now: scene-core's `Pickable`, `Selected` and `Hovered` components and `ScenePicker` (the narrow
@@ -1860,10 +2046,12 @@ The seven areas below were built in parallel on their own branches from `a3-rema
 - Every row of engine `docs/benchmarks-ui.md` is within budget on a quiet machine (2026-11-04, after the follow-ups
   below: chart lines and areas on the GPU 0.13 and 0.17 ms, 100,000 glyphs over a backdrop 0.31 ms, the console flood
   0.13 ms p50, 0.21 ms p99; engine-bench `-Ponly=console` runs one part).
-- Not built: the OS accessibility bridge (UI27, assessed in the tools section), VR multiview for direct world panels
-  and XR gizmos drawn in 3D, the TLAS ray-query pick, node inspectors (no D46 stores), pen pressure and tilt (no fields
-  in `Pointer`), a full spelling dictionary (only a self-written sample ships: no word list may be downloaded), the
-  loupe of touch selection handles, rotated chart text; world panels drawn directly do not draw paths and columns.
+- Not built: ~~the OS accessibility bridge (UI27, assessed in the tools section)~~ (built: Windows UI Automation,
+  "OS accessibility bridge (2026-11-05)"), ~~VR multiview for direct world panels and XR gizmos drawn in 3D~~ (built:
+  "VR stereo"), the TLAS ray-query pick, node inspectors (no D46 stores), ~~pen pressure and tilt~~ (built:
+  "Leftovers (2026-11-05)"), ~~a full spelling dictionary~~ (built: `ui-spell-en`, SCOWL), ~~the loupe of touch
+  selection handles~~ (built: "Leftovers"), ~~rotated chart text~~ (built: "turned text and custom chart scales");
+  world panels drawn directly do not draw paths and columns.
 - `CameraView` asks for the size it recorded the frame before (one frame late on a resize).
 
 #### Follow-ups decided by the lead (2026-11-04)
@@ -2116,7 +2304,7 @@ is listed under Left.
 |---|---|---|
 | Model | `Chart`: any number of `Axis` objects (X at the bottom or top, Y left or right, stacked outwards), scales `LINEAR`, `LOG`, `SYMLOG` (constant per axis), `TIME` (seconds since 1970 UTC plus a zone offset), `CATEGORY` (names); ranges are versioned `AxisRange`s, so linking axes is sharing one (`Axis.link`), across charts too; a `Crosshair` (versioned) shared by charts shows the hovered X in all of them; axes can be hidden, inverted, auto-fitted (`autoFit`), kept out of fitting (`fits(false)`), followed (`follow`); series name their axes (`Series.axes`); every series, legend item, annotation and drag tool can be shown and hidden | `Chart`, `Axis`, `AxisRange`, `Crosshair` |
 | Ticks | nice numbers (1, 2, 5 times a power of ten, nearest the spacing asked for on a log scale) with minors; log decades (every n-th when narrow, 2 to 9 as minors, linear within a decade); symlog zero and signed powers thinned to the spacing; time by calendar (microseconds to seconds as nice numbers, then 1 s to 1 week, 1/2/3/6 months, nice years) with labels by the step (`mm:ss.fff`, `HH:mm:ss`, `HH:mm`, `MM-dd`, `yyyy-MM`, `yyyy`); categories within their names. Labels are text without allocation (`TickFormat`: decimals of the step, scientific beyond 1e7 or below 1e-6, Hinnant's civil dates); X labels wider than their room thin the ticks; label blocks are reused by their text, so a pan shapes only the labels coming into view | `Ticks`, `TickFormat` |
-| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it: no rotated text); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
+| Layout and drawing | the chart element draws grid, axes, ticks, labels, titles (a Y axis's title above it, or turned beside its labels by `text-angle`: leftovers); a child `chart-plot` (the plot rectangle, `clip: true` in the themes) records the series; a child `chart-overlay` records drag tools, annotations, crosshair, highlights, zoom and selection boxes, legend (in the plot at `legend-position`, rows wrapping at the plot's width or a column) and tooltips. The chart lays its children out after layout (`Ui.FrameListener.afterLayout`, offsets in code), in the same frame. Drawing goes through `Canvas`: polylines with dashes carried across segments and round joins (discs), segments clipped to the plot (Liang-Barsky), markers (circle and square as boxes, diamond and triangles as triangles, cross, plus, asterisk as lines), quads and pie wedges as triangles, images | `Chart`, `Canvas` |
 | New primitive | `Primitive.TRIANGLE` (kind 7): the bounding box in words 1-4, colour A, corners in words 9-14, per-edge anti-aliasing flags (`EDGE_AB`, `EDGE_BC`, `EDGE_CA`: a shape's outline anti-aliased, its shared inner edges hard); `DrawList.triangle`. Recorded through the public API only; `DrawList` changed by one method (`triangle`, using `start`/`emit` and the range transform), `Primitive` by the constants | `ui-core` |
 | Data | `Column`s by absolute index (`first`..`end`): `Columns.of` over `VersionedDoubleArray`, `VersionedFloatArray`, `VersionedDoubleRing`, `VersionedFloatRing` (appended samples visited by `changesSince`), plain `double[]`/`float[]` (`changed()`), getters with a `Versioned` trigger, and `Columns.index(start, step)` (implicit evenly spaced X) | `Column`, `Columns` |
 | Series | `line` (stairs `Step.POST/PRE/MID`, `area` to a baseline), `scatter`, `stems`, `digital` (lanes at the plot's bottom), `shaded` (band between two columns), `stackedArea`, `bars` (grouped, `stacked`, `horizontal`), `histogram` (bins, range, density, cumulative; binned on change), `histogram2d`, `heatmap` (`HeatTexture`: a `UiTextures` texture coloured by the `colormap`, cells several texels wide so linear filtering keeps them sharp), `pie` (a donut by `donut-hole`, share labels), `candlestick` (or `ohlc`), `errorBars` (vertical or horizontal), `infiniteLines`, `image`, `text`, `annotate` (callouts kept in the plot); `Subplots` (rows of charts, `linkColumns`, `linkRows`, `linkAllX`, one crosshair) | `*Series`, `InfiniteLines`, `Annotation`, `Subplots` |
@@ -2194,9 +2382,9 @@ and `UiTunablesTest` in `ui-controls`.
 - Engine-side line quality (design 7 GPU): instanced segments with miter joins and a bevel fallback, round caps and
   dashes by cumulative length in the shader would replace the CPU's discs and dash splitting; SDF markers instanced.
 - A nearest-sampled image flag would let heatmaps use one texel a cell.
-- Not built: rotated text (Y axis titles sit above their axes), axis tags, heatmap value labels, histogram binning on
-  the GPU, decimation of bars and candlesticks beyond `ui.chart.maxPoints`, a custom scale (ImPlot's transform
-  callbacks), ~~legends outside the plot~~ (built: chartfix).
+- Not built: ~~rotated text~~ (built: leftovers), axis tags, heatmap value labels, histogram binning on the GPU,
+  decimation of bars and candlesticks beyond `ui.chart.maxPoints`, ~~a custom scale (ImPlot's transform callbacks)~~
+  (built: leftovers, `Scale`), ~~legends outside the plot~~ (built: chartfix).
 - `common-state` with `VersionedDoubleRing`/`VersionedFloatRing` must be released (`ui-core` asks for 0.4.0; the build
   uses `-Ptruesim.common-state=../common-state-tree`).
 
@@ -2535,7 +2723,7 @@ with their lines, Java rules, the text scale, live font sizes).
 | Log flood: 100,000 lines from another thread shown in one frame | — | 1.4 ms median (the ring keeps 10,000; a burst hands over only those) |
 | Appending 1,000 lines to the ring | — | 0.047 to 0.058 ms median (about 50 ns a line) |
 
-#### OS accessibility bridge (UI27): assessed, not built
+#### OS accessibility bridge (UI27): assessed here, built since (section "OS accessibility bridge (2026-11-05)")
 
 The UI side is ready: `Semantics.of(store, interaction)` gives every layer's tree with roles, names (live text),
 states and actions, and every new control here is named (the galleries' `Semantics.unnamed` is empty). A Windows UI
@@ -2570,7 +2758,7 @@ interface above except the patterns. Not built in this group; nothing outside th
   shaped runs for repeated messages would help); to measure again on a quiet machine.
 - The controls gallery pseudo-localised shows truncation and overflow in other areas' controls (`TextSettingsTest`
   prints them); not fixed here.
-- The OS accessibility bridge (above).
+- ~~The OS accessibility bridge (above).~~ Built (section "OS accessibility bridge (2026-11-05)").
 
 ### Group A3, scene (2026-11-04): local branch a3-scene
 

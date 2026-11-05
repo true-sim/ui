@@ -41,6 +41,10 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
     private final int[] players = new int[MAX];
     private final float[] scrollX = new float[MAX];
     private final float[] scrollY = new float[MAX];
+    private final float[] pressures = new float[MAX];
+    private final float[] tiltsX = new float[MAX];
+    private final float[] tiltsY = new float[MAX];
+    private final float[] twists = new float[MAX];
     private final boolean[] used = new boolean[MAX];
     private final boolean[] lifted = new boolean[MAX];
 
@@ -112,6 +116,31 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
         return this;
     }
 
+    /**
+     * Puts pointer {@code id}, a {@linkplain Pointer.Kind#PEN pen}, at {@code x, y} with {@code buttonBits} held,
+     * pressing with {@code pressure} (0 to 1) at a tilt of {@code tiltX, tiltY} degrees; returns this.
+     */
+    public SyntheticInput pen(int id, float x, float y, int buttonBits, float pressure, float tiltX, float tiltY) {
+        pointer(id, Pointer.Kind.PEN, x, y, buttonBits);
+        int i = index(id);
+        pressures[i] = pressure;
+        tiltsX[i] = tiltX;
+        tiltsY[i] = tiltY;
+        return this;
+    }
+
+    /** Sets the pressure pointer {@code id} reports (0 to 1; {@link Pointer#NO_PRESSURE}: none); returns this. */
+    public SyntheticInput pressure(int id, float value) {
+        pressures[index(id)] = value;
+        return this;
+    }
+
+    /** Sets pointer {@code id}'s barrel rotation in degrees; returns this. */
+    public SyntheticInput twist(int id, float degrees) {
+        twists[index(id)] = degrees;
+        return this;
+    }
+
     /** Sets the modifiers pointer {@code id} reports; returns this. */
     public SyntheticInput modifiers(int id, int bits) {
         modifiers[index(id)] = bits;
@@ -158,6 +187,10 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
         used[free] = true;
         ids[free] = id;
         kinds[free] = Pointer.Kind.MOUSE;
+        pressures[free] = Pointer.NO_PRESSURE;
+        tiltsX[free] = 0;
+        tiltsY[free] = 0;
+        twists[free] = 0;
         return free;
     }
 
@@ -191,7 +224,12 @@ public final class SyntheticInput implements UiCommandSource, PointerSource {
                 continue;
             }
             input.pointer(ids[i], kinds[i]).moveTo(xs[i], ys[i]).buttons(buttons[i]).modifiers(modifiers[i])
-                .player(players[i]).scroll(scrollX[i], scrollY[i]);
+                .player(players[i]).scroll(scrollX[i], scrollY[i]).tilt(tiltsX[i], tiltsY[i]).twist(twists[i]);
+            if (pressures[i] >= 0) {
+                input.pointer(ids[i], kinds[i]).pressure(pressures[i]);
+            } else {
+                input.pointer(ids[i], kinds[i]).noPressure();
+            }
             scrollX[i] = 0;
             scrollY[i] = 0;
         }

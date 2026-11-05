@@ -4,6 +4,7 @@ import com.truesim.annotations.AllowAllocation;
 import com.truesim.common.state.VersionedDouble;
 import com.truesim.common.state.Watch;
 import com.truesim.ui.controls.anim.Visuals;
+import com.truesim.ui.core.AccessibleValue;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.core.Role;
 import com.truesim.ui.core.UiState;
@@ -32,6 +33,13 @@ public final class ProgressBar extends Control {
         root.add(fill);
         controls.poll(this);
         bind(model);
+        root.accessibleValue(new AccessibleValue() {
+            @Override
+            @AllowAllocation("read when the semantics tree is taken, not per frame")
+            public String text() {
+                return indeterminate ? "" : AccessibleValue.number(ProgressBar.this.model.get());
+            }
+        });
     }
 
     /** Binds the bar to {@code value}; returns this. */

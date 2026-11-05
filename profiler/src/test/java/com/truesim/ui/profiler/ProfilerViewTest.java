@@ -86,6 +86,17 @@ class ProfilerViewTest {
     }
 
     @Test
+    void theFrameGraphOverlayIsOpaqueInTheDefaultTheme() {
+        Ui ui = ui("default");
+        ProfilerGallery g = ProfilerGallery.build(ui);
+        ProfilerGallery.settle(ui, ProfilerGallery.WIDTH, ProfilerGallery.HEIGHT);
+        com.truesim.ui.style.value.Paint fill = ui.styles().styleOf(g.frameGraph.element().slot())
+            .get(com.truesim.ui.style.Styles.BACKGROUND);
+        assertThat(fill).isInstanceOf(com.truesim.ui.style.value.Paint.Box.class);
+        assertThat(Rgba.a(((com.truesim.ui.style.value.Paint.Box) fill).color().rgba())).isEqualTo(1f);
+    }
+
+    @Test
     void theTimelineZoomsPansSelectsAndGoesLive() {
         Ui ui = ui("default");
         ProfilerGallery g = ProfilerGallery.build(ui);
