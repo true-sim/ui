@@ -93,6 +93,13 @@ public final class ChartStyles implements StyleKeyHolder {
      */
     public static final StyleKey<Color> PLOT_BACKGROUND =
         StyleKey.of("plot-background", StyleTypes.color(), Color.TRANSPARENT);
+    /**
+     * How text is turned, clockwise on the screen as CSS's {@code rotate} ({@code -90deg} reads upwards): on
+     * {@code chart-axis} its tick labels' angle (a slanted label ends at its tick, or starts there when turned the
+     * other way), on {@code chart-axis-title} the title's (a turned title of a Y axis lies beside its labels, centred
+     * on the plot; unturned it sits above the axis).
+     */
+    public static final StyleKey<Float> TEXT_ANGLE = StyleKey.of("text-angle", StyleTypes.angle(), 0f);
 
     /** Made by {@link java.util.ServiceLoader}: initialises the keys. */
     public ChartStyles() {

@@ -47,6 +47,10 @@ chart-axis {
 
 chart-axis[side=left], chart-axis[side=right] { tick-spacing: 50px; }
 chart-axis-title { font: 900 13px "Comic Sans MS", cursive; color: $lime; }
+// turned the other way round from the default theme's: Y titles read downwards, bottom labels slant down to the right
+chart-axis-title[side=left], chart-axis-title[side=right] { text-angle: 90deg; }
+chart-axis[side=bottom] { text-angle: 25deg; }
+chart.slanted chart-axis[side=bottom] { text-angle: 65deg; }
 
 chart-grid { stroke: rgba($lime, 0.35); line-width: 2px; line-dash: 8px 4px; }
 chart-grid-minor { stroke: rgba($hot, 0.2); line-width: 1px; }

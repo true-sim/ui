@@ -1,7 +1,6 @@
 package com.truesim.ui.charts;
 
 import com.truesim.annotations.AllowAllocation;
-import com.truesim.common.math.Maths;
 import com.truesim.ui.core.Element;
 import com.truesim.ui.text.TextBlock;
 import java.util.List;
@@ -12,15 +11,17 @@ import java.util.List;
  * any number of axes; series name the X and Y axis they are drawn against. Axes on the same side stack outwards in the
  * order they were added.
  *
- * <p>The mapping to pixels goes through the scale's transform (the identity, {@code log10}, or the symmetric
- * logarithm), so zooming and panning a log axis behave evenly on screen. Pixels are relative to the chart's content
- * box; a Y axis grows upwards unless {@linkplain #inverted inverted}.
+ * <p>The mapping to pixels goes through the scale's transform (the identity, {@code log10}, the symmetric logarithm, a
+ * power, pieces, or a game's own {@link Scale}), so zooming and panning a log axis behave evenly on screen. Pixels are
+ * relative to the chart's content box; a Y axis grows upwards unless {@linkplain #inverted inverted} (or its scale is
+ * {@linkplain Scale#reversed reversed}).
  *
  * <p>Its look is the theme's: the style part {@code chart-axis} (with the element id the axis's id and the fact
  * {@code side}) gives the tick label font and colour, {@code stroke} and {@code line-width} for the axis line and
  * ticks, {@code tick-length}, {@code minor-tick-length}, {@code tick-spacing}, {@code minor-ticks}, {@code gap}
  * (between ticks and labels, and between stacked axes), {@code fit-padding}, and {@code background} under the axis
- * when it is {@code :hover}ed or {@code :selected}; {@code chart-axis-title} the title's font and colour.
+ * when it is {@code :hover}ed or {@code :selected}, {@code text-angle} its labels' angle; {@code chart-axis-title} (with
+ * the axis's id and {@code side}) the title's font, colour and {@code text-angle}.
  */
 public final class Axis {
 
@@ -39,12 +40,11 @@ public final class Axis {
     private final Chart chart;
     private final String id;
     private final Side side;
-    private final Scale scale;
+    private Scale scale;
     private AxisRange range;
     private boolean enabled = true;
     private String title = "";
     private List<String> categories = List.of();
-    private double symlogConstant = 1;
     private double timeOffset;
     private boolean inverted;
     private boolean autoFit;
@@ -77,7 +77,12 @@ public final class Axis {
     long ticksVersion = -1; // the range version the ticks were made for
     float ticksPixels = -1;
     long ticksStyle = -1;
-    float maxLabel; // the widest (Y) or tallest (X) label in pixels
+    float maxLabel; // the widest (Y) or tallest (X) label in pixels, as drawn (turned)
+    float labelAlong; // the most room a label takes along the axis, as drawn (turned): X labels thin the ticks by it
+    float titleDepth; // a turned title's room across the axis (beside its labels), 0 for one above the axis
+    float labelTurn; // the labels' text-angle (radians)
+    float titleTurn; // the title's text-angle (radians)
+    float labelRoom; // the room across a horizontal axis its turned labels were given (arrange's passes)
     boolean paused; // the user zoomed or panned it: no following or auto-fitting until a reset
 
     @AllowAllocation("axes are made when a chart is built")
@@ -114,6 +119,25 @@ public final class Axis {
     /** The scale. */
     public Scale scale() {
         return scale;
+    }
+
+    /** Sets the scale (the range kept as data values; refitted by a reset); returns this. */
+    public Axis scale(Scale value) {
+        if (value == null) {
+            throw new IllegalArgumentException("no scale");
+        }
+        if (value != scale) {
+            scale = value;
+            mappedVersion = -1;
+            ticksVersion = -1;
+            chart.changed();
+        }
+        return this;
+    }
+
+    /** The ticks for the axis's current range (made when the chart lays out). */
+    public Ticks ticks() {
+        return ticks;
     }
 
     /** The visible range (possibly shared with linked axes). */
@@ -169,21 +193,21 @@ public final class Axis {
         return this;
     }
 
-    /** The symmetric logarithm's linear half-width ({@link Scale#SYMLOG}). */
+    /** The symmetric logarithm's linear half-width ({@link Scale#symlog}; 1 for other scales). */
     public double symlogConstant() {
-        return symlogConstant;
+        return scale instanceof BuiltinScales.Symlog s ? s.constant() : 1;
     }
 
-    /** Sets the symmetric logarithm's linear half-width (positive); returns this. */
+    /**
+     * Sets the symmetric logarithm's linear half-width (positive): the axis's scale becomes {@link Scale#symlog} of
+     * it; returns this.
+     */
+    @AllowAllocation("a scale is made when a chart is built or restyled by code")
     public Axis symlogConstant(double value) {
         if (!(value > 0)) {
             throw new IllegalArgumentException("the symlog constant must be positive: " + value);
         }
-        symlogConstant = value;
-        mappedVersion = -1;
-        ticksVersion = -1;
-        chart.changed();
-        return this;
+        return scale(Scale.symlog(value));
     }
 
     /** Seconds added to UTC for a time axis's labels and calendar ticks (a time zone's offset). */
@@ -287,29 +311,14 @@ public final class Axis {
 
     // ---------------------------------------------------------------- transform
 
-    /** The scale's transform of a data value (log10 for log; the symmetric logarithm; the identity otherwise). */
+    /** The scale's transform of a data value ({@link Scale#forward}: log10 for log, the identity for linear...). */
     public double forward(double v) {
-        return switch (scale) {
-            case LOG -> v > 0 ? Maths.log10(v) : Double.NaN;
-            case SYMLOG -> {
-                double a = Math.abs(v) / symlogConstant;
-                double t = Maths.log10(1 + a);
-                yield v < 0 ? -t : t;
-            }
-            default -> v;
-        };
+        return scale.forward(v);
     }
 
     /** The data value of a transformed value: {@link #forward}'s inverse. */
     public double inverse(double t) {
-        return switch (scale) {
-            case LOG -> Maths.pow(10, t);
-            case SYMLOG -> {
-                double v = symlogConstant * (Maths.pow(10, Math.abs(t)) - 1);
-                yield t < 0 ? -v : v;
-            }
-            default -> t;
-        };
+        return scale.inverse(t);
     }
 
     /**
@@ -329,11 +338,20 @@ public final class Axis {
 
     /** Takes the range's current values into the mapping. */
     void remap() {
-        double lo = forward(range.min());
-        double hi = forward(range.max());
-        if (!(hi > lo) || hi != hi || lo != lo) { // a log axis over non-positive values: show a decade
-            lo = scale == Scale.LOG ? -1 : 0;
-            hi = lo + 1;
+        double a = forward(range.min());
+        double b = forward(range.max());
+        double lo = Math.min(a, b); // a decreasing (reversed) scale maps the maximum to the start
+        double hi = Math.max(a, b);
+        if (!(hi > lo) || hi != hi || lo != lo || Double.isInfinite(hi - lo)) {
+            // a range the scale cannot show (a log axis over non-positive values): its default range
+            a = forward(scale.defaultMin());
+            b = forward(scale.defaultMax());
+            lo = Math.min(a, b);
+            hi = Math.max(a, b);
+            if (!(hi > lo)) {
+                lo = 0;
+                hi = 1;
+            }
         }
         f0 = lo;
         f1 = hi;
@@ -352,7 +370,7 @@ public final class Axis {
 
     /** The pixel of data value {@code v} (relative to the chart's content box). */
     public float toPixel(double v) {
-        if (scale == Scale.LINEAR || scale == Scale.TIME || scale == Scale.CATEGORY) {
+        if (scale.identity()) {
             return (float) (p0 + (v - f0) * k);
         }
         return (float) (p0 + (forward(v) - f0) * k);
@@ -407,9 +425,9 @@ public final class Axis {
     }
 
     private void setTransformed(double lo, double hi) {
-        double min = inverse(lo);
-        double max = inverse(hi);
-        if (range.set(min, max)) {
+        double a = inverse(lo);
+        double b = inverse(hi);
+        if (range.set(Math.min(a, b), Math.max(a, b))) {
             remap();
         }
     }
@@ -422,11 +440,13 @@ public final class Axis {
         if (lo != lo || hi != hi || lo > hi) {
             return false;
         }
-        double a = forward(lo);
-        double b = forward(hi);
-        if (a != a || b != b) {
+        double fa = forward(lo);
+        double fb = forward(hi);
+        if (fa != fa || fb != fb) {
             return false;
         }
+        double a = Math.min(fa, fb);
+        double b = Math.max(fa, fb);
         if (scale == Scale.CATEGORY) {
             a -= 0.5;
             b += 0.5;
@@ -440,7 +460,9 @@ public final class Axis {
         }
         a -= span * padding;
         b += span * padding;
-        boolean changed = range.set(inverse(a), inverse(b));
+        double ia = inverse(a);
+        double ib = inverse(b);
+        boolean changed = range.set(Math.min(ia, ib), Math.max(ia, ib));
         if (changed) {
             remap();
         }
@@ -461,16 +483,7 @@ public final class Axis {
 
     /** Appends {@code value} as a tooltip shows it: one decimal finer than the ticks. */
     public StringBuilder format(StringBuilder out, double value) {
-        double step = ticks.step();
-        switch (scale) {
-            case LOG -> TickFormat.significant(out, value);
-            case TIME -> TickFormat.time(out, value + timeOffset, step > 0 ? Math.max(1e-6, step / 10) : 1);
-            case CATEGORY -> categoryName(out, Math.rint(value));
-            default -> {
-                double s = step > 0 ? step / 10 : Math.max(Math.abs(value) * 1e-3, 1e-12);
-                TickFormat.number(out, value, s);
-            }
-        }
+        scale.format(this, out, value);
         return out;
     }
 

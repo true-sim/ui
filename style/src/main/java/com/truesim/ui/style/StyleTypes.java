@@ -89,6 +89,28 @@ public final class StyleTypes {
         return n;
     }
 
+    /**
+     * An angle in degrees from -360 to 360: unitless (degrees) or in {@code deg}, {@code rad}, {@code turn} or
+     * {@code grad} ({@code -90deg}, {@code -0.25turn}). Positive angles turn clockwise on the screen, as CSS's do.
+     */
+    public static StyleType<Float> angle() {
+        String what = "an angle from -360deg to 360deg";
+        return of(what, v -> {
+            if (v instanceof Num n && (n.unit().isEmpty() || Operators.compatible(n.unit(), "deg"))) {
+                double d = n.unit().isEmpty() ? n.value() : Operators.convert(n.value(), n.unit(), "deg");
+                if (d >= -360 && d <= 360) {
+                    return (float) d;
+                }
+            }
+            throw expected(what, v);
+        }, d -> {
+            if (!(d >= -360 && d <= 360)) {
+                throw new IllegalArgumentException(d + " is not " + what);
+            }
+            return d;
+        });
+    }
+
     /** An integer in {@code min..max}. */
     public static StyleType<Integer> integer(int min, int max) {
         String what = "an integer from " + min + " to " + max;

@@ -21,7 +21,9 @@ import java.util.SplittableRandom;
  * each and linked X axes sharing a crosshair; log and symlog axes; a time axis with stairs and a digital signal;
  * scatter with every marker; grouped bars on a category axis; stacked horizontal bars; an area, stacked areas and a
  * shaded band; a histogram; a 2D histogram; a heatmap; a pie and a donut; candlesticks on a time axis; error bars and
- * stems; infinite lines, text, a callout, an image and the drag tools; and 2 by 2 subplots with linked axes. The data
+ * stems; infinite lines, text, a callout, an image and the drag tools; 2 by 2 subplots with linked axes; custom scales
+ * (a square root, pieces, a reversed log and a game's own cube root); and turned text (slanted category labels, Y
+ * titles reading upwards as everywhere in the default theme). The data
  * is generated from fixed seeds, so the picture is the same each time. Build it in a UI of {@link #WIDTH} by
  * {@link #HEIGHT} pixels and {@link #settle} it.
  *
@@ -37,7 +39,7 @@ public final class ChartsGallery {
     /** The page's width in pixels. */
     public static final int WIDTH = 1600;
     /** The page's height in pixels. */
-    public static final int HEIGHT = 1280;
+    public static final int HEIGHT = 1600;
 
     private static final float TILE_W = 380;
     private static final float TILE_H = 300;
@@ -59,6 +61,8 @@ public final class ChartsGallery {
     public final Chart errors;
     public final Chart tools;
     public final Subplots subplots;
+    public final Chart scales;
+    public final Chart turned;
     public final LineSeries sine;
     public final ScatterSeries dots;
     public final BarSeries bars;
@@ -339,6 +343,52 @@ public final class ChartsGallery {
             }
         }
         subplots.linkColumns().linkRows();
+
+        // 17: custom scales: a square root, pieces, a reversed log, and a scale of the game's own (the cube root)
+        scales = tile(ui, new Chart(ui, "Scales"));
+        scales.title("Custom scales");
+        scales.x().scale(Scale.SQRT).title("sqrt");
+        scales.y().scale(Scale.piecewise(new double[] {0, 10, 100}, new double[] {0, 2, 3})).title("pieces");
+        Axis depth = scales.addAxis("depth", Axis.Side.RIGHT, Scale.reversed(Scale.LOG)).title("reversed log");
+        Axis cube = scales.addAxis("cube", Axis.Side.TOP, new Scale() {
+            @Override
+            public double forward(double value) {
+                return Math.cbrt(value);
+            }
+
+            @Override
+            public double inverse(double transformed) {
+                return transformed * transformed * transformed;
+            }
+        }).title("cube root (a game's own)");
+        double[] qx = new double[101];
+        double[] qy = new double[101];
+        double[] qd = new double[101];
+        for (int i = 0; i < qx.length; i++) {
+            qx[i] = i * 10;
+            qy[i] = i;
+            qd[i] = Math.pow(10, i * 0.04);
+        }
+        scales.line("pieces", Columns.of(qx), Columns.of(qy));
+        scales.line("depth", Columns.of(qx), Columns.of(qd)).axes(scales.x(), depth);
+        scales.scatter("cube", Columns.of(qx), Columns.of(qy)).axes(cube, scales.y()).styled("circle");
+
+        // 18: turned text: long category names slanted (the chart's style name), the Y title reading upwards
+        turned = tile(ui, new Chart(ui, "Turned"));
+        turned.element().style("slanted");
+        turned.title("Turned labels and titles");
+        Axis months = turned.addAxis("month", Axis.Side.BOTTOM, Scale.CATEGORY).title("month")
+            .categories(List.of("January", "February", "March", "April", "May", "June", "July", "August",
+                "September", "October", "November", "December"));
+        turned.x().enabled(false);
+        turned.y().title("rainfall (mm)");
+        double[] mi = new double[12];
+        double[] rain = new double[12];
+        for (int i = 0; i < mi.length; i++) {
+            mi[i] = i;
+            rain[i] = 40 + 30 * Math.sin(i * 0.6) + random.nextDouble() * 10;
+        }
+        turned.bars(List.of("rain"), Columns.of(mi), Columns.of(rain)).axes(months, turned.y());
     }
 
     private static Element sized(Ui ui, Element e, float w, float h) {
@@ -360,7 +410,7 @@ public final class ChartsGallery {
     /** All the charts, the subplots' included. */
     public List<Chart> charts() {
         java.util.ArrayList<Chart> all = new java.util.ArrayList<>(List.of(linkedA, linkedB, logs, time, scatter,
-            grouped, stackedBars, areas, histogram, histogram2d, heatmap, pies, candles, errors, tools));
+            grouped, stackedBars, areas, histogram, histogram2d, heatmap, pies, candles, errors, tools, scales, turned));
         for (int r = 0; r < subplots.rows(); r++) {
             for (int c = 0; c < subplots.columns(); c++) {
                 all.add(subplots.chart(r, c));
