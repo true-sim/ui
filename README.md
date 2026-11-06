@@ -25,3 +25,12 @@ The design, its decisions and what is built: [docs/ui.md](docs/ui.md).
 
 Sibling checkouts of `build-logic`, `common-*` and `scene` are used as included builds when present (override with
 `-Ptruesim.<repo>=<path>`); otherwise the published packages are used.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Bundled third-party data keeps its own licence, with the texts beside the files:
+
+- `ui-fonts`, `ui-fonts-cjk`, `ui-fonts-emoji`: Inter and Noto fonts under the SIL Open Font License 1.1 (each
+  module's `CREDITS.md` and `OFL-*.txt`).
+- `ui-spell-en`: SCOWL's Hunspell dictionaries under SCOWL's MIT-like licence, with Geoff Kuenning's BSD licence for
+  the affix files (`CREDITS.md` and the `README_*.txt` files).
